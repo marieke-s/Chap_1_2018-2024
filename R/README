@@ -1,0 +1,1 @@
+This is an optional directory where I save all of my custom R functions I have written for the current analysis. These can then be sourced into R using the source() function.
