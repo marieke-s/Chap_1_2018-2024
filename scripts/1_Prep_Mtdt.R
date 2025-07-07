@@ -20,8 +20,12 @@ rm(list = ls())
 setwd("/media/marieke/Shared/Chap-1/Model/Scripts/Chap_1_2018-2024")
 
 # Libraries
+library(concaveman)
 library(dplyr)
+library(geosphere)
 library(ggplot2)
+library(igraph)
+library(purrr)
 library(leaflet)
 library(lubridate)
 library(readxl)
@@ -30,6 +34,7 @@ library(reticulate)
 library(sf)
 library(stringr)
 library(terra)
+
 
 # Load functions
 source("./utils/Fct_Data-Prep.R")
@@ -64,6 +69,45 @@ mtdt_1 <- mtdtfull |>
 
 #------------- 2. Pool replicates --------------------
 
+
+#---- Extract SHOM bathy because some depth_seafloor are NA -----
+# Explanation: 
+# Since there are NA values in the mtdt depth column, we use the bathymetry extracted from a digital surface model (MNT bathymétrique du SHOM: https://diffusion.shom.fr/donnees/bathymerie/mnt-facade-gdl-ca-homonim.html) to fill NA values. 
+
+
+# Dataset 
+dt <- mtdt_1
+
+# Load bathy
+bathy <- terra::rast("./data/raw_data/predictors/Bathymetry/MNT_MED_CORSE_SHOM100m_merged.tif")
+
+# Extract SHOM bathymetry from start/end coordinates
+start_bathy = abs(terra::extract(bathy, terra::vect(dt, geom = c("longitude_start_DD", "latitude_start_DD"), crs = crs(bathy)))[, 2])
+end_bathy   = abs(terra::extract(bathy, terra::vect(dt, geom = c("longitude_end_DD", "latitude_end_DD"), crs = crs(bathy)))[, 2])
+
+dt <- dt |>
+  mutate(
+    max_shom_bathy = pmax(start_bathy, end_bathy, na.rm = TRUE), # The maximum bathymetry between start and end points is retained
+    combined_bathy = coalesce(as.numeric(depth_seafloor), max_shom_bathy)
+  ) 
+
+# Correlation between depth_seafloor and max_shom_bathy
+cor(dt$depth_seafloor, dt$max_shom_bathy, use = "pairwise.complete.obs")
+
+# Assign back dataset name
+mtdt_1 <- dt
+rm(dt, bathy, end_bathy, start_bathy)
+
+
+
+
+
+
+
+
+
+
+
 #---- Buffer transect --------------------
 buff <- buffer_transect(
   df = mtdt_1,
@@ -74,10 +118,10 @@ buff <- buffer_transect(
   buffer_dist = 500 # buffer distance is meters
 )
 
-beepr::beep()
+# beepr::beep()
 
 # Plot buffers
-plot(buff, max.plot = 1)
+# plot(buff, max.plot = 1)
 
 # Check if buff are valid
 sum(!st_is_valid(buff))
@@ -90,8 +134,8 @@ buffered_grouped <- buff %>%
   mutate(date = as.Date(date)) %>%
   {
     overlap_matrix <- st_intersects(.)
-    g <- graph_from_adj_list(overlap_matrix)
-    .$buffer_group <- components(g)$membership
+    g <- igraph::graph_from_adj_list(overlap_matrix)
+    .$buffer_group <- igraph::components(g)$membership
     .
   } %>%
   group_by(buffer_group) %>%
@@ -140,11 +184,8 @@ buffered_grouped <- buff %>%
       spygen_code %in% c("SPY232834", "SPY232833") ~ min(replicate[spygen_code %in% c("SPY232834", "SPY232833")]),
       TRUE ~ replicate
     )
-  ) %>%
-  
-  # Remove SPY232832 and SPY232671_SPY232678 as their replicates were not selected for valuable reasons (too far away, on too deep)
-  filter(spygen_code != "SPY232832") %>%
-  filter(spygen_code != "SPY232671_SPY232678")
+  ) 
+
 
 # Check the result ------------
 # count number of samples per replicate group
