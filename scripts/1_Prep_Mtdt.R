@@ -274,103 +274,103 @@ st_write(buff, "./data/processed_data/buff_500m_2023_FR_surface_coastal_30L.shp"
 
 
 
-#---- Assign replicates --------------------
-buffered_grouped <- buff %>%
-  # Step 1: Group samples by overlapping buffers
-  mutate(date = as.Date(date)) %>%
-  {
-    overlap_matrix <- st_intersects(.)
-    g <- igraph::graph_from_adj_list(overlap_matrix)
-    .$buffer_group <- igraph::components(g)$membership
-    .
-  } %>%
-  group_by(buffer_group) %>%
-  mutate(n_in_group = n()) %>%
-  ungroup() %>%
-  mutate(
-    overlap_date_group = if_else(
-      n_in_group > 2,
-      paste(buffer_group, date, sep = "_"),
-      as.character(buffer_group)
-    )
-  ) %>%
-  select(-buffer_group, -n_in_group) %>%
-  
-  # Step 2: Apply bathy-based subgroups to groups > 2 samples
-  group_by(overlap_date_group) %>%
-  group_split() %>%
-  lapply(function(df_group) {
-    if (nrow(df_group) > 2) {
-      df_group %>%
-        group_by(max_shom_bathy) %>%
-        mutate(bathy_sub_id = cur_group_id()) %>%
-        ungroup() %>%
-        mutate(
-          bathy_sub_id = dense_rank(bathy_sub_id),
-          bathy_subgroup = paste0(overlap_date_group[1], "_b", bathy_sub_id)
-        ) %>%
-        select(-bathy_sub_id)
-    } else {
-      df_group$bathy_subgroup <- df_group$overlap_date_group
-      df_group
-    }
-  }) %>%
-  bind_rows() %>%
-  
-  # Step 3: Assign clean replicate ID 
-  group_by(bathy_subgroup) %>%
-  mutate(replicate = cur_group_id()) %>%
-  select(-overlap_date_group, -bathy_subgroup) %>%
-  ungroup() %>%
-  
-  # ---- Step 4: Manual Adjustments 
-  # Force SPY232834 and SPY232833 into the same replicate group (assign lowest of their current replicate values)
-  mutate(
-    replicate = case_when(
-      spygen_code %in% c("SPY232834", "SPY232833") ~ min(replicate[spygen_code %in% c("SPY232834", "SPY232833")]),
-      TRUE ~ replicate
-    )
-  ) 
-
-
+# #---- Assign replicates --------------------
+# buffered_grouped <- buff %>%
+#   # Step 1: Group samples by overlapping buffers
+#   mutate(date = as.Date(date)) %>%
+#   {
+#     overlap_matrix <- st_intersects(.)
+#     g <- igraph::graph_from_adj_list(overlap_matrix)
+#     .$buffer_group <- igraph::components(g)$membership
+#     .
+#   } %>%
+#   group_by(buffer_group) %>%
+#   mutate(n_in_group = n()) %>%
+#   ungroup() %>%
+#   mutate(
+#     overlap_date_group = if_else(
+#       n_in_group > 2,
+#       paste(buffer_group, date, sep = "_"),
+#       as.character(buffer_group)
+#     )
+#   ) %>%
+#   select(-buffer_group, -n_in_group) %>%
+#   
+#   # Step 2: Apply bathy-based subgroups to groups > 2 samples
+#   group_by(overlap_date_group) %>%
+#   group_split() %>%
+#   lapply(function(df_group) {
+#     if (nrow(df_group) > 2) {
+#       df_group %>%
+#         group_by(max_shom_bathy) %>%
+#         mutate(bathy_sub_id = cur_group_id()) %>%
+#         ungroup() %>%
+#         mutate(
+#           bathy_sub_id = dense_rank(bathy_sub_id),
+#           bathy_subgroup = paste0(overlap_date_group[1], "_b", bathy_sub_id)
+#         ) %>%
+#         select(-bathy_sub_id)
+#     } else {
+#       df_group$bathy_subgroup <- df_group$overlap_date_group
+#       df_group
+#     }
+#   }) %>%
+#   bind_rows() %>%
+#   
+#   # Step 3: Assign clean replicate ID 
+#   group_by(bathy_subgroup) %>%
+#   mutate(replicate = cur_group_id()) %>%
+#   select(-overlap_date_group, -bathy_subgroup) %>%
+#   ungroup() %>%
+#   
+#   # ---- Step 4: Manual Adjustments 
+#   # Force SPY232834 and SPY232833 into the same replicate group (assign lowest of their current replicate values)
+#   mutate(
+#     replicate = case_when(
+#       spygen_code %in% c("SPY232834", "SPY232833") ~ min(replicate[spygen_code %in% c("SPY232834", "SPY232833")]),
+#       TRUE ~ replicate
+#     )
+#   ) 
+# 
+# 
 
 #---- Assign replicates including subsite ----
-# 1. Assign replicate ID to known patterns
-known_replicates <- buff %>%
+
+# STEP 1 — Identify samples with known replicate-defining subsites
+known_rep_replicates <- buff %>%
   mutate(
-    # Match patterns
-    replicate_group = case_when(
+    # Normalize (aller/retour) to common subsite key
+    replicate_key = case_when(
       str_detect(subsite, "^piaf_\\d+$") ~ subsite,
       str_detect(subsite, "^t_\\d+$") ~ subsite,
       str_detect(subsite, "^IPOCOM_\\d+$") ~ subsite,
-      # unify _aller/_retour for pairing
-      str_detect(subsite, "^(\\d+)_\\((aller|retour)\\)$") ~ str_replace(subsite, "_\\((aller|retour)\\)", ""),
+      str_detect(subsite, "^\\d+_\\((aller|retour)\\)$") ~ str_replace(subsite, "_\\((aller|retour)\\)", ""),
       TRUE ~ NA_character_
     )
   ) %>%
-  group_by(replicate_group) %>%
-  mutate(replicate = if (!is.na(replicate_group[1])) cur_group_id() else NA_integer_) %>%
-  ungroup()
+  filter(!is.na(replicate_key)) %>%
+  group_by(replicate_key) %>%
+  mutate(replicate = cur_group_id()) %>%
+  ungroup() %>%
+  select(-replicate_key)
 
-# 2. Split known from unknown
-known_set <- known_replicates %>% filter(!is.na(replicate))
-unknown_set <- known_replicates %>% filter(is.na(replicate_group)) %>% select(-replicate_group)
+# STEP 2 — Separate out samples not already assigned to replicates
+remaining_to_group <- buff %>%
+  filter(!spygen_code %in% known_rep_replicates$spygen_code)
 
-# 3. Apply original buffer-based logic to unknown samples
-buffered_grouped <- unknown_set %>%
+# STEP 3 — Apply buffer-based grouping to only the remaining samples
+grouped_remaining <- remaining_to_group %>%
   mutate(date = as.Date(date)) %>%
   {
-    overlap_matrix <- sf::st_intersects(.)
-    g <- igraph::graph_from_adj_list(overlap_matrix)
-    .$buffer_group <- igraph::components(g)$membership
+    overlaps <- st_intersects(.)
+    g <- graph_from_adj_list(overlaps)
+    .$buffer_group <- components(g)$membership
     .
   } %>%
   group_by(buffer_group) %>%
   mutate(n_in_group = n()) %>%
   ungroup() %>%
-  mutate(
-    overlap_date_group = if_else(n_in_group > 2, paste(buffer_group, date, sep = "_"), as.character(buffer_group))
-  ) %>%
+  mutate(overlap_date_group = if_else(n_in_group > 2, paste(buffer_group, date, sep = "_"), as.character(buffer_group))) %>%
   select(-buffer_group, -n_in_group) %>%
   group_by(overlap_date_group) %>%
   group_split() %>%
@@ -392,24 +392,129 @@ buffered_grouped <- unknown_set %>%
   }) %>%
   bind_rows() %>%
   group_by(bathy_subgroup) %>%
-  mutate(replicate = cur_group_id()) %>%
-  select(-overlap_date_group, -bathy_subgroup) %>%
-  ungroup()
+  mutate(replicate = max(known_rep_replicates$replicate, na.rm = TRUE) + cur_group_id()) %>%  # shift replicate IDs to avoid overlap
+  ungroup() %>%
+  select(-overlap_date_group, -bathy_subgroup)
 
-# 4. Merge back with known replicates
-all_buffered <- bind_rows(
-  known_set %>% select(-replicate_group),
-  buffered_grouped
-)
+# STEP 4 — Combine both groups
+final_grouped <- bind_rows(known_rep_replicates, grouped_remaining)
 
-# 5. Manual fix
-all_buffered <- all_buffered %>%
+# STEP 5 — Manual override
+final_grouped <- final_grouped %>%
   mutate(
     replicate = case_when(
       spygen_code %in% c("SPY232834", "SPY232833") ~ min(replicate[spygen_code %in% c("SPY232834", "SPY232833")]),
       TRUE ~ replicate
     )
   )
+
+
+
+#---------- Pool replicates 2 ----
+# 1. Split replicate groups by size
+rep_groups_split <- final_grouped %>%
+  st_drop_geometry() %>%
+  count(replicate, name = "group_size")
+
+# 2. Join size info to original data
+final_grouped <- final_grouped %>%
+  left_join(rep_groups_split, by = "replicate")
+
+# 3. Separate groups needing refinement (size > 2)
+to_refine <- final_grouped %>% filter(group_size > 2)
+keep_as_is <- final_grouped %>% filter(group_size <= 2)
+
+# 4. Refine over-large groups using date + time_start
+refined <- to_refine %>%
+  group_by(replicate, date, time_start) %>%
+  mutate(new_replicate = cur_group_id()) %>%
+  ungroup()
+
+# 5. Offset new replicate IDs to avoid overlap
+offset <- max(final_grouped$replicate, na.rm = TRUE)
+refined <- refined %>%
+  mutate(replicate = new_replicate + offset) %>%
+  select(-new_replicate, -group_size)
+
+# 6. Recombine all together
+final_grouped_refined <- bind_rows(
+  keep_as_is %>% select(-group_size),
+  refined
+)
+
+
+
+
+
+
+
+
+
+
+
+
+
+final_grouped %>%
+  st_drop_geometry() %>%
+  count(replicate) %>%
+  count(n, name = "num_groups") %>%
+  arrange(n)
+
+
+final_grouped_refined %>%
+  st_drop_geometry() %>%
+  count(replicate) %>%
+  count(n, name = "num_groups") %>%
+  arrange(n)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+final_grouped <- final_grouped %>%
+  group_by(replicate) %>%
+  mutate(n_in_replicate = n()) %>%
+  ungroup()
+
+
+t <- final_grouped %>% filter(n_in_replicate == 4)
+
+
+
+ggplot(t) +
+  geom_sf(aes(fill = factor(n_in_replicate)), color = "black", size = 0.2) +
+  scale_fill_manual(
+    values = c("1" = "red", "2" = "#91cf60", "3" = "#d9ef8b", "4" = "#fee08b", "5" = "pink", "6" = "blue"),
+    na.value = "grey80",
+    name = "Samples per replicate",
+    guide = guide_legend(reverse = TRUE)
+  ) +
+  labs(title = "Replicate Groups by Sample Count",
+       subtitle = "Red = singleton replicates",
+       fill = "Samples") +
+  theme_minimal()
+
+
+
+
+
+
+
+
+
+
 
 # Check the result ------------
 # count number of samples per replicate group
