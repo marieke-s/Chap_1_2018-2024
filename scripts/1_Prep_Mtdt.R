@@ -344,3 +344,4 @@ rm(buff, mtdt_2023_FR_surface_coastal_30L, buffered_grouped)
 #------------- 3. Subset n°2 : 40m depth --------------------
 #------------- 4. Make merged buffer ---------------------
 
+TEST
