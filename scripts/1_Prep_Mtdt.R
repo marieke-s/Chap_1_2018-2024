@@ -42,7 +42,7 @@ source("./utils/Fct_Data-Prep.R")
 
 
 
-#------------- Load and small clean data ---------------------
+#------------- Load and clean data ---------------------
 # Load the metadata file
 mtdtfull <- readr::read_csv("./data/raw_data/eDNA/Med_metadonnees_ADNe - v1.1_2018-2024.csv")
 
@@ -111,6 +111,11 @@ mtdtcomb <- bind_rows(mtdtfull, ipocom)
 # Clean up
 rm(mtdtfull, ipocom, col, missing_cols)
 
+
+
+
+
+
 #------------- 1. Subset n°1 : France + marine + coastal --------------------
 # Explanation:
 # Selection of points sampled in France 
@@ -128,6 +133,12 @@ mtdt_1 <- mtdtcomb %>%
                                           "estuary", 
                                           "open_ocean", 
                                           "seamount")))
+
+
+
+
+
+
 
 
 
@@ -159,6 +170,9 @@ for (p in unique(mtdt_pool$pool)) {
 
 # Clean up 
 rm(mtdt_pool, p, codes, new_code)
+
+
+
 
 
 
