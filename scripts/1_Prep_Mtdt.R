@@ -59,9 +59,40 @@ if (any(mtdtfull$spygen_code == "SPY232652")) {
     mutate(depth_sampling = ifelse(spygen_code == "SPY232652", 20, depth_sampling)) 
 }
 
-# Load ipocom data
+# Load IPOCOM data
 ipocom <- readr::read_delim("./data/raw_data/eDNA/eREF_IPOCOM TRANSECT 2024.csv", delim = ";")
   
+# Correct IPOCOM coordinates errors
+# SPY233779 IPOCOM_135 Y_DEBUT 43.4785833333333 --> 42.4785833333333
+# SPY2401466 IPOCOM_13 Y_DEBUT 43.7057833 --> 43.5057833
+# SPY2401440 IPOCOM_12 Y_DEBUT 42.53943333 --> 43.53943333
+# SPY2401596 IPOCOM_76 X_FIN 5.44973333333333 --> 5.34973333333333
+
+if (any(ipocom$N_Transect == "IPOCOM_135")) {
+  ipocom <- ipocom %>%
+    mutate(Y_DEBUT = ifelse(N_Transect == "IPOCOM_135", 42.4785833333333, Y_DEBUT))
+}
+if (any(ipocom$N_Transect == "IPOCOM_13")) {
+  ipocom <- ipocom %>%
+    mutate(Y_DEBUT = ifelse(N_Transect == "IPOCOM_13", 43.5057833, Y_DEBUT))
+}
+if (any(ipocom$N_Transect == "IPOCOM_12")) {
+  ipocom <- ipocom %>%
+    mutate(Y_DEBUT = ifelse(N_Transect == "IPOCOM_12", 43.53943333, Y_DEBUT))
+}
+if (any(ipocom$N_Transect == "IPOCOM_76")) {
+  ipocom <- ipocom %>%
+    mutate(X_FIN = ifelse(N_Transect == "IPOCOM_76", 5.34973333333333, X_FIN))
+}
+
+
+# Error on SPY2401568 IPOCOM_62 ????s
+
+# Correct Mtdtfull coordinates errors
+# SPY2401010 : longitude_end_DD 42.902999999999999 --> ???
+
+
+
 
 #------------- 0. Add IPOCOM 2024 data -----------------
 # Rename ipocom columns to match mtdtfull
@@ -180,15 +211,15 @@ rm(mtdt_pool, p, codes, new_code)
 
 
 #------------- 3. Pool replicates --------------------
+# Explanation: In most protocols, two samples were done at the same time and same location : they are field replicates. For the future analyses, we want to pool these replicates together. Problem is, there are no replicate values saved in the metadata file. This section aims to recover which samples go together. 
 
-
-#---- Extract SHOM bathy because some depth_seafloor are NA -----
+#---- Extract SHOM bathy -----
 # Explanation: 
 # Since there are NA values in the mtdt depth column, we use the bathymetry extracted from a digital surface model (MNT bathymétrique du SHOM: https://diffusion.shom.fr/donnees/bathymerie/mnt-facade-gdl-ca-homonim.html) to fill NA values. 
 
 
 # Dataset 
-dt <- mtdt_1
+dt <- mtdt_2
 
 # Load bathy
 bathy <- terra::rast("./data/raw_data/predictors/Bathymetry/MNT_MED_CORSE_SHOM100m_merged.tif")
@@ -207,7 +238,7 @@ dt <- dt |>
 cor(dt$depth_seafloor, dt$max_shom_bathy, use = "pairwise.complete.obs")
 
 # Assign back dataset name
-mtdt_1 <- dt
+mtdt_2 <- dt
 rm(dt, bathy, end_bathy, start_bathy)
 
 
@@ -222,7 +253,7 @@ rm(dt, bathy, end_bathy, start_bathy)
 
 #---- Buffer transect --------------------
 buff <- buffer_transect(
-  df = mtdt_1,
+  df = mtdt_2,
   start_lon_col = "longitude_start_DD",
   start_lat_col = "latitude_start_DD",
   end_lon_col = "longitude_end_DD",
@@ -230,13 +261,16 @@ buff <- buffer_transect(
   buffer_dist = 500 # buffer distance is meters
 )
 
-# beepr::beep()
+beepr::beep()
 
 # Plot buffers
-# plot(buff, max.plot = 1)
+plot(buff, max.plot = 1)
 
 # Check if buff are valid
 sum(!st_is_valid(buff))
+
+# Save buff
+st_write(buff, "./data/processed_data/buff_500m_2023_FR_surface_coastal_30L.shp", delete_dsn = TRUE)
 
 
 
@@ -299,6 +333,84 @@ buffered_grouped <- buff %>%
   ) 
 
 
+
+#---- Assign replicates including subsite ----
+# 1. Assign replicate ID to known patterns
+known_replicates <- buff %>%
+  mutate(
+    # Match patterns
+    replicate_group = case_when(
+      str_detect(subsite, "^piaf_\\d+$") ~ subsite,
+      str_detect(subsite, "^t_\\d+$") ~ subsite,
+      str_detect(subsite, "^IPOCOM_\\d+$") ~ subsite,
+      # unify _aller/_retour for pairing
+      str_detect(subsite, "^(\\d+)_\\((aller|retour)\\)$") ~ str_replace(subsite, "_\\((aller|retour)\\)", ""),
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  group_by(replicate_group) %>%
+  mutate(replicate = if (!is.na(replicate_group[1])) cur_group_id() else NA_integer_) %>%
+  ungroup()
+
+# 2. Split known from unknown
+known_set <- known_replicates %>% filter(!is.na(replicate))
+unknown_set <- known_replicates %>% filter(is.na(replicate_group)) %>% select(-replicate_group)
+
+# 3. Apply original buffer-based logic to unknown samples
+buffered_grouped <- unknown_set %>%
+  mutate(date = as.Date(date)) %>%
+  {
+    overlap_matrix <- sf::st_intersects(.)
+    g <- igraph::graph_from_adj_list(overlap_matrix)
+    .$buffer_group <- igraph::components(g)$membership
+    .
+  } %>%
+  group_by(buffer_group) %>%
+  mutate(n_in_group = n()) %>%
+  ungroup() %>%
+  mutate(
+    overlap_date_group = if_else(n_in_group > 2, paste(buffer_group, date, sep = "_"), as.character(buffer_group))
+  ) %>%
+  select(-buffer_group, -n_in_group) %>%
+  group_by(overlap_date_group) %>%
+  group_split() %>%
+  lapply(function(df_group) {
+    if (nrow(df_group) > 2) {
+      df_group %>%
+        group_by(max_shom_bathy) %>%
+        mutate(bathy_sub_id = cur_group_id()) %>%
+        ungroup() %>%
+        mutate(
+          bathy_sub_id = dense_rank(bathy_sub_id),
+          bathy_subgroup = paste0(overlap_date_group[1], "_b", bathy_sub_id)
+        ) %>%
+        select(-bathy_sub_id)
+    } else {
+      df_group$bathy_subgroup <- df_group$overlap_date_group
+      df_group
+    }
+  }) %>%
+  bind_rows() %>%
+  group_by(bathy_subgroup) %>%
+  mutate(replicate = cur_group_id()) %>%
+  select(-overlap_date_group, -bathy_subgroup) %>%
+  ungroup()
+
+# 4. Merge back with known replicates
+all_buffered <- bind_rows(
+  known_set %>% select(-replicate_group),
+  buffered_grouped
+)
+
+# 5. Manual fix
+all_buffered <- all_buffered %>%
+  mutate(
+    replicate = case_when(
+      spygen_code %in% c("SPY232834", "SPY232833") ~ min(replicate[spygen_code %in% c("SPY232834", "SPY232833")]),
+      TRUE ~ replicate
+    )
+  )
+
 # Check the result ------------
 # count number of samples per replicate group
 buffered_grouped %>%
@@ -344,4 +456,3 @@ rm(buff, mtdt_2023_FR_surface_coastal_30L, buffered_grouped)
 #------------- 3. Subset n°2 : 40m depth --------------------
 #------------- 4. Make merged buffer ---------------------
 
-TEST
