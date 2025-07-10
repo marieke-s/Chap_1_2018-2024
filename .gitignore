@@ -1,4 +1,11 @@
 .Rproj.user
 .Rhistory
 .RData
+.RDataTmp
 .Ruserdata
+.Rproj
+data/
+output/
+figures/
+analyses/.Rprofile
+
