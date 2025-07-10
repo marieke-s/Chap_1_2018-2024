@@ -1,15 +1,16 @@
 #------------- Description ---------------------
 # Purpose: 
 # This script aims to 
+#     - make a subset of the full eDNA metadata file to keep samples needed for our study
 #     - pool sampling replicates together within a single point
 #     - make a buffer around the pooled sampling points
-#     - make a subset of the full eDNA metadata file to keep samples needed for our study
+
 
 # The data subset resulting from this script will be used for predictors extraction (xxxx.R) and filtering the occurence dataset (xxx.R)
 
 # Data source: 
 # A csv file of the medata of mediterranean eDNA samplings in 2018-2024 produced by Laure Velez and Amandine Avouac (amandine.avouac@umontpellier.fr).
-
+# A csv file for the IPOCOM metadata sent by Celia Bertrand on Slack the 7/07/2025 : eREF_IPOCOM TRANSECT 2024.csv
 # Author: Marieke Schultz
 
 # Date script created: 2025-07-07
@@ -39,35 +40,132 @@ library(terra)
 # Load functions
 source("./utils/Fct_Data-Prep.R")
 
-plot = "YES"
 
 
-#------------- Load data ---------------------
+#------------- Load and small clean data ---------------------
 # Load the metadata file
 mtdtfull <- readr::read_csv("./data/raw_data/eDNA/Med_metadonnees_ADNe - v1.1_2018-2024.csv")
 
+# If mdtdt is version <= 1.1 :
+# For row with spygen_code = SPY232658 replace sampling_depth to 80
+if (any(mtdtfull$spygen_code == "SPY232658")) {
+  mtdtfull <- mtdtfull %>%
+    mutate(depth_sampling = ifelse(spygen_code == "SPY232658", 80, depth_sampling)) 
+}
 
-#------------- 1. Subset n°1 : France + marine + 30L --------------------
+# For row with spygen_code = SPY232652 replace sampling_depth to 20
+if (any(mtdtfull$spygen_code == "SPY232652")) {
+  mtdtfull <- mtdtfull %>%
+    mutate(depth_sampling = ifelse(spygen_code == "SPY232652", 20, depth_sampling)) 
+}
+
+# Load ipocom data
+ipocom <- readr::read_delim("./data/raw_data/eDNA/eREF_IPOCOM TRANSECT 2024.csv", delim = ";")
+  
+
+#------------- 0. Add IPOCOM 2024 data -----------------
+# Rename ipocom columns to match mtdtfull
+ipocom <- ipocom %>%
+  rename(
+    spygen_code = N_SPYGEN,
+    date = DATE,
+    latitude_start_DD = Y_DEBUT,
+    longitude_start_DD = X_DEBUT,
+    latitude_end_DD = Y_FIN,
+    longitude_end_DD = X_FIN,
+    subsite = N_Transect,
+    time_start = HEURE_DEBUT,
+    duration = TEMPS_FILTRATION,
+    comments = COMMENTAIRE
+  ) 
+
+# Format ipocom date as mtdtfull date
+ipocom$date <- as.Date(ipocom$date, format = "%d/%m/%Y")
+
+# Format duration column 
+ipocom$duration <- as.numeric(ipocom$duration) / 60
+
+# Remove ipocom columns not in mtdtfull
+ipocom <- ipocom %>%
+  select(-c("HEURE_FIN", "Temp"))
+
+# Add missing columns to ipocom with NA
+missing_cols <- setdiff(names(mtdtfull), names(ipocom))
+
+for (col in missing_cols) {
+  ipocom[[col]] <- NA
+}
+
+# For column 'country' set "France" for all rows
+ipocom$country <- "France"
+
+# For column 'component' set "open_ocean" for all rows
+ipocom$pool <- "no"
+
+# Reorder ipocom columns to match mtdtfull
+ipocom <- ipocom[, names(ipocom)]
+
+# Combine the two datasets
+mtdtcomb <- bind_rows(mtdtfull, ipocom)
+
+# Clean up
+rm(mtdtfull, ipocom, col, missing_cols)
+
+#------------- 1. Subset n°1 : France + marine + coastal --------------------
 # Explanation:
-# Selection of points sampled in France (90 samples removed)
-# Selection of marine points, i.e. outside harbours, lagoons, ports, rivers, estuaries (213 samples removed)
-# Filtering out the seamont and open_ocean samples because they are outside the coastal zones of which we are interested in (= 52 samples removed) 
-# Selection of 30L samples to unsure consistence through the protocols (There are 209 15L samples, 214 60L samples, 20 45L samples, 2 40L samples and 104 NA ≈ 550 samples removed)
+# Selection of points sampled in France 
+# Selection of marine points, i.e. outside harbours, lagoons, ports, rivers, estuaries 
+# Filtering out the seamont and open_ocean samples because they are outside the coastal zones of which we are interested in 
+# = 377 samples removed
 
-mtdt_1 <- mtdtfull |>
-  filter(country == "France") |>  # Filter France
-  filter(!(component == "harbour"|
-           component =="lagoon"|
-           component == "port"|
-           component == "freshwater_river"|
-           component == "estuary" |
-           component == "open_ocean" |
-           component == "seamount")) |> 
-  filter(estimated_volume == "15" |
-           estimated_volume == "30")
+mtdt_1 <- mtdtcomb %>%
+  filter(is.na(country) | country == "France") %>%
+  filter(
+    is.na(component) | !(component %in% c("harbour", 
+                                          "lagoon", 
+                                          "port", 
+                                          "freshwater_river",
+                                          "estuary", 
+                                          "open_ocean", 
+                                          "seamount")))
 
 
-#------------- 2. Pool replicates --------------------
+
+#------------- 2. Pool 15L pooled samples ------------
+# Explanation : There is one protocol that filters simultaneously 2 15L samples on the submersible pump. The 2 samples are then pooled by SpyGen and analysed as an unique 30L sample. There are indicated in the column "pool". 
+
+# Filter samples that need to be pooled
+mtdt_pool <- mtdt_1 |>
+  dplyr::filter(!(pool == "no"))
+
+# we expect to reduce the number of mtdt_1 rows by 162/2 = 81 rows 
+
+# ---- Automatically pool samples using the `pool` column 
+mtdt_2 <- mtdt_1  # initialize
+
+for (p in unique(mtdt_pool$pool)) {
+  
+  codes <- unlist(strsplit(p, split = "_"))
+  new_code <- p
+  
+  mtdt_2 <- combine_rows(
+    data = mtdt_2,  # ✅ keep updating the pooled dataset
+    codes_to_combine = codes,
+    new_code = new_code,
+    proceed = TRUE
+  )
+}
+
+
+# Clean up 
+rm(mtdt_pool, p, codes, new_code)
+
+
+
+
+
+
+#------------- 3. Pool replicates --------------------
 
 
 #---- Extract SHOM bathy because some depth_seafloor are NA -----
@@ -204,7 +302,7 @@ buffered_grouped <- buffered_grouped %>%
 ggplot(buffered_grouped) +
   geom_sf(aes(fill = factor(n_in_replicate)), color = "black", size = 0.2) +
   scale_fill_manual(
-    values = c("1" = "red", "2" = "#91cf60", "3" = "#d9ef8b", "4" = "#fee08b", "5" = "#fc8d59", "6" = "#d73027"),
+    values = c("1" = "red", "2" = "#91cf60", "3" = "#d9ef8b", "4" = "#fee08b", "5" = "pink", "6" = "blue"),
     na.value = "grey80",
     name = "Samples per replicate",
     guide = guide_legend(reverse = TRUE)
@@ -231,3 +329,4 @@ rm(buff, mtdt_2023_FR_surface_coastal_30L, buffered_grouped)
 
 #------------- 3. Subset n°2 : 40m depth --------------------
 #------------- 4. Make merged buffer ---------------------
+
