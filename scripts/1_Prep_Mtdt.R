@@ -286,42 +286,94 @@ rm(mtdtfull, ipocom)
 
 #------------- Subset n°1 : France + marine + coastal --------------------
 # Explanation:
-# Selection of points sampled in France 
-# Selection of marine points, i.e. outside harbours, lagoons, ports, rivers, estuaries 
-# Filtering out the seamont and open_ocean samples because they are outside the coastal zones of which we are interested in 
-# = 360 samples removed
-# Keep sample that do not match the criteria if its replicate does.
+# - Selection of points sampled in France 
+# - Selection of marine points: outside harbours, lagoons, ports, rivers, estuaries 
+# - Filtering out the seamount and open_ocean samples 
+# - BUT: keep any sample in a replicate group if one of them passes the filters
+# - AND: if replicates == "no", it must pass the filters individually
 
-# STEP 1: Get the unique replicate groups that should be kept
+# STEP 1: Identify valid replicate groups
 valid_replicates <- mtdtcomb %>%
   filter(is.na(country) | country == "France") %>%
-  filter(is.na(component) | !(component %in% c("harbour", "lagoon", "port", 
-                                               "freshwater_river", "estuary", 
-                                               "open_ocean", "seamount"))) %>%
+  filter(is.na(component) | !(component %in% c(
+    "harbour", "lagoon", "port", 
+    "freshwater_river", "estuary", 
+    "open_ocean", "seamount"
+  ))) %>%
   pull(replicates) %>%
   unique()
 
-# STEP 2: Keep all rows whose replicate group is in that valid list
+# STEP 2: Keep:
+# - all samples in valid replicate groups
+# - singletons (replicates == "no") only if they meet the filters individually
 mtdt_1 <- mtdtcomb %>%
-  filter(replicates %in% valid_replicates)
-
-
+  filter(
+    (replicates %in% valid_replicates) |
+      (
+        replicates == "no" &
+          (is.na(country) | country == "France") &
+          (is.na(component) | !(component %in% c(
+            "harbour", "lagoon", "port", 
+            "freshwater_river", "estuary", 
+            "open_ocean", "seamount"
+          )))
+      )
+  )
 
 rm(valid_replicates)
 
+#------------- Extract bathymetry ---------------------
+# Explanation: 
+# Since there are NA values in the mtdt depth column, we use the bathymetry extracted from a digital surface model (MNT bathymétrique du SHOM: https://diffusion.shom.fr/donnees/bathymerie/mnt-facade-gdl-ca-homonim.html) to fill NA values. 
 
 
+# Dataset 
+dt <- mtdt_1
 
+# Load bathy
+bathy <- terra::rast("./data/raw_data/predictors/Bathymetry/MNT_MED_CORSE_SHOM100m_merged.tif")
 
+# Extract SHOM bathymetry from start/end coordinates
+start_bathy = abs(terra::extract(bathy, terra::vect(dt, geom = c("longitude_start_DD", "latitude_start_DD"), crs = crs(bathy)))[, 2])
+end_bathy   = abs(terra::extract(bathy, terra::vect(dt, geom = c("longitude_end_DD", "latitude_end_DD"), crs = crs(bathy)))[, 2])
 
+dt <- dt |>
+  mutate(
+    max_shom_bathy = pmax(start_bathy, end_bathy, na.rm = TRUE), # The maximum bathymetry between start and end points is retained
+    combined_bathy = coalesce(as.numeric(depth_seafloor), max_shom_bathy)
+  ) 
 
+# Correlation between depth_seafloor and max_shom_bathy
+cor(dt$depth_seafloor, dt$max_shom_bathy, use = "pairwise.complete.obs")
+
+# Assign back dataset name
+mtdt_1 <- dt
+rm(dt, bathy, end_bathy, start_bathy)
+
+#------------- Subset n°2 : 40m depth --------------------
+# env 600 samples removed
+
+# STEP 1: Identify replicate groups where at least one sample has bathy < 40
+valid_replicates_bathy <- mtdt_1 %>%
+  filter(!is.na(combined_bathy) & combined_bathy < 40 & replicates != "no") %>%
+  pull(replicates) %>%
+  unique()
+
+# STEP 2: Keep:
+# - all samples in valid replicate groups
+# - singletons (replicates == "no") only if combined_bathy < 40
+mtdt_2 <- mtdt_1 %>%
+  filter(
+    (replicates %in% valid_replicates_bathy) |
+      (replicates == "no" & !is.na(combined_bathy) & combined_bathy < 40)
+  )
 
 
 
 
 #------------- Buffer samples ---------------------
-mtdt_1 <- buffer_transect(
-  df = mtdt_1,
+mtdt_2 <- buffer_transect(
+  df = mtdt_2,
   start_lon_col = "longitude_start_DD",
   start_lat_col = "latitude_start_DD",
   end_lon_col = "longitude_end_DD",
@@ -329,18 +381,10 @@ mtdt_1 <- buffer_transect(
   buffer_dist = 500
 )
 
-ggplot(mtdt_1) +
+ggplot(mtdt_2) +
   geom_sf(aes(geometry = wkt_geometry), fill = "lightblue", color = "darkblue", alpha = 0.4) +
   theme_minimal() +
-  ggtitle("500m samples buffer 2018-2024")
-
-
-
-#------------- Extract bathymetry ---------------------
-
-#------------- Subset n°2 : 40m depth --------------------
-
-
+  ggtitle("500m samples mtdt_2 buffer 2018-2024")
 
 
 
