@@ -35,6 +35,7 @@ library(reticulate)
 library(sf)
 library(stringr)
 library(terra)
+library(tidyr)
 
 
 # Load functions
@@ -96,7 +97,8 @@ replicate_groups <- list(
   c("SPY232138", "SPY233971", "SPY232132", "SPY232197"),
   c("SPY232130", "SPY232272", "SPY232135", "SPY232154"),
   c("SPY234951", "SPY234961", "SPY234952", "SPY234957"),
-  c("SPY233998", "SPY234954", "SPY234956", "SPY234960", "SPY234955", "SPY234959")
+  c("SPY233998", "SPY234954", "SPY234956", "SPY234960", "SPY234955", "SPY234959"),
+  c("SPY232255", "SPY233721")
 )
 
 # Update replicates
@@ -136,6 +138,8 @@ rm(replicate_groups, standardize_replicates)
 mtdtfull <- mtdtfull %>%
   select(-contains("...1"))
 
+
+
 # sampling_depth 
 if (any(mtdtfull$spygen_code == "SPY232658")) {
   mtdtfull <- mtdtfull %>%
@@ -147,10 +151,9 @@ if (any(mtdtfull$spygen_code == "SPY232652")) {
     mutate(depth_sampling = ifelse(spygen_code == "SPY232652", 20, depth_sampling)) 
 }
 
-# coordinates
-# SPY2401010 : longitude_end_DD 42.902999999999999 --> 42.753000000000000; 9.176416666666670 
-# t_06 end --> 42.750149999999998; 9.084933333333330
 
+
+# coordinates
 if (any(mtdtfull$spygen_code == "SPY2401010")) {
   mtdtfull <- mtdtfull %>%
     mutate(latitude_end_DD = ifelse(spygen_code == "SPY2401010", 42.750149999999998, latitude_end_DD))
@@ -169,12 +172,16 @@ if (any(mtdtfull$spygen_code == "SPY2401011")) {
 }
 
 
+
 # component
 mtdtfull <- mtdtfull %>%
   mutate(component = ifelse(spygen_code == "SPY212587", "offshore", component))
 
+mtdtfull <- mtdtfull %>%
+  mutate(component = ifelse(spygen_code == "SPY211262", "offshore", component))
 
-
+mtdtfull <- mtdtfull %>%
+  mutate(component = ifelse(spygen_code == "SPY211311", "offshore", component))
 
 
 
@@ -212,7 +219,6 @@ if (any(ipocom$N_Transect == "IPOCOM_62")) {
       X_FIN = ifelse(N_Transect == "IPOCOM_62", 5.46201, X_FIN)
     )
 }
-
 
 
 
@@ -264,6 +270,14 @@ ipocom <- ipocom %>%
 # Reorder ipocom columns to match mtdtfull
 ipocom <- ipocom[, names(mtdtfull)]
 
+# Component 
+ipocom <- ipocom %>%
+  mutate(component = ifelse(spygen_code == "SPY2401568", "offshore", component))
+
+ipocom <- ipocom %>%
+  mutate(component = ifelse(spygen_code == "SPY2401569", "offshore", component))
+
+
 rm(col, missing_cols)
 
 
@@ -288,17 +302,18 @@ rm(mtdtfull, ipocom)
 # Explanation:
 # - Selection of points sampled in France 
 # - Selection of marine points: outside harbours, lagoons, ports, rivers, estuaries 
-# - Filtering out the seamount and open_ocean samples 
+# - Filtering out the seamount, canyon and open_ocean samples 
 # - BUT: keep any sample in a replicate group if one of them passes the filters
 # - AND: if replicates == "no", it must pass the filters individually
 
-# STEP 1: Identify valid replicate groups
+# STEP 1: Identify valid replicate groups (excluding "no")
 valid_replicates <- mtdtcomb %>%
+  filter(replicates != "no") %>%
   filter(is.na(country) | country == "France") %>%
   filter(is.na(component) | !(component %in% c(
     "harbour", "lagoon", "port", 
     "freshwater_river", "estuary", 
-    "open_ocean", "seamount"
+    "open_ocean", "seamount", "canyon"
   ))) %>%
   pull(replicates) %>%
   unique()
@@ -315,7 +330,7 @@ mtdt_1 <- mtdtcomb %>%
           (is.na(component) | !(component %in% c(
             "harbour", "lagoon", "port", 
             "freshwater_river", "estuary", 
-            "open_ocean", "seamount"
+            "open_ocean", "seamount", "canyon"
           )))
       )
   )
@@ -350,24 +365,36 @@ cor(dt$depth_seafloor, dt$max_shom_bathy, use = "pairwise.complete.obs")
 mtdt_1 <- dt
 rm(dt, bathy, end_bathy, start_bathy)
 
-#------------- Subset n°2 : 40m depth --------------------
-# env 600 samples removed
+#------------- Subset n°2 : remove offshore > 50m depth --------------------
+# Explanation : we want to remove samples far away from the coast, yet some offshore samples are close enough to be kept (since offshore was assigned to samples > 6km away from the coast). Thus we remove samples that are BOTH offshore AND > 50m depth, this ensures keeping coastal samples relatively close to shore.
 
-# STEP 1: Identify replicate groups where at least one sample has bathy < 40
-valid_replicates_bathy <- mtdt_1 %>%
-  filter(!is.na(combined_bathy) & combined_bathy < 40 & replicates != "no") %>%
+# STEP 1: Identify valid replicate groups (excluding "no")
+valid_replicates_component_bathy <- mtdt_1 %>%
+  filter(replicates != "no") %>%
+  filter(
+    is.na(component) | component != "offshore" |
+      (!is.na(combined_bathy) & combined_bathy <= 50)
+  ) %>%
   pull(replicates) %>%
   unique()
 
 # STEP 2: Keep:
-# - all samples in valid replicate groups
-# - singletons (replicates == "no") only if combined_bathy < 40
+# - all rows in valid replicate groups
+# - singletons (replicates == "no") only if they are not deep offshore
 mtdt_2 <- mtdt_1 %>%
   filter(
-    (replicates %in% valid_replicates_bathy) |
-      (replicates == "no" & !is.na(combined_bathy) & combined_bathy < 40)
+    (replicates %in% valid_replicates_component_bathy) |
+      (
+        replicates == "no" &
+          (
+            is.na(component) | component != "offshore" |
+              (!is.na(combined_bathy) & combined_bathy <= 50)
+          )
+      )
   )
 
+# Clean up
+rm(valid_replicates_component_bathy)
 
 
 
@@ -381,15 +408,80 @@ mtdt_2 <- buffer_transect(
   buffer_dist = 500
 )
 
-ggplot(mtdt_2) +
-  geom_sf(aes(geometry = wkt_geometry), fill = "lightblue", color = "darkblue", alpha = 0.4) +
-  theme_minimal() +
-  ggtitle("500m samples mtdt_2 buffer 2018-2024")
+# ggplot(mtdt_2) +
+#   geom_sf(aes(geometry = wkt_geometry), fill = "lightblue", color = "darkblue", alpha = 0.1) +
+#   theme_minimal() +
+#   ggtitle("500m samples buffer 2028-2022")
+
+# Save as gpkg
+mtdt_2$time_start <- as.character(mtdt_2$time_start)
+sf::write_sf(mtdt_2, "./data/processed_data/mtdt_2.gpkg", delete_dsn = TRUE)
+
+#------------- Buffer replicates ------------
+# Step 1: Create POINTS from all start and end locations per sample in replicates
+replicate_points <- mtdt_2 %>%
+  filter(replicates != "no") %>%         # remove samples with no replicate
+  mutate(across(starts_with("latitude"), as.numeric),
+         across(starts_with("longitude"), as.numeric)) %>%
+  rowwise() %>%
+  mutate(points = list(tibble(
+    lat = c(latitude_start_DD, latitude_end_DD),
+    lon = c(longitude_start_DD, longitude_end_DD)
+  ))) %>%
+  ungroup() %>%
+  select(replicates, spygen_code, points) %>%
+  unnest(points)
+
+# Step 2: Convert to sf POINT objects
+replicate_points_sf <- st_as_sf(
+  replicate_points,
+  coords = c("lon", "lat"),
+  crs = 4326
+)
+
+plot(st_geometry(replicate_points_sf))
+
+# Step 3: Compute concave hulls for each replicate group
+replicate_polygons <- replicate_sf_points %>%
+  group_by(replicates) %>%
+  group_split() %>%
+  map_dfr(function(df) {
+    hull <- concaveman(df, concavity = 10, length_threshold = 10)
+    tibble(
+      replicates = unique(df$replicates),
+      replicates_wkt_geometry = st_as_text(st_geometry(hull))
+    )
+  })
+
+# Step 4: Extract 'no' replicate samples and assign their own wkt_geometry
+replicate_polygons_no <- mtdt_2 %>%
+  filter(replicates == "no") %>%
+  mutate(replicates_wkt_geometry = st_as_text(wkt_geometry)) %>%
+  select(replicates, spygen_code, replicates_wkt_geometry)
+
+# Step 5: Combine replicate group geometries and singleton geometries
+replicate_geometries <- bind_rows(
+  replicate_polygons,
+  replicate_polygons_no
+)
+
+# Step 6: Join replicate_wkt_geometry into mtdt_2
+mtdt_2 <- mtdt_2 %>%
+  left_join(replicate_geometries, by = c("replicates", "spygen_code"))
+
+# Step 7: Plot and export
+replicate_polygons_sf <- mtdt_2 %>%
+  select(replicates, spygen_code, replicates_wkt_geometry) %>%
+  distinct(replicates, replicates_wkt_geometry) %>%
+  filter(!is.na(replicates_wkt_geometry)) %>%
+  mutate(geometry = st_as_sfc(replicates_wkt_geometry, crs = 4326)) %>%
+  st_as_sf()
+
+# Plot
+plot(st_geometry(replicate_polygons_sf), main = "Replicate Geometries")
+
+# Export
+write_sf(replicate_polygons_sf, "./data/processed_data/data_prep/eDNA/replicate_polygons_sf.gpkg", delete_dsn = TRUE)
 
 
-
-
-
-
-#------------- Buffer replicates ---------------------
 
