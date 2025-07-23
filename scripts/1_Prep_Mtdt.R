@@ -435,6 +435,9 @@ replicates_buffer <- mtdt_2 |>
   st_as_sf(crs = 4326)
 
 
+# Drop Z and M dimensions (convert ZM to XY)
+replicates_buffer <- st_zm(replicates_buffer, drop = TRUE, what = "ZM")
+
 # Combine replicates_buffer for replicates != "no" and wkt_geometry for replicates == "no" in col named "replicates_geometry"
 mtdt_3 <- mtdt_2 |>
   rename(sample_geometry = wkt_geometry) |>
@@ -450,7 +453,6 @@ mtdt_3 <- mtdt_2 |>
     st_as_text(sample_geometry)
   }) |>
   ungroup()
-
 
 # Convert mtdt_3 to non spatial data frame
 mtdt_3 <- st_drop_geometry(mtdt_3)
