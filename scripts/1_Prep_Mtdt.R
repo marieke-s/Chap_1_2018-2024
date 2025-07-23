@@ -415,73 +415,71 @@ mtdt_2 <- buffer_transect(
 
 # Save as gpkg
 mtdt_2$time_start <- as.character(mtdt_2$time_start)
-sf::write_sf(mtdt_2, "./data/processed_data/mtdt_2.gpkg", delete_dsn = TRUE)
+sf::write_sf(mtdt_2, "./data/processed_data/eDNA/mtdt_2.gpkg", delete_dsn = TRUE)
 
 #------------- Buffer replicates ------------
-# Step 1: Create POINTS from all start and end locations per sample in replicates
-replicate_points <- mtdt_2 %>%
-  filter(replicates != "no") %>%         # remove samples with no replicate
-  mutate(across(starts_with("latitude"), as.numeric),
-         across(starts_with("longitude"), as.numeric)) %>%
-  rowwise() %>%
-  mutate(points = list(tibble(
-    lat = c(latitude_start_DD, latitude_end_DD),
-    lon = c(longitude_start_DD, longitude_end_DD)
-  ))) %>%
-  ungroup() %>%
-  select(replicates, spygen_code, points) %>%
-  unnest(points)
 
-# Step 2: Convert to sf POINT objects
-replicate_points_sf <- st_as_sf(
-  replicate_points,
-  coords = c("lon", "lat"),
-  crs = 4326
-)
-
-plot(st_geometry(replicate_points_sf))
-
-# Step 3: Compute concave hulls for each replicate group
-replicate_polygons <- replicate_sf_points %>%
-  group_by(replicates) %>%
-  group_split() %>%
-  map_dfr(function(df) {
-    hull <- concaveman(df, concavity = 10, length_threshold = 10)
+# Group by replicate and compute concave hulls
+replicates_buffer <- mtdt_2 |>
+  filter(replicates != "no") |>
+  group_split(replicates) |>
+  
+  # Apply concave hull algorithm to each replicate group
+  purrr::map_dfr(function(mtdt_2) {
+    hull <- concaveman::concaveman(mtdt_2, concavity = 10, length_threshold = 10)   # length_threshold : length of the shortest edge in the hull
     tibble(
-      replicates = unique(df$replicates),
-      replicates_wkt_geometry = st_as_text(st_geometry(hull))
+      replicate = unique(mtdt_2$replicates),
+      geometry = st_geometry(hull)
     )
-  })
+  }) |>
+  st_as_sf(crs = 4326)
 
-# Step 4: Extract 'no' replicate samples and assign their own wkt_geometry
-replicate_polygons_no <- mtdt_2 %>%
-  filter(replicates == "no") %>%
-  mutate(replicates_wkt_geometry = st_as_text(wkt_geometry)) %>%
-  select(replicates, spygen_code, replicates_wkt_geometry)
 
-# Step 5: Combine replicate group geometries and singleton geometries
-replicate_geometries <- bind_rows(
-  replicate_polygons,
-  replicate_polygons_no
-)
+# Combine replicates_buffer for replicates != "no" and wkt_geometry for replicates == "no" in col named "replicates_geometry"
+mtdt_3 <- mtdt_2 |>
+  rename(sample_geometry = wkt_geometry) |>
+  rowwise() |>
+  mutate(replicates_geometry = if (replicates != "no") {
+    matched_index <- match(replicates, replicates_buffer$replicate)
+    if (!is.na(matched_index)) {
+      st_as_text(replicates_buffer$geometry[[matched_index]])
+    } else {
+      NA_character_
+    }
+  } else {
+    st_as_text(sample_geometry)
+  }) |>
+  ungroup()
 
-# Step 6: Join replicate_wkt_geometry into mtdt_2
-mtdt_2 <- mtdt_2 %>%
-  left_join(replicate_geometries, by = c("replicates", "spygen_code"))
 
-# Step 7: Plot and export
-replicate_polygons_sf <- mtdt_2 %>%
-  select(replicates, spygen_code, replicates_wkt_geometry) %>%
-  distinct(replicates, replicates_wkt_geometry) %>%
-  filter(!is.na(replicates_wkt_geometry)) %>%
-  mutate(geometry = st_as_sfc(replicates_wkt_geometry, crs = 4326)) %>%
-  st_as_sf()
+# Convert mtdt_3 to non spatial data frame
+mtdt_3 <- st_drop_geometry(mtdt_3)
+
+# Convert mtdt_3 to spatial object with replicates_geometry
+mtdt_3 <- st_as_sf(mtdt_3, wkt = "replicates_geometry", crs = 4326)
+head(mtdt_3$replicates_geometry)
 
 # Plot
-plot(st_geometry(replicate_polygons_sf), main = "Replicate Geometries")
+plot(mtdt_3[1])
 
-# Export
-write_sf(replicate_polygons_sf, "./data/processed_data/data_prep/eDNA/replicate_polygons_sf.gpkg", delete_dsn = TRUE)
+# Clean 
+rm(replicates_buffer)
+
+
+
+
+
+
+
+
+
+
+
+
+#------------- Export ------------
+# Save as gpkg
+mtdt_3$time_start <- as.character(mtdt_3$time_start)
+sf::write_sf(mtdt_3, "./data/processed_data/eDNA/mtdt_3.gpkg", delete_dsn = TRUE)
 
 
 
