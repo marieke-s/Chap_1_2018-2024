@@ -190,95 +190,84 @@ mtdtfull <- mtdtfull %>%
 
 
 #------------- Load IPOCOM ---------------------
-ipocom <- readr::read_delim("./data/raw_data/eDNA/eREF_IPOCOM TRANSECT 2024.csv", delim = ";")
+ipocom <- readr::read_csv("./data/raw_data/eDNA/AB_eREF_IPOCOM TRANSECT 2024_metadatas template.csv")
+
+
+
 
 #------------- Clean IPOCOM ---------------------
-# Coordinates errors 
-if (any(ipocom$N_Transect == "IPOCOM_135")) {
+# Coordinates errors ----
+
+if (any(ipocom$subsite_andromede == "IPOCOM_12")) {
   ipocom <- ipocom %>%
-    mutate(Y_DEBUT = ifelse(N_Transect == "IPOCOM_135", 42.4785833333333, Y_DEBUT))
+    mutate(latitude_start_DD = ifelse(subsite_andromede == "IPOCOM_12", 43.53943333, latitude_start_DD))
 }
-if (any(ipocom$N_Transect == "IPOCOM_13")) {
+
+if (any(ipocom$subsite_andromede == "IPOCOM_13")) {
   ipocom <- ipocom %>%
-    mutate(Y_DEBUT = ifelse(N_Transect == "IPOCOM_13", 43.5057833, Y_DEBUT))
+    mutate(latitude_start_DD = ifelse(subsite_andromede == "IPOCOM_13", 43.5057833, latitude_start_DD))
 }
-if (any(ipocom$N_Transect == "IPOCOM_12")) {
+
+if (any(ipocom$subsite_andromede == "IPOCOM_22")) {
   ipocom <- ipocom %>%
-    mutate(Y_DEBUT = ifelse(N_Transect == "IPOCOM_12", 43.53943333, Y_DEBUT))
+    mutate(longitude_end_DD = ifelse(subsite_andromede == "IPOCOM_22", 6.854, longitude_end_DD))
 }
-if (any(ipocom$N_Transect == "IPOCOM_76")) {
+
+if (any(ipocom$subsite_andromede == "IPOCOM_34")) {
   ipocom <- ipocom %>%
-    mutate(X_FIN = ifelse(N_Transect == "IPOCOM_76", 5.34973333333333, X_FIN))
+    mutate(latitude_start_DD = ifelse(subsite_andromede == "IPOCOM_34", 43.246, latitude_start_DD))
 }
-if (any(ipocom$N_Transect == "IPOCOM_62")) {
+
+if (any(ipocom$subsite_andromede == "IPOCOM_40")) {
+  ipocom <- ipocom %>%
+    mutate(latitude_end_DD = ifelse(subsite_andromede == "IPOCOM_40", 43.148, latitude_end_DD))
+}
+
+if (any(ipocom$subsite_andromede == "IPOCOM_58")) {
+  ipocom <- ipocom %>%
+    mutate(latitude_start_DD = ifelse(subsite_andromede == "IPOCOM_58", 43.068, latitude_start_DD))
+}
+
+if (any(ipocom$subsite_andromede == "IPOCOM_62")) {
   ipocom <- ipocom %>%
     mutate(
-      Y_DEBUT = ifelse(N_Transect == "IPOCOM_62", 43.04214, Y_DEBUT),
-      X_DEBUT = ifelse(N_Transect == "IPOCOM_62", 5.46331, X_DEBUT),
-      Y_FIN = ifelse(N_Transect == "IPOCOM_62", 43.05471, Y_FIN),
-      X_FIN = ifelse(N_Transect == "IPOCOM_62", 5.46201, X_FIN)
+      latitude_start_DD = ifelse(subsite_andromede == "IPOCOM_62", 43.04214, latitude_start_DD),
+      longitude_start_DD = ifelse(subsite_andromede == "IPOCOM_62", 5.46331, longitude_start_DD),
+      latitude_end_DD = ifelse(subsite_andromede == "IPOCOM_62", 43.05471, latitude_end_DD),
+      longitude_end_DD = ifelse(subsite_andromede == "IPOCOM_62", 5.46201, longitude_end_DD)
     )
 }
 
-
-
-#------------- Format IPOCOM to Metadata -----------------
-# Rename ipocom columns to match mtdtfull
-ipocom <- ipocom %>%
-  rename(
-    spygen_code = N_SPYGEN,
-    date = DATE,
-    latitude_start_DD = Y_DEBUT,
-    longitude_start_DD = X_DEBUT,
-    latitude_end_DD = Y_FIN,
-    longitude_end_DD = X_FIN,
-    subsite = N_Transect,
-    time_start = HEURE_DEBUT,
-    duration = TEMPS_FILTRATION,
-    comments = COMMENTAIRE
-  ) 
-
-# Format ipocom date as mtdtfull date
-ipocom$date <- as.Date(ipocom$date, format = "%d/%m/%Y")
-
-# Format duration column 
-ipocom$duration <- as.numeric(ipocom$duration) / 60
-
-# Remove ipocom columns not in mtdtfull
-ipocom <- ipocom %>%
-  select(-c("HEURE_FIN", "Temp"))
-
-# Add missing columns to ipocom with NA
-missing_cols <- setdiff(names(mtdtfull), names(ipocom))
-
-for (col in missing_cols) {
-  ipocom[[col]] <- NA
+if (any(ipocom$subsite_andromede == "IPOCOM_76")) {
+  ipocom <- ipocom %>%
+    mutate(longitude_end_DD = ifelse(subsite_andromede == "IPOCOM_76", 5.34973333333333, longitude_end_DD))
 }
 
-# For column 'country' set "France" for all rows
-ipocom$country <- "France"
+if (any(ipocom$subsite_andromede == "IPOCOM_82")) {
+  ipocom <- ipocom %>%
+    mutate(latitude_end_DD = ifelse(subsite_andromede == "IPOCOM_82", 43.317, latitude_end_DD))
+}
 
-# For column 'pool' set "no" for all rows
-ipocom$pool <- "no"
+if (any(ipocom$subsite_andromede == "IPOCOM_135")) {
+  ipocom <- ipocom %>%
+    mutate(latitude_start_DD = ifelse(subsite_andromede == "IPOCOM_135", 42.4785833333333, latitude_start_DD))
+}
 
-# Fill replicates column
+
+# Format ipocom to match mtdtfull ----
 ipocom <- ipocom %>%
-  group_by(subsite) %>%
-  mutate(replicates = paste(sort(spygen_code), collapse = "/")) %>%
-  ungroup()
+  rename(BiodivMed2023 = BiodivMed)
 
-# Reorder ipocom columns to match mtdtfull
-ipocom <- ipocom[, names(mtdtfull)]
+ipocom$date <- as.Date(ipocom$date, format = "%d/%m/%Y")
 
-# Component 
-ipocom <- ipocom %>%
-  mutate(component = ifelse(spygen_code == "SPY2401568", "offshore", component))
+# Convert hms/difftime to numeric seconds
+ipocom$duration <- as.numeric(ipocom$duration, units = "secs")
 
-ipocom <- ipocom %>%
-  mutate(component = ifelse(spygen_code == "SPY2401569", "offshore", component))
+# Convert to minutes if mtdtfull uses minutes
+ipocom$duration <- ipocom$duration / 60
 
 
-rm(col, missing_cols)
+
 
 
 
@@ -287,6 +276,8 @@ rm(col, missing_cols)
 
 # Combine the two datasets
 mtdtcomb <- bind_rows(mtdtfull, ipocom)
+
+# Combine the two datasets and keep only the columns present in mtdtfull filling with NA if necessary
 
 # Clean up
 rm(mtdtfull, ipocom)
@@ -459,7 +450,6 @@ mtdt_3 <- st_drop_geometry(mtdt_3)
 
 # Convert mtdt_3 to spatial object with replicates_geometry
 mtdt_3 <- st_as_sf(mtdt_3, wkt = "replicates_geometry", crs = 4326)
-head(mtdt_3$replicates_geometry)
 
 # Plot
 plot(mtdt_3[1])
@@ -482,6 +472,92 @@ rm(replicates_buffer)
 # Save as gpkg
 mtdt_3$time_start <- as.character(mtdt_3$time_start)
 sf::write_sf(mtdt_3, "./data/processed_data/eDNA/mtdt_3.gpkg", delete_dsn = TRUE)
+
+#------------- Mtdt_replicates -----------------
+# Explanation : make a simplified dataset grouped by replicates for NCDF extraction 
+
+
+# Prepare dataset ----
+# Keep "spygen_code", "replicates", "date", "time_start", country", "region", "site", "component", "replicates_geometry", "depth_sampling"
+mtdt_4 <- mtdt_3 %>%                
+  select(spygen_code, replicates, date, time_start, country, region, replicates_geometry, depth_sampling) 
+
+# Replace time_start = NULL by 7:00
+mtdt_4$time_start[is.na(mtdt_4$time_start)] <- "07:00:00"
+
+# Check if any mtdt_4$time_start is NA
+any(is.na(mtdt_4$time_start))
+
+# Replace replicates = "no" by "spygen_code"
+mtdt_4$replicates[mtdt_4$replicates == "no"] <- mtdt_4$spygen_code[mtdt_4$replicates == "no"]
+
+# Remove spygne_code
+mtdt_4 <- mtdt_4 %>%                
+  select(-spygen_code)
+
+
+
+
+# Group by replicates ----
+# 1 ----
+mtdt_4 <- mtdt_4 %>%                
+  select(replicates, date, time_start, country, region, replicates_geometry, depth_sampling) %>%
+  group_by(replicates) %>%
+  summarise(
+    date = first(date),
+    time_start = min(time_start, na.rm = TRUE), # time_start = keep earliest time_start
+    depth_sampling =  first(na.omit(depth_sampling)),
+    country = first(country),
+    region = first(region),
+    replicates_geometry = first(replicates_geometry),
+    .groups = "drop"
+  )
+
+any(is.na(mtdt_4$date))
+
+
+# More complex to account for diff depth_sampling  ----
+mtdt_4 <- mtdt_4 %>%
+  select(replicates, date, time_start, country, region, replicates_geometry, depth_sampling) %>%
+  group_by(replicates) %>%
+  summarise(
+    date = first(date),
+    time_start = min(time_start, na.rm = TRUE),
+    depth_sampling = if (n_distinct(na.omit(depth_sampling)) == 1) {
+      first(na.omit(depth_sampling))
+    } else {
+      print(replicates)
+      NA_real_
+    },
+    depth_sampling_mean = if (n_distinct(na.omit(depth_sampling)) > 1) {
+      mean(depth_sampling, na.rm = TRUE)
+    } else {
+      NA_real_
+    },
+    depth_sampling_sd = if (n_distinct(na.omit(depth_sampling)) > 1) {
+      sd(depth_sampling, na.rm = TRUE)
+    } else {
+      NA_real_
+    },
+    country = first(country),
+    region = first(region),
+    replicates_geometry = first(replicates_geometry),
+    .groups = "drop"
+  )
+
+
+# Export date and time ----
+# For Gaétan (aggregation of MARS3D data) and Martin (extraction Canyon)
+# Sent on 24/07/2025
+mtdt_4 %>%
+  select(replicates, date, time_start) %>%
+  write_csv("./data/processed_data/eDNA/mtdt_4_date_time.csv")
+
+
+
+
+
+
 
 
 
