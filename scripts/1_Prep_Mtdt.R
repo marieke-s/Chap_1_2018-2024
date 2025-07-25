@@ -254,6 +254,21 @@ if (any(ipocom$subsite_andromede == "IPOCOM_135")) {
 }
 
 
+# Depth_sampling missing ----
+# Mail Adele Barroil 25/07/25 : "Pour ces deux transects on a eu un problème avec la sonde CTD donc pas de données. Mais pour SPY2401554/SPY2401555 ca devait être entre 20 et 25 m et pour SPY2401674/SPY2401675 vers 10m"
+
+if (any(ipocom$replicates == "SPY2401554/SPY2401555")) {
+  ipocom <- ipocom %>%
+    mutate(depth_sampling = ifelse(replicates == "SPY2401554/SPY2401555", 22.5, depth_sampling))
+}
+
+if (any(ipocom$replicates == "SPY2401674/SPY2401675")) {
+  ipocom <- ipocom %>%
+    mutate(depth_sampling = ifelse(replicates == "SPY2401674/SPY2401675", 10, depth_sampling))
+}
+
+
+
 # Format ipocom to match mtdtfull ----
 ipocom <- ipocom %>%
   rename(BiodivMed2023 = BiodivMed)
@@ -473,10 +488,11 @@ rm(replicates_buffer)
 mtdt_3$time_start <- as.character(mtdt_3$time_start)
 sf::write_sf(mtdt_3, "./data/processed_data/eDNA/mtdt_3.gpkg", delete_dsn = TRUE)
 
-#------------- Mtdt_replicates -----------------
+#------------- Group Mtdt by replicates -----------------
 # Explanation : make a simplified dataset grouped by replicates for NCDF extraction 
 
 
+# --- Simplified mtdt for MARS3D extraction ----
 # Prepare dataset ----
 # Keep "spygen_code", "replicates", "date", "time_start", country", "region", "site", "component", "replicates_geometry", "depth_sampling"
 mtdt_4 <- mtdt_3 %>%                
@@ -491,7 +507,7 @@ any(is.na(mtdt_4$time_start))
 # Replace replicates = "no" by "spygen_code"
 mtdt_4$replicates[mtdt_4$replicates == "no"] <- mtdt_4$spygen_code[mtdt_4$replicates == "no"]
 
-# Remove spygne_code
+# Remove spygen_code
 mtdt_4 <- mtdt_4 %>%                
   select(-spygen_code)
 
@@ -499,46 +515,22 @@ mtdt_4 <- mtdt_4 %>%
 
 
 # Group by replicates ----
-# 1 ----
-mtdt_4 <- mtdt_4 %>%                
-  select(replicates, date, time_start, country, region, replicates_geometry, depth_sampling) %>%
-  group_by(replicates) %>%
-  summarise(
-    date = first(date),
-    time_start = min(time_start, na.rm = TRUE), # time_start = keep earliest time_start
-    depth_sampling =  first(na.omit(depth_sampling)),
-    country = first(country),
-    region = first(region),
-    replicates_geometry = first(replicates_geometry),
-    .groups = "drop"
-  )
-
-any(is.na(mtdt_4$date))
-
-
-# More complex to account for diff depth_sampling  ----
+# When diff depth_sampling --> prints the rows and make the mean across depth_sampling 
 mtdt_4 <- mtdt_4 %>%
   select(replicates, date, time_start, country, region, replicates_geometry, depth_sampling) %>%
   group_by(replicates) %>%
   summarise(
     date = first(date),
     time_start = min(time_start, na.rm = TRUE),
+    
+    # Use first value if all non-NA values are identical; otherwise compute mean
     depth_sampling = if (n_distinct(na.omit(depth_sampling)) == 1) {
       first(na.omit(depth_sampling))
     } else {
-      print(replicates)
-      NA_real_
-    },
-    depth_sampling_mean = if (n_distinct(na.omit(depth_sampling)) > 1) {
+      print(cur_data_all())  # This prints the full data for the current group
       mean(depth_sampling, na.rm = TRUE)
-    } else {
-      NA_real_
     },
-    depth_sampling_sd = if (n_distinct(na.omit(depth_sampling)) > 1) {
-      sd(depth_sampling, na.rm = TRUE)
-    } else {
-      NA_real_
-    },
+    
     country = first(country),
     region = first(region),
     replicates_geometry = first(replicates_geometry),
@@ -546,8 +538,11 @@ mtdt_4 <- mtdt_4 %>%
   )
 
 
-# Export date and time ----
-# For Gaétan (aggregation of MARS3D data) and Martin (extraction Canyon)
+
+
+
+# Export ----
+# Date and time for Gaétan (aggregation of MARS3D data) and Martin (extraction Canyon) 
 # Sent on 24/07/2025
 mtdt_4 %>%
   select(replicates, date, time_start) %>%
@@ -555,6 +550,113 @@ mtdt_4 %>%
 
 
 
+
+
+
+
+
+
+
+# Geom date, time, depth_sampling for Paule (MARS3D extraction) 
+st_write(mtdt_4, "./data/processed_data/eDNA/mtdt_4.gpkg", delete_dsn = TRUE)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# --- Complete mtdt extraction ----
+# Prepare dataset ----
+mtdt_5 <- mtdt_3 
+
+# Replace time_start = NULL by 7:00
+mtdt_5$time_start[is.na(mtdt_5$time_start)] <- "07:00:00"
+
+# Check if any mtdt_4$time_start is NA
+any(is.na(mtdt_5$time_start))
+
+# Replace replicates = "no" by "spygen_code"
+mtdt_5$replicates[mtdt_5$replicates == "no"] <- mtdt_5$spygen_code[mtdt_5$replicates == "no"]
+
+# Remove spygen_code
+mtdt_5 <- mtdt_5 %>%                
+  select(-spygen_code)
+
+
+
+
+# Group by replicates ----
+mtdt_5 <- mtdt_5 %>%
+  select(-c("latitude_start_DD", "longitude_start_DD", 
+                    "latitude_end_DD", "longitude_end_DD", 
+                    "pool", "subsite_andromede", "max_shom_bathy", "combined_bathy", "mpa_dist"))
+
+
+mtdt_5 <- mtdt_5 %>%
+  group_by(replicates) %>%
+  summarise(
+    date = first(na.omit(date)),
+    time_start = min(time_start, na.rm = TRUE),
+    
+    # Use first value if all non-NA values are identical; otherwise compute mean
+    depth_sampling = if (n_distinct(na.omit(depth_sampling)) == 1) {
+      first(na.omit(depth_sampling))
+    } else {
+      print(cur_data_all())  # This prints the full data for the current group
+      mean(depth_sampling, na.rm = TRUE)
+    },
+    
+    # Use first value if all non-NA values are identical; otherwise take the first non-NA value
+    depth_seafloor = if(n_distinct(na.omit(depth_seafloor)) == 1) {
+      first(na.omit(depth_seafloor))
+    } else {
+      print(cur_data_all())  # This prints the full data for the current group
+      first(na.omit(depth_seafloor))
+    },
+    
+    lockdown = first(na.omit(lockdown)),
+    BiodivMed2023 = first(na.omit(BiodivMed2023)),
+    method = first(na.omit(method)),
+    country = first(na.omit(country)),
+    region = first(na.omit(region)),
+    site = first(na.omit(site)),
+    subsite = first(na.omit(subsite)),
+    component = first(na.omit(component)),
+    habitat = first(na.omit(habitat)),
+    protection = first(na.omit(protection)),
+    mpa_name = first(na.omit(mpa_name)),
+    replicates_geometry = first(na.omit(replicates_geometry)),
+    Tele01 = first(na.omit(Tele01)),
+    Pleo = first(na.omit(Pleo)),  
+    Mamm01 = first(na.omit(Mamm01)),
+    Vert01 = first(na.omit(Vert01)),
+    X16s_Metazoa = first(na.omit(X16s_Metazoa)),
+    Bact02 = first(na.omit(Bact02)), 
+    Euka02 = first(na.omit(Euka02)),
+    
+  # if comments differ combine them by copy pasting them with their associated replicates id :
+    comments = paste(unique(na.omit(comments)), collapse = "; "),  # Combine unique comments with a semicolon
+    .groups = "drop"
+  )
 
 
 
