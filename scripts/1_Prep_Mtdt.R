@@ -3,10 +3,11 @@
 # This script aims to 
 #     - make a subset of the full eDNA metadata file to keep samples needed for our study
 #     - pool sampling replicates together within a single point
-#     - make a buffer around the pooled sampling points
+#     - make a buffer around the pooled replicates
+#     - group the metadata by replicates
 
 
-# The data subset resulting from this script will be used for predictors extraction (xxxx.R) and filtering the occurence dataset (xxx.R)
+# The data subset resulting from this script will be used for predictors extraction (2_Extraction_Vect_and_Rasters.R) and filtering the occurence dataset (xxx.R)
 
 # Data source: 
 # A csv file of the medata of mediterranean eDNA samplings in 2018-2024 produced by Laure Velez and Amandine Avouac (amandine.avouac@umontpellier.fr).
@@ -136,7 +137,7 @@ rm(replicate_groups, standardize_replicates)
 
 # Remove "...1" column
 mtdtfull <- mtdtfull %>%
-  select(-contains("...1"))
+  dplyr::select(-contains("...1"))
 
 
 
@@ -584,7 +585,7 @@ st_write(mtdt_4, "./data/processed_data/eDNA/mtdt_4.gpkg", delete_dsn = TRUE)
 
 
 
-# --- Complete mtdt extraction ----
+# --- Complete mtdt ----
 # Prepare dataset ----
 mtdt_5 <- mtdt_3 
 
@@ -599,14 +600,99 @@ mtdt_5$replicates[mtdt_5$replicates == "no"] <- mtdt_5$spygen_code[mtdt_5$replic
 
 # Remove spygen_code
 mtdt_5 <- mtdt_5 %>%                
-  select(-spygen_code)
+  dplyr::select(-spygen_code)
+
+
+
+
+# Check homogeneity of replicates ----
+# Check if all replicates have the same values for the following columns:
+col <- "duration"
+
+# Print the rows with different values for the column
+mtdt_5 %>%
+  st_drop_geometry() %>%
+  group_by(replicates) %>%
+  summarise(
+    n_distinct_values = n_distinct(!!sym(col), na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(n_distinct_values > 1) %>%
+  print(n = 100)
+
+
+rm(col)
+
+# Summarise the different values for rows identified above
+mtdt_5 %>%
+  st_drop_geometry() %>%
+  group_by(replicates) %>%
+  summarise(
+    different_values = paste(unique(!!sym(col)), collapse = ", "),
+    .groups = "drop"
+  ) %>%
+  filter(different_values != "") %>%
+  print(n = 100)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+library(dplyr)
+
+col <- "duration"
+
+# Step 1: Identify groups with >1 distinct non-NA value
+replicate_with_diff_vals <- mtdt_5 %>%
+  st_drop_geometry() %>%
+  group_by(replicates) %>%
+  summarise(
+    n_distinct_values = n_distinct(!!sym(col), na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(n_distinct_values > 1)
+
+# Step 2: Compute summary statistics only for those groups
+summary_df <- mtdt_5 %>%
+  st_drop_geometry() %>%
+  filter(replicates %in% replicate_with_diff_vals$replicates) %>%
+  group_by(replicates) %>%
+  summarise(
+    values = list(na.omit(unique(!!sym(col)))),  # get non-NA unique values
+    .groups = "drop"
+  ) %>%
+  mutate(
+    distinct_values_str = sapply(values, function(x) paste(x, collapse = ";")),
+    range = sapply(values, function(x) if(length(x) > 0) max(x) - min(x) else NA),
+    mean = sapply(values, function(x) if(length(x) > 0) mean(x) else NA),
+    sd = sapply(values, function(x) if(length(x) > 1) sd(x) else NA),
+    min = sapply(values, function(x) if(length(x) > 0) min(x) else NA),
+    max = sapply(values, function(x) if(length(x) > 0) max(x) else NA)
+  ) %>%
+  dplyr::select(replicates, distinct_values_str, range, mean, sd, min, max)
+
+# Step 3: Print the result
+print(summary_df, n = 100)
 
 
 
 
 # Group by replicates ----
 mtdt_5 <- mtdt_5 %>%
-  select(-c("latitude_start_DD", "longitude_start_DD", 
+  dplyr::select(-c("latitude_start_DD", "longitude_start_DD", 
                     "latitude_end_DD", "longitude_end_DD", 
                     "pool", "subsite_andromede", "max_shom_bathy", "combined_bathy", "mpa_dist"))
 
@@ -652,11 +738,34 @@ mtdt_5 <- mtdt_5 %>%
     X16s_Metazoa = first(na.omit(X16s_Metazoa)),
     Bact02 = first(na.omit(Bact02)), 
     Euka02 = first(na.omit(Euka02)),
+    estimated_volume = first(na.omit(estimated_volume)),
     
   # if comments differ combine them by copy pasting them with their associated replicates id :
     comments = paste(unique(na.omit(comments)), collapse = "; "),  # Combine unique comments with a semicolon
     .groups = "drop"
   )
+
+
+# Order mtdt_5 columns as mtdt_3
+names_mtdt_3 <- colnames(mtdt_3)
+
+# Check if mtdt_3 and mtdt_5 have the same columns and print columns that are only in one of the two datasets
+cols_mtdt_3 <- colnames(mtdt_3)
+cols_mtdt_5 <- colnames(mtdt_5)
+only_in_mtdt_3 <- setdiff(cols_mtdt_3, cols_mtdt_5)
+only_in_mtdt_5 <- setdiff(cols_mtdt_5, cols_mtdt_3)
+print(paste("Columns only in mtdt_3:", paste(only_in_mtdt_3, collapse = ", ")))
+print(paste("Columns only in mtdt_5:", paste(only_in_mtdt_5, collapse = ", ")))
+
+
+
+
+
+# Export ----
+# Save as gpkg
+mtdt_5$time_start <- as.character(mtdt_5$time_start)
+sf::write_sf(mtdt_5, "./data/processed_data/eDNA/mtdt_5.gpkg", delete_dsn = TRUE)
+
 
 
 
