@@ -218,7 +218,8 @@ if (any(ipocom$subsite_andromede == "IPOCOM_12")) {
 
 if (any(ipocom$subsite_andromede == "IPOCOM_13")) {
   ipocom <- ipocom %>%
-    mutate(latitude_start_DD = ifelse(subsite_andromede == "IPOCOM_13", 43.5057833, latitude_start_DD))
+    mutate(latitude_start_DD = ifelse(subsite_andromede == "IPOCOM_13", 43.54591, latitude_start_DD), 
+           longitude_start_DD = ifelse(subsite_andromede == "IPOCOM_13", 7.08869, longitude_start_DD))
 }
 
 if (any(ipocom$subsite_andromede == "IPOCOM_22")) {
@@ -365,7 +366,25 @@ mtdt_1 <- mtdtcomb %>%
       )
   )
 
+# Remove SPY200808/SPY200809 because it is in a harbour 
+mtdt_1 <- mtdt_1 %>%
+  filter(!(replicates == "SPY200808/SPY200809"))
+
+
+
+# Remove SPY2401065/SPY2401066 because it is in a lagoon
+mtdt_1 <- mtdt_1 %>%
+  filter(!(replicates == "SPY2401065/SPY2401066"))
+
 rm(valid_replicates)
+
+
+
+
+
+
+
+
 
 #------------- Extract bathymetry ---------------------
 # Explanation: 

@@ -40,7 +40,7 @@ library(stringr)
 buff <- st_read("./data/processed_data/eDNA/mtdt_5.gpkg")
 
 #------------- Vector data ----------------
-############## Sampling effort ############
+######################## Sampling effort ############
 # Explanation : the aim is to compute variables that represent the sampling effort in each replicate group : 
 # 1. Total volume filtered in the replicate group = estimated_volume_total -->  Already exists
 # 2. Nb of PCR replicates = 12 * nb of pooled samples + 12 nb of unpooled samples --> computed here 
@@ -88,19 +88,105 @@ str(buff$area_km2)
 
 
 
-# Ensure area_km2 is numeric (not units) for plotting
-buff$area_km2_num <- as.numeric(units::set_units(buff$area_km2, km^2))
+# [Optional Plot] ----
 
-# filter if needed
-dt <- buff %>%
-  filter(area_km2_num > 5)  # Adjust threshold as needed
+# # Ensure area_km2 is numeric (not units) for plotting
+# buff$area_km2_num <- as.numeric(units::set_units(buff$area_km2, km^2))
+# 
+# # filter if needed
+# dt <- buff %>%
+#   filter(area_km2_num > 5)  # Adjust threshold as needed
+# 
+# ggplot(dt) +
+#   geom_sf(aes(fill = area_km2_num), color = NA) +
+#   viridis::scale_fill_viridis(name = "Area (km²)", option = "plasma", direction = -1) +
+#   theme_minimal() +
+#   labs(title = "Buffer Area Map", fill = "km²")
 
-ggplot(dt) +
-  geom_sf(aes(fill = area_km2_num), color = NA) +
-  viridis::scale_fill_viridis(name = "Area (km²)", option = "plasma", direction = -1) +
-  theme_minimal() +
-  labs(title = "Buffer Area Map", fill = "km²")
 
-# square root of area
-sqrt(7)
-0.5*0.5
+######################## Distance to shore ############
+# Explanation : distance to shore is computed from the coastline shapefile using 'Distance_shore.ipynb'.
+# Important methodological considerations : 
+# Distance to shore is computed from replicates group's buffer centroids.
+# When a centroid is on land (which happened for ~ 67/792 centroids) we set the distance to shore to 1 meter because it was actually not sampled on land (obviously) and it ended up there only because we simplified transects into straight lines between transect start and end points.
+
+
+
+# Load data after dist_shore computed  ----
+buff <- st_read("./data/processed_data/predictors/mtdt_5_dist-shore.gpkg")
+######################## Vessel presence (Luka) ############
+######################## MPA : inside-outside reserve ####
+# Data :
+# The 'protection' variable is : 0 = not in any MPA, 1 = in MPA not fully protected, 2 = in fully protected MPA.
+# The methodological method used is : Taking the highest protection level across all the MPA legislation crossed by start and end points of the transects.
+# From Marie Orblin and Lola Romant (MARBEC)
+# Here we keep only 1 = fully protected areas and 0 = the rest. Then we match this data with our df.
+
+# Load data
+mpa <- read.csv("data/raw_data/predictors/MPA/MetaData_AMP.csv")
+colnames(mpa)[1] <- "spygen_code"
+
+# Keep only the rows with in df 
+mpa <- mpa[mpa$spygen_code %in% mtdt$spygen_code, ] |> 
+  dplyr::select(spygen_code, protection)
+
+# Bind mpa$protection to df
+df <- df
+df <- merge(df, mpa, by = "spygen_code")
+
+# Change protection values 2 --> 1, 1 --> 0
+df$reserve <- ifelse(df$protection == 2, 1, 0)
+
+# Remove protection column
+df <- df |> dplyr::select(-protection)
+
+
+
+
+######################## MPA : protection level ####
+# Data :  
+# The 'Index_MPA_num' variable is : 0-5 according to protection levels defined in the MPA Guide (Grorud-Colvert et al. 2021)
+# The methodological method used is : Taking the highest protection level across all the MPA legislation crossed by start and end points of the transects.
+# From Marie Orblin and Lola Romant (MARBEC)
+# Here we match this data with our df. 
+
+# Load data
+mpa <- read.csv("data/raw_data/predictors/MPA/MetaData_AMP.csv")
+colnames(mpa)[1] <- "spygen_code"
+
+# Keep only the rows with in df 
+mpa <- mpa[mpa$spygen_code %in% mtdt$spygen_code, ] |> 
+  dplyr::select(spygen_code, Index_MPA_num)
+
+# Bind mpa$Index_MPA_num to df
+df <- df
+df <- merge(df, mpa, by = "spygen_code")
+
+
+######################## MPA : distance to reserve ####
+# Data :
+# The distance to the nearest reserve is computed by Marie Orblin (cf "./analyses/archived/Sent_scripts/in_out_amp24_Marie_Orblin.R". The computed distance is the minimul distance between the centroid of a reserve (fully protected MPA) and the start point of the transect.
+# Here we match this data with our df. 
+
+
+# Load data
+mpa <- read.csv("data/raw_data/predictors/MPA/MetaData_AMP.csv")
+colnames(mpa)[1] <- "spygen_code"
+
+# df <- read.csv( "./data/processed_data/data_prep/Med_TOT_2023_FR_coastal_sd30m_noVH4_Litto3D_balanced2rep_pooled_rare5_coord_P0O0.csv")
+
+# Keep only the rows with in df 
+mpa <- mpa[mpa$spygen_code %in% df$spygen_code, ] |> 
+  dplyr::select(spygen_code, dist_min_fully_protected_MPA)
+
+# Bind mpa$dist_min_fully_protected_MPA to df
+df <- merge(df, mpa, by = "spygen_code")
+
+# Save df
+df_3 <- df
+write.csv(df, "./data/processed_data/data_prep/Med_TOT_2023_FR_coastal_sd30m_noVH4_Litto3D_balanced2rep_pooled_rare5_coord_dist_MPA_P0O0.csv")
+
+
+
+
+
