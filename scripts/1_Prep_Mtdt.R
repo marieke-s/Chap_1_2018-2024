@@ -190,6 +190,18 @@ mtdtfull <- mtdtfull %>%
 
 
 
+# estimated_volume
+# Explanation : pump filter seawater at 1L/min, thus estimated_volume can be retrieved using duration 
+
+mtdtfull <- mtdtfull %>%
+  mutate(estimated_volume = ifelse(is.na(estimated_volume) & !is.na(duration), duration, estimated_volume)) 
+
+# 2 samples (SPY211147_SPY211148) have both duration and estimated_volume = NA. For now, we keep them to NA.
+
+
+
+
+
 #------------- Load IPOCOM ---------------------
 ipocom <- readr::read_csv("./data/raw_data/eDNA/AB_eREF_IPOCOM TRANSECT 2024_metadatas template.csv")
 
@@ -232,21 +244,32 @@ if (any(ipocom$subsite_andromede == "IPOCOM_58")) {
 if (any(ipocom$subsite_andromede == "IPOCOM_62")) {
   ipocom <- ipocom %>%
     mutate(
-      latitude_start_DD = ifelse(subsite_andromede == "IPOCOM_62", 43.04214, latitude_start_DD),
-      longitude_start_DD = ifelse(subsite_andromede == "IPOCOM_62", 5.46331, longitude_start_DD),
-      latitude_end_DD = ifelse(subsite_andromede == "IPOCOM_62", 43.05471, latitude_end_DD),
-      longitude_end_DD = ifelse(subsite_andromede == "IPOCOM_62", 5.46201, longitude_end_DD)
+      latitude_start_DD = ifelse(subsite_andromede == "IPOCOM_62", 43.0702333333333, latitude_start_DD),
+      longitude_start_DD = ifelse(subsite_andromede == "IPOCOM_62", 5.77218333333333, longitude_start_DD),
+      latitude_end_DD = ifelse(subsite_andromede == "IPOCOM_62", 43.0908, latitude_end_DD),
+      longitude_end_DD = ifelse(subsite_andromede == "IPOCOM_62", 5.7704, longitude_end_DD)
     )
 }
 
 if (any(ipocom$subsite_andromede == "IPOCOM_76")) {
   ipocom <- ipocom %>%
-    mutate(longitude_end_DD = ifelse(subsite_andromede == "IPOCOM_76", 5.34973333333333, longitude_end_DD))
+    mutate(longitude_end_DD = ifelse(subsite_andromede == "IPOCOM_76", 5.2837, longitude_end_DD), 
+           latitude_end_DD = ifelse(subsite_andromede == "IPOCOM_76", 43.2586, latitude_end_DD)
+           
+           
+           )
 }
 
 if (any(ipocom$subsite_andromede == "IPOCOM_82")) {
   ipocom <- ipocom %>%
     mutate(latitude_end_DD = ifelse(subsite_andromede == "IPOCOM_82", 43.317, latitude_end_DD))
+}
+
+if (any(ipocom$subsite_andromede == "IPOCOM_111")) {
+  ipocom <- ipocom %>%
+    mutate(
+      latitude_start_DD = ifelse(subsite_andromede == "IPOCOM_111", 43.3705166666667, latitude_start_DD),
+      longitude_start_DD = ifelse(subsite_andromede == "IPOCOM_111", 3.66183333333333, longitude_start_DD))
 }
 
 if (any(ipocom$subsite_andromede == "IPOCOM_135")) {
@@ -497,7 +520,7 @@ sf::write_sf(mtdt_3, "./data/processed_data/eDNA/mtdt_3.gpkg", delete_dsn = TRUE
 # Prepare dataset ----
 # Keep "spygen_code", "replicates", "date", "time_start", country", "region", "site", "component", "replicates_geometry", "depth_sampling"
 mtdt_4 <- mtdt_3 %>%                
-  select(spygen_code, replicates, date, time_start, country, region, replicates_geometry, depth_sampling) 
+  dplyr::select(spygen_code, replicates, date, time_start, country, region, replicates_geometry, depth_sampling) 
 
 # Replace time_start = NULL by 7:00
 mtdt_4$time_start[is.na(mtdt_4$time_start)] <- "07:00:00"
@@ -510,7 +533,7 @@ mtdt_4$replicates[mtdt_4$replicates == "no"] <- mtdt_4$spygen_code[mtdt_4$replic
 
 # Remove spygen_code
 mtdt_4 <- mtdt_4 %>%                
-  select(-spygen_code)
+  dplyr::select(-spygen_code)
 
 
 
@@ -518,7 +541,7 @@ mtdt_4 <- mtdt_4 %>%
 # Group by replicates ----
 # When diff depth_sampling --> prints the rows and make the mean across depth_sampling 
 mtdt_4 <- mtdt_4 %>%
-  select(replicates, date, time_start, country, region, replicates_geometry, depth_sampling) %>%
+  dplyr::select(replicates, date, time_start, country, region, replicates_geometry, depth_sampling) %>%
   group_by(replicates) %>%
   summarise(
     date = first(date),
@@ -546,7 +569,7 @@ mtdt_4 <- mtdt_4 %>%
 # Date and time for Gaétan (aggregation of MARS3D data) and Martin (extraction Canyon) 
 # Sent on 24/07/2025
 mtdt_4 %>%
-  select(replicates, date, time_start) %>%
+  dplyr::select(replicates, date, time_start) %>%
   write_csv("./data/processed_data/eDNA/mtdt_4_date_time.csv")
 
 
@@ -607,53 +630,7 @@ mtdt_5 <- mtdt_5 %>%
 
 # Check homogeneity of replicates ----
 # Check if all replicates have the same values for the following columns:
-col <- "duration"
-
-# Print the rows with different values for the column
-mtdt_5 %>%
-  st_drop_geometry() %>%
-  group_by(replicates) %>%
-  summarise(
-    n_distinct_values = n_distinct(!!sym(col), na.rm = TRUE),
-    .groups = "drop"
-  ) %>%
-  filter(n_distinct_values > 1) %>%
-  print(n = 100)
-
-
-rm(col)
-
-# Summarise the different values for rows identified above
-mtdt_5 %>%
-  st_drop_geometry() %>%
-  group_by(replicates) %>%
-  summarise(
-    different_values = paste(unique(!!sym(col)), collapse = ", "),
-    .groups = "drop"
-  ) %>%
-  filter(different_values != "") %>%
-  print(n = 100)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-library(dplyr)
-
-col <- "duration"
+col <- "estimated_volume"
 
 # Step 1: Identify groups with >1 distinct non-NA value
 replicate_with_diff_vals <- mtdt_5 %>%
@@ -687,7 +664,8 @@ summary_df <- mtdt_5 %>%
 # Step 3: Print the result
 print(summary_df, n = 100)
 
-
+# Clean 
+rm(replicate_with_diff_vals, summary_df, col)
 
 
 # Group by replicates ----
@@ -707,7 +685,7 @@ mtdt_5 <- mtdt_5 %>%
     depth_sampling = if (n_distinct(na.omit(depth_sampling)) == 1) {
       first(na.omit(depth_sampling))
     } else {
-      print(cur_data_all())  # This prints the full data for the current group
+      #print(cur_data_all())  # This prints the full data for the current group
       mean(depth_sampling, na.rm = TRUE)
     },
     
@@ -715,7 +693,7 @@ mtdt_5 <- mtdt_5 %>%
     depth_seafloor = if(n_distinct(na.omit(depth_seafloor)) == 1) {
       first(na.omit(depth_seafloor))
     } else {
-      print(cur_data_all())  # This prints the full data for the current group
+      #print(cur_data_all())  # This prints the full data for the current group
       first(na.omit(depth_seafloor))
     },
     
@@ -738,7 +716,9 @@ mtdt_5 <- mtdt_5 %>%
     X16s_Metazoa = first(na.omit(X16s_Metazoa)),
     Bact02 = first(na.omit(Bact02)), 
     Euka02 = first(na.omit(Euka02)),
-    estimated_volume = first(na.omit(estimated_volume)),
+    estimated_volume_total = sum(na.omit(estimated_volume)),
+    duration_total = sum(na.omit(duration))
+,
     
   # if comments differ combine them by copy pasting them with their associated replicates id :
     comments = paste(unique(na.omit(comments)), collapse = "; "),  # Combine unique comments with a semicolon
@@ -746,8 +726,6 @@ mtdt_5 <- mtdt_5 %>%
   )
 
 
-# Order mtdt_5 columns as mtdt_3
-names_mtdt_3 <- colnames(mtdt_3)
 
 # Check if mtdt_3 and mtdt_5 have the same columns and print columns that are only in one of the two datasets
 cols_mtdt_3 <- colnames(mtdt_3)
@@ -757,7 +735,8 @@ only_in_mtdt_5 <- setdiff(cols_mtdt_5, cols_mtdt_3)
 print(paste("Columns only in mtdt_3:", paste(only_in_mtdt_3, collapse = ", ")))
 print(paste("Columns only in mtdt_5:", paste(only_in_mtdt_5, collapse = ", ")))
 
-
+# Clean 
+rm(cols_mtdt_3, cols_mtdt_5, only_in_mtdt_3, only_in_mtdt_5)
 
 
 
