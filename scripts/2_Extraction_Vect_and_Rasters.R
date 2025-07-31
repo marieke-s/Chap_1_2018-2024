@@ -34,13 +34,25 @@ library(stringr)
 
 
 
+# Load functions
+source("./utils/Fct_Data-Prep.R")
+
+#------------- VECTOR DATA ----------------
+
+############## Distance to shore ############
+# Explanation : distance to shore is computed from the coastline shapefile using '2.1_Distance_shore.py'.
+# Important methodological considerations : 
+# Distance to shore is computed from replicates group's buffer centroids.
+# When a centroid is on land (which happened for ~ 67/792 centroids) we set the distance to shore to 1 meter because it was actually not sampled on land (obviously) and it ended up there only because we simplified transects into straight lines between transect start and end points.
+
+# Run 2.1_Distance_shore.py ----
+# Basic bash call
+system("python3 ./scripts/2.1_Distance_shore.py")
 
 
-#------------- Load mtdt ------------------ 
-buff <- st_read("./data/processed_data/eDNA/mtdt_5.gpkg")
-
-#------------- Vector data ----------------
-######################## Sampling effort ############
+# Load buff with dist_shore  ----
+buff <- st_read("./data/processed_data/predictors/mtdt_5_dist-shore.gpkg")
+############## Sampling effort ############
 # Explanation : the aim is to compute variables that represent the sampling effort in each replicate group : 
 # 1. Total volume filtered in the replicate group = estimated_volume_total -->  Already exists
 # 2. Nb of PCR replicates = 12 * nb of pooled samples + 12 nb of unpooled samples --> computed here 
@@ -82,111 +94,464 @@ buff <- st_transform(buff, crs = 2154)
 buff$area_km2 <- st_area(buff) / 1e6  # Convert from m^2 to km^2
 buff$area_km2 <- units::set_units(st_area(buff), km^2)
 
+############## MPA : in or out reserve #############
+# Explanation : variable that states whether or not the replicates were done within a fully protected MPA (ie a reserve).
+
+# MPA data used : protectionMed_fr_modif.gpkg made by Lola Romant during her internship. She assigned protection levels to the French Mediterranean MPA based on MPA Guide Categories. This data was then modified by Laure Velez to keep only the MPA with the highest protection level when several were overlapping (protectionMed_fr.shp). Then it was manually (QGIS) modified by Marieke Schultz to keep correct like this : 
+# Passe de la Réserve naturelle de Cerbicale (Bouches De Bonifacio) du niveau 3 au niveau 4
+# Passe de l'Archipel des îles de Lavezzi (Bouches De Bonifacio) du niveau 3 au niveau 4
+# J'ai créée la colonne "Fully" dans laquelle les niveaux 1, 2 et 3 sont en "YES" et le reste en "NO"
+# --> protectionMed_fr_modif.gpkg
+
+# In/Out data used : mtd_2018_2024_ampfully.csv made by Laure Velez in 07/2025. She checked for each eDNA samples whether or not they belonged to a fully protected MPA, cheking both start point, end point, and transect (eg when start and end points were outside but transect crossing the reserve). 
+
+# Load In/Out data
+in_out <- read.csv("./data/raw_data/predictors/MPA/mtd_2018_2024_ampfully.csv")
+unique(in_out$mpa_fully)
+
+
+# Here we assign the variable "mpa_fully" to the buff data. 
+# When all samples of the replicates have mpa_fully = 1 we set buff$mpa_fully = 1, when all samples of the replicates have mpa_fully = 0 we set buff$mpa_fully = 0, else we set buff$mpa_fully = NA.
+
+# Step 1: Create a named vector of spygen_code -> mpa_fully
+mpa_lookup <- setNames(in_out$mpa_fully, in_out$spygen_code)
+
+# Step 2: Function to calculate mpa_fully for one buff row
+get_mpa_fully_status <- function(replicate_str) {
+  # Extract SPY codes from the string (handles both '/' and '_')
+  codes <- unlist(strsplit(replicate_str, "[/_]"))
+  
+  # Lookup corresponding mpa_fully values
+  values <- mpa_lookup[codes]
+  
+  # Remove any missing spygen_codes
+  values <- values[!is.na(values)]
+  
+  if (length(values) == 0) {
+    return(NA)
+  } else if (all(values == 1)) {
+    return(1)
+  } else if (all(values == 0)) {
+    return(0)
+  } else {
+    return(NA)
+  }
+}
+
+# Step 3: Apply to buff
+buff$mpa_fully <- vapply(buff$replicates, get_mpa_fully_status, FUN.VALUE = numeric(1))
+
+
+
+
+
+################################################################################################  
+#########################  /!\ MISSING IPOCOM IN LAURE'S DATA######################## 
+################################################################################################  
+
+
+
+######################## Vessel presence (Luka) ############
+
+
+
+######################## Canyon : distance to canyon : MARTIN ####
+
+
+######################## Port : distance to port : MARTIN ####
+
+######################## MPA : distance to reserve : MARTIN ####
+
+#------------- RASTER DATA ----------------
+######################## Gravity (1 km) : weighted mean, min, max, range ####
+# Data : From Laure Velez (MARBEC)
+
+# Parameters
+var <- "gravity"
+rast <- terra::rast("./data/raw_data/predictors/Gravity/rastGravity.tif")
+poly <- buff 
+
+# Extraction
+buff <- spatial_extraction(var = var, rast = rast, poly = poly, stat = c("min", "max", "mean", "range"))
+
+
+
+
+######################## Bathymetry (0.001°) : weighted mean, min, max, range ####
+# Data : we use the SHOM MNT at 100m resolution
+
+# Parameters
+var <- "bathy"
+rast <- terra::rast("./data/raw_data/predictors/Bathymetry/MNT_MED_CORSE_SHOM100m_merged.tif")
+poly <- buff
+
+# Set values >= to 0 to NA (because it's land)
+rast[rast >= 0] <- NA
+
+# Extraction
+buff <- spatial_extraction(var = var, rast = rast, poly = poly)
+
+
+######################## Terrain index : slope, aspect, TPI, TRI, roughness ####
+# Compute terrain indices ----
+# Data : we use the SHOM MNT at 100m resolution
+
+
+#------------- Load data ------------------
+# Load the bathy data
+rast <- terra::rast("./data/processed_data/data_prep/predictors/Bathymetry/MNT_MED_CORSE_SHOM100m_merged.tif")
+
+# Reproject the raster to WGS84
+rast <- terra::project(rast, "EPSG:4326") # default method is "bilinear" if the first layer of rast is numeric (not categorical).
+
+# Set values > or = to 0 to NA
+rast[rast >= 0] <- NA
+
+# Plot rast
+plot(rast)
+
+
+
+
+
+
+
+
+#------------- Compute terrain indices ------------------
+compute_selected_terrain_ind(rast = rast, 
+                             folder_path = "./data/processed_data/data_prep/predictors/terrain_indices/SHOM_100m/", 
+                             neighbors = 8, 
+                             name = "SHOM100m_merged", # string to add in the filname before ".tif"
+                             indices = c("slope", "aspect", "TRI", "TPI", "roughness"))
+
+# Check the results
+tif_files <- list.files("./data/processed_data/data_prep/predictors/terrain_indices/SHOM_100m/", pattern = ".tif", full.names = TRUE)
+
+rasters <- lapply(tif_files, rast)
+
+names(rasters) <- tools::file_path_sans_ext(basename(tif_files))
+
+# Plot each raster
+for (i in seq_along(rasters)) {
+  plot(rasters[[i]], main = names(rasters)[i])
+}
+
+# Concatenate the rasters
+rasters <- terra::concats(rasters)
+
+
+#------------- Plot results ------------------
+# Load terrain indices
+filelist_temp <- list.files("./data/processed_data/data_prep/predictors/terrain_indices/SHOM_100m/", pattern = ".tif", full.names = TRUE)
+rast <- terra::rast(filelist_temp)
+rm(filelist_temp)
+plot(rast)
+
+
+# Compute layer 2 - layer 5 and pot
+d <- terra::subset(rast, 2) - terra::subset(rast, 5)
+plot(d)
+# Extract terrain indices ----
+# Load terrain indices
+filelist_temp <- list.files("./data/processed_data/data_prep/predictors/terrain_indices/SHOM_100m/", pattern = ".tif", full.names = TRUE)
+rast <- terra::rast(filelist_temp)
+rm(filelist_temp)
+plot(rast)
+
+# Iterate through each habitat layer in the raster
+for (layer in names(rast)) {
+  # Call spatial_extraction function for the current habitat layer
+  df <- spatial_extraction(
+    var = layer,  # Current habitat name
+    rast = rast[[layer]],  
+    df = df,  
+    poly = poly, 
+    stats = c("min", "max","mean")  # Averages the pixel values within the buffer
+  )
+}
+
+
+######################## Habitat : LOIC #########################
+r_bioce <- terra::rast(filepath_bioce) %>% as.factor() %>% segregate()
+
+names(r_bioce) <-  c("Association rhodolithes", "Association matte morte P.oceanica",
+                     "Coralligene","P.oceanica","Roche du large", "Algues infralittorales",
+                     "Galets infralittoraux","fonds meubles circalittoraux",
+                     "Fonds meubles infralittoraux", "Habitats artificiels",
+                     "Herbiers Cymodocess", "Zone bathyale","Herbier mixte", "Z.noltei")
+
+r_bioce <- project(r_bioce, r, "sum") # project to r which has a lower resolution. The function "sum" compute ...
+
+r_bioce$meadow_p = r_bioce$P.oceanica
+r_bioce$meadow_c = r_bioce$`Herbiers Cymodocess`
+
+r_bioce$soft_bottom <- app(r_bioce[[names(r_bioce) %in% c("fonds meubles circalittoraux","Fonds meubles infralittoraux")]], fun = "sum")
+
+# r_bioce$caillou <- app(r_bioce[[names(r_bioce) %in% c("Roche du large","Galets infralittoraux")]], fun = "sum")
+
+r_bioce$coralligenous <- app(r_bioce[[names(r_bioce) %in% c("Association rhodolithes","Coralligene")]], fun = "sum")
+
+r_bioce <- r_bioce[[!(names(r_bioce) %in% c("P.oceanica",
+                                            "Herbiers Cymodocess",
+                                            "Herbier mixte",
+                                            "Z.noltei",
+                                            "fonds meubles circalittoraux",
+                                            "Roche du large",
+                                            "Galets infralittoraux",
+                                            "Zone bathyale",
+                                            "Fonds meubles infralittoraux",
+                                            "Association rhodolithes",
+                                            "Coralligene"))]]
+
+names(r_bioce)
+
+## main biocenose in a cell ----
+
+fun <- function(i) { i / sum(i) } # function to compute proportion of each habitats in the new cells (with lower resolution)
+
+r_bioce <- app(r_bioce, fun = fun)
+
+r_max_bioce <- which.max(r_bioce)
+names(r_max_bioce) <- "max_bioce"
+
+values(r_max_bioce) <- case_when(values(r_max_bioce)== 1 ~ "Association matte morte P.oceanica",
+                                 values(r_max_bioce)== 3 ~ "Algues infralittorales",
+                                 values(r_max_bioce) == 6 ~ "zone bathyale",
+                                 values(r_max_bioce) == 7 ~ "meadow",
+                                 values(r_max_bioce) == 8 ~ "soft bottom",
+                                 values(r_max_bioce) == 9 ~ "corralligenous")
+
+# save into a raster file (class SpatRaster)
+writeRaster(r_max_bioce, file = "Outputs/01_read_cleaning/r_max_bioce.tif", overwrite = TRUE)
+
+## number of biocenoses per cell ----
+
+fun1 <- function(i) {sum(i !=0)}
+
+r_n_bioce <- app(r_bioce, fun1)
+
+names(r_n_bioce) <- "n_bioce"
+
+# save into a raster file (class SpatRaster)
+writeRaster(r_n_bioce, file = "Outputs/01_read_cleaning/r_n_bioce.tif", overwrite = TRUE)
+
+
+
+######################## Habitat : main habitat and number of habitat ####
+# Data :
+# A raster file with 7 bands representing the surface of different habitats in m² :
+# 1 posidonia_seagrass	surface of posidonia in m²	
+# 2 coralligeneous	surface of coralligeneous in m²	
+# 3 rocks	surface of rocks in m²
+# 4 sand	surface of sand in m²	
+# 5 dead_matte	surface of dead_matte in m²	
+# 5 other_seagrass	surface of other_seagrass in m²	
+# 6 infralitoral_algae	surface of infralitoral_algae in m²	
+# 7 infralitoral_algae	surface of infralitoral_algae in m²
+# from Andromede
+
+# Load necessary data
+rast <- terra::rast("./data/raw_data/predictors/Habitat_and_Anchoring/bioc_landscape_indices_bathy_anchorings_2023_medfr_1000m_2154.tif", lyrs = c(1:7))
+rast <- terra::project(rast, "EPSG:4326")
+df <- df
+poly <- as(buff, "SpatVector")
+
+# Rename bands
+names(rast) <- c("Posidonia", "Coralligeneous", "Rocks", "Sand", "Dead_Matte", "Other_Seagrass", "Infralitoral_Algae")
+
+# Initialize results columns in df
+df$main_habitat <- NA
+df$number_habitat <- NA
+
+# Find main habitat and number of habitats for each polygon
+for (i in 1:nrow(poly)) {  
+  spygn_code <- poly$spygen_code[i]
+  print(paste(
+    "--------------------------------------------",
+    "Processed polygon:", spygn_code,
+    "Polygon number:", i,
+    "--------------------------------------------"
+  ))
+  
+  polygon_sums <- list()
+  
+  for (band in 1:7) {
+    band_name <- names(rast)[band]
+    raster_band <- terra::subset(rast, band)
+    
+    # Extraction with weights
+    val <- terra::extract(raster_band, poly[i, ], weights = TRUE, na.rm = TRUE)
+    
+    # Check if extraction returned any values
+    if (!is.null(val) && nrow(val) > 0) {
+      # Compute weighted sum, ignoring NA values
+      weighted_values <- val[, 2] * val[, 3]
+      weighted_sum <- sum(weighted_values, na.rm = TRUE)
+      
+      # If all values were NA, set weighted_sum to 0
+      if (all(is.na(weighted_values))) {
+        weighted_sum <- 0
+      }
+    } else {
+      weighted_sum <- 0
+    }
+    
+    polygon_sums[[band_name]] <- weighted_sum
+    
+    print(paste(band_name, "weighted sum:", weighted_sum))
+  }
+  
+  # Convert polygon_sums to a named numeric vector
+  sums_vector <- unlist(polygon_sums)
+  
+  # Determine the main habitat (band with the highest weighted sum)
+  # If all sums are zero, set main_habitat to NA or a specific value indicating no habitat
+  if (all(sums_vector == 0)) {
+    max_band <- NA
+  } else {
+    max_band <- names(sums_vector)[which.max(sums_vector)]
+  }
+  
+  # Determine the number of habitats with non-zero sums
+  number_habitat <- sum(sums_vector != 0)
+  
+  # Store results in the corresponding row in df
+  df$main_habitat[df$spygen_code == spygn_code] <- max_band
+  df$number_habitat[df$spygen_code == spygn_code] <- number_habitat
+  
+  print(paste(" - Main habitat for", spygn_code, ":", ifelse(is.na(max_band), "None", max_band)))
+  print(paste(" - Number of habitats for", spygn_code, ":", number_habitat))
+}
+
+
+write.csv(df, "./data/processed_data/data_prep/predictors/Extracted_Predictors/mtdt_101220242_COV_protection_habitat.csv")
+
+
+
+######################## Habitat : surface of each habitat ####
+# Load data
+rast <- terra::rast("./data/raw_data/predictors/Habitat_and_Anchoring/bioc_landscape_indices_bathy_anchorings_2023_medfr_1000m_2154.tif", lyrs = c(1:7))
+rast <- terra::project(rast, "EPSG:4326")
+
+# Rename bands
+names(rast) <- c("Posidonia", "Coralligeneous", "Rocks", "Sand", "Dead_Matte", "Other_Seagrass", "Infralitoral_Algae")
+plot(rast)
+
+# df <- readRDS("./data/processed_data/data_prep/Med_TOT_2023_P0_R0_Idalongeville.rds")
+# poly <- readRDS('./data/processed_data/data_prep/Med_TOT_2023_P0.rds')
+# poly <- poly %>% dplyr::select(spygen_code, geometry)
+
+# Convert poly df to SpatVector
+# poly <- st_as_sf(poly)
+# poly <- terra::vect(poly)
+# dim(poly)
+# plot(poly)
+# class(poly)
+
+# Iterate through each habitat layer in the raster
+for (layer in names(rast)) {
+  # Call spatial_extraction function for the current habitat layer
+  df <- spatial_extraction(
+    var = layer,  # Current habitat name
+    rast = rast[[layer]],  
+    df = df,  
+    poly = poly, 
+    stats = c("mean")  # Averages the pixel values within the buffer
+  )
+}
+
+# Check the updated data frame
+print(colnames(df))
+
+
+
+
+######################## GFW : Vessel Presence (0.01°) : weighted mean, min, max, range ####
+# Parameters
+var <- "Vessel_Presence"
+rast <- terra::rast("./data/raw_data/predictors/Vessels/public-global-presence-v20231026_202301-202401_Vessel_Presence_0.01_degres.tif.tif")
+rast <- terra::project(rast, "EPSG:4326")
+df <- df
+poly <- buff
+
+# Extraction
+df <- spatial_extraction(var = var, rast = rast, df = df, poly = poly)
+
+# [For Updates---]
+write.csv(df, "./data/processed_data/data_prep/predictors/Extracted_Predictors/mtdt_101220242_COV_spatial_cov_no_hab_no_fishing_eff.csv")
+
+
+######################## GFW : Apparent Fishing Effort (0.01°) : weighted mean ####
+df_1 <- df
+#  /!\ WARNING : RUN INDEPENDENTLY 
+# This means that you need to save your previous df results and start from a new df with no other covariables saved in it. 
+# This is because, when binding the df_NA and df, column index number is used. Thus, if you have a different number of column it won't work.
+
+### 1. Extraction of weighted mean
+# Parameters 
+rast <- terra::rast("./data/raw_data/predictors/Vessels/public-global-fishing-effort-v20231026_Apparent_fishing_effort_202301-202401_0.01_degres.tif")
+rast <- terra::project(rast, "EPSG:4326")
+poly <- buff
+df <- df
+var <- "Fishing_Eff"
+
+# Extraction
+df <- spatial_extraction(var = var, rast = rast, df = df, poly = poly)
+
+
+
+### 2. Extraction of nearest value for NA 
+# Parameters
+rast <- raster::raster("./data/raw_data/predictors/Vessels/public-global-fishing-effort-v20231026_Apparent_fishing_effort_202301-202401_0.01_degres.tif")
+rast <- raster::projectRaster(rast, crs = "EPSG:4326")
+df <- df
+df_NA <- df[is.na(df$Fishing_Eff_mean), ] # Keep df rows in which Fishing_Eff is NA
+poly_NA <- poly |> dplyr::filter(spygen_code %in% df_NA$spygen_code) # Keep only poly that have their spygen_code in df_NA
+
+# Extraction
+df_NA <- nearest_value(var = var, rast = rast, df = df_NA, poly = poly_NA)
+
+
+
+### 3. Binding both results
+df_NA <- df_NA |> dplyr::select(spygen_code, Fishing_Eff_value)
+df_binded <- merge(df, df_NA, by = "spygen_code", all = TRUE)
+
+df_binded$Fishing_Eff <- ifelse(is.na(df_binded$Fishing_Eff_mean), 
+                                as.numeric(df_binded$Fishing_Eff_value), 
+                                as.numeric(df_binded$Fishing_Eff_mean))
+
+df <- df_binded |> dplyr::select(spygen_code, date, Fishing_Eff)
+
+df_2 <- df
+write.csv(df, "./data/processed_data/data_prep/predictors/Extracted_Predictors/mtdt_101220242_COV_fishing_eff.csv")
+
+
+################ Check data for homogenous sampling effort ##############
+buff %>%
+  group_by(PCR_replicates) %>%
+  summarise(count = n()) %>%
+  print()
+
+
+
+buff %>%
+  group_by(estimated_volume_total) %>%
+  summarise(count = n()) %>%
+  print()
+
+
+
+buff %>%
+  filter(estimated_volume_total > 55 & estimated_volume_total < 67 & PCR_replicates == 24) %>%
+  dim()
+
 
 summary(buff$area_km2)
-str(buff$area_km2)
+hist(buff$area_km2, breaks = 10)
 
-
-
-# [Optional Plot] ----
-
-# # Ensure area_km2 is numeric (not units) for plotting
-# buff$area_km2_num <- as.numeric(units::set_units(buff$area_km2, km^2))
-# 
-# # filter if needed
-# dt <- buff %>%
-#   filter(area_km2_num > 5)  # Adjust threshold as needed
-# 
-# ggplot(dt) +
-#   geom_sf(aes(fill = area_km2_num), color = NA) +
-#   viridis::scale_fill_viridis(name = "Area (km²)", option = "plasma", direction = -1) +
-#   theme_minimal() +
-#   labs(title = "Buffer Area Map", fill = "km²")
-
-
-######################## Distance to shore ############
-# Explanation : distance to shore is computed from the coastline shapefile using 'Distance_shore.ipynb'.
-# Important methodological considerations : 
-# Distance to shore is computed from replicates group's buffer centroids.
-# When a centroid is on land (which happened for ~ 67/792 centroids) we set the distance to shore to 1 meter because it was actually not sampled on land (obviously) and it ended up there only because we simplified transects into straight lines between transect start and end points.
-
-
-
-# Load data after dist_shore computed  ----
-buff <- st_read("./data/processed_data/predictors/mtdt_5_dist-shore.gpkg")
-######################## Vessel presence (Luka) ############
-######################## MPA : inside-outside reserve ####
-# Data :
-# The 'protection' variable is : 0 = not in any MPA, 1 = in MPA not fully protected, 2 = in fully protected MPA.
-# The methodological method used is : Taking the highest protection level across all the MPA legislation crossed by start and end points of the transects.
-# From Marie Orblin and Lola Romant (MARBEC)
-# Here we keep only 1 = fully protected areas and 0 = the rest. Then we match this data with our df.
-
-# Load data
-mpa <- read.csv("data/raw_data/predictors/MPA/MetaData_AMP.csv")
-colnames(mpa)[1] <- "spygen_code"
-
-# Keep only the rows with in df 
-mpa <- mpa[mpa$spygen_code %in% mtdt$spygen_code, ] |> 
-  dplyr::select(spygen_code, protection)
-
-# Bind mpa$protection to df
-df <- df
-df <- merge(df, mpa, by = "spygen_code")
-
-# Change protection values 2 --> 1, 1 --> 0
-df$reserve <- ifelse(df$protection == 2, 1, 0)
-
-# Remove protection column
-df <- df |> dplyr::select(-protection)
-
-
-
-
-######################## MPA : protection level ####
-# Data :  
-# The 'Index_MPA_num' variable is : 0-5 according to protection levels defined in the MPA Guide (Grorud-Colvert et al. 2021)
-# The methodological method used is : Taking the highest protection level across all the MPA legislation crossed by start and end points of the transects.
-# From Marie Orblin and Lola Romant (MARBEC)
-# Here we match this data with our df. 
-
-# Load data
-mpa <- read.csv("data/raw_data/predictors/MPA/MetaData_AMP.csv")
-colnames(mpa)[1] <- "spygen_code"
-
-# Keep only the rows with in df 
-mpa <- mpa[mpa$spygen_code %in% mtdt$spygen_code, ] |> 
-  dplyr::select(spygen_code, Index_MPA_num)
-
-# Bind mpa$Index_MPA_num to df
-df <- df
-df <- merge(df, mpa, by = "spygen_code")
-
-
-######################## MPA : distance to reserve ####
-# Data :
-# The distance to the nearest reserve is computed by Marie Orblin (cf "./analyses/archived/Sent_scripts/in_out_amp24_Marie_Orblin.R". The computed distance is the minimul distance between the centroid of a reserve (fully protected MPA) and the start point of the transect.
-# Here we match this data with our df. 
-
-
-# Load data
-mpa <- read.csv("data/raw_data/predictors/MPA/MetaData_AMP.csv")
-colnames(mpa)[1] <- "spygen_code"
-
-# df <- read.csv( "./data/processed_data/data_prep/Med_TOT_2023_FR_coastal_sd30m_noVH4_Litto3D_balanced2rep_pooled_rare5_coord_P0O0.csv")
-
-# Keep only the rows with in df 
-mpa <- mpa[mpa$spygen_code %in% df$spygen_code, ] |> 
-  dplyr::select(spygen_code, dist_min_fully_protected_MPA)
-
-# Bind mpa$dist_min_fully_protected_MPA to df
-df <- merge(df, mpa, by = "spygen_code")
-
-# Save df
-df_3 <- df
-write.csv(df, "./data/processed_data/data_prep/Med_TOT_2023_FR_coastal_sd30m_noVH4_Litto3D_balanced2rep_pooled_rare5_coord_dist_MPA_P0O0.csv")
-
-
-
-
+buff$area_km2 <- as.numeric(buff$area_km2)
+buff %>%
+  filter(estimated_volume_total > 55 & estimated_volume_total < 67 & PCR_replicates == 24 & area_km2 < 2) %>%
+  dim()
 

@@ -196,7 +196,24 @@ mtdtfull <- mtdtfull %>%
 mtdtfull <- mtdtfull %>%
   mutate(estimated_volume = ifelse(is.na(estimated_volume) & !is.na(duration), duration, estimated_volume)) 
 
-# 2 samples (SPY211147_SPY211148) have both duration and estimated_volume = NA. For now, we keep them to NA.
+mtdtfull <- mtdtfull %>%
+  mutate(estimated_volume = ifelse(replicates == "SPY211147_SPY211148", 16, estimated_volume))
+
+
+
+
+
+
+
+# country 
+mtdtfull <- mtdtfull %>%
+  mutate(country = ifelse(replicates == "SPY180926/SPY180931", "Spain", country),
+         country = ifelse(replicates == "SPY181817/SPY181827/SPY182545/SPY182546", "Spain", country),
+         country = ifelse(replicates == "SPY180928/SPY180929", "Spain", country),
+         country = ifelse(replicates == "SPY182155/SPY182160/SPY182543/SPY182544", "Spain", country)
+         )
+
+
 
 
 
@@ -728,6 +745,7 @@ mtdt_5 <- mtdt_5 %>%
     protection = first(na.omit(protection)),
     mpa_name = first(na.omit(mpa_name)),
     replicates_geometry = first(na.omit(replicates_geometry)),
+    proeject = first(na.omit(proeject)),
     Tele01 = first(na.omit(Tele01)),
     Pleo = first(na.omit(Pleo)),  
     Mamm01 = first(na.omit(Mamm01)),

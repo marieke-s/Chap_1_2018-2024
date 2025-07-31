@@ -29,67 +29,111 @@ buffer_transect <- function(df,
   # Apply buffer and return
   st_buffer(sf_obj, dist = buffer_dist)
 }
-#---------------------------------- Function : combine_rows----------------
-combine_rows <- function(data, codes_to_combine, new_code, proceed = TRUE) {
-  # Ensure exactly two codes
-  if (length(codes_to_combine) != 2) {
-    stop("Please provide exactly two spygen_codes to combine.")
+#---------------------------------- Function : spatial_extraction --------------------
+# This function extracts pixel values from a raster within a polygon (ie replicates buffer).
+# It reprojects the polygon to the raster's CRS if necessary.
+# It computes the mean, min, max, and range of the pixel values within the polygon.
+# The mean is weighted by the area of the pixels intersected with the.
+
+
+spatial_extraction <- function(var, rast, poly, stats = c("mean", "min", "max", "range")) {
+  
+  # Load necessary libraries
+  require(terra)
+  require(sf)
+  require(dplyr)
+  
+  # Ensure stats contains only allowed values
+  stats <- intersect(stats, c("mean", "min", "max", "range"))
+  
+  # Reproject polygons if CRS differs
+  raster_crs <- sf::st_crs(terra::crs(rast))
+  poly_crs <- sf::st_crs(poly)
+  
+  if (!identical(poly_crs, raster_crs)) {
+    poly <- sf::st_transform(poly, crs = raster_crs)
   }
   
-  # Get the rows to combine
-  rows_to_combine <- data[data$spygen_code %in% codes_to_combine, ]
+  # Initialize vectors to store the statistics
+  rast_means <- numeric(length = nrow(poly))
+  rast_mins <- numeric(length = nrow(poly))
+  rast_maxs <- numeric(length = nrow(poly))
+  rast_ranges <- numeric(length = nrow(poly))
   
-  if (nrow(rows_to_combine) != 2) {
-    stop("The specified spygen_codes must match exactly two rows in the data.")
-  }
-  
-  # Set up columns to compare
-  other_columns <- setdiff(names(rows_to_combine), "spygen_code")
-  
-  # Compare values
-  differing_columns <- which(rows_to_combine[1, other_columns] != rows_to_combine[2, other_columns])
-  differing_col_names <- other_columns[differing_columns]
-  
-  # Get row IDs for message
-  code_1 <- rows_to_combine$spygen_code[1]
-  code_2 <- rows_to_combine$spygen_code[2]
-  
-  # Warn if differences exist
-  if (length(differing_columns) > 0) {
-    warning(sprintf(
-      "Warning: Values differ between %s and %s in columns: %s",
-      code_1,
-      code_2,
-      paste(differing_col_names, collapse = ", ")
-    ))
-    if (!proceed) stop("Operation aborted by the user.")
-  }
-  
-  # Use the first row as the base
-  new_row <- rows_to_combine[1, ]
-  new_row$spygen_code <- new_code
-  
-  # Custom handling for differing 'comments'
-  if ("comments" %in% differing_col_names) {
-    comment_1 <- as.character(rows_to_combine$comments[1])
-    comment_2 <- as.character(rows_to_combine$comments[2])
+  for (i in 1:nrow(poly)) {
     
-    comment_1 <- ifelse(is.na(comment_1), "", comment_1)
-    comment_2 <- ifelse(is.na(comment_2), "", comment_2)
+    # Extract raster values within the current polygon with weights
+    extracted_values <- terra::extract(x = rast, y = poly[i, ], weights = TRUE)
     
-    if (nzchar(comment_2)) {
-      combined_comment <- trimws(paste0(
-        comment_1,
-        ifelse(nzchar(comment_1), " | ", ""),
-        code_2, ": ", comment_2
-      ))
-      new_row$comments <- combined_comment
+    # Filter out NA values
+    extracted_values <- extracted_values[!is.na(extracted_values[, 2]), ]
+    
+    values <- extracted_values[, 2]
+    weights <- extracted_values[, 3]
+    
+    if (length(values) > 0) {
+      if ("mean" %in% stats) {
+        rast_means[i] <- sum(values * weights, na.rm = TRUE) / sum(weights, na.rm = TRUE)
+      }
+      if ("min" %in% stats) {
+        rast_mins[i] <- min(values, na.rm = TRUE)
+      }
+      if ("max" %in% stats) {
+        rast_maxs[i] <- max(values, na.rm = TRUE)
+      }
+      if ("range" %in% stats) {
+        rast_ranges[i] <- max(values, na.rm = TRUE) - min(values, na.rm = TRUE)
+      }
+    } else {
+      if ("mean" %in% stats) rast_means[i] <- NA
+      if ("min" %in% stats)  rast_mins[i]  <- NA
+      if ("max" %in% stats)  rast_maxs[i]  <- NA
+      if ("range" %in% stats) rast_ranges[i] <- NA
     }
   }
   
-  # Remove original rows and add new one
-  data <- data[!data$spygen_code %in% codes_to_combine, ]
-  data <- rbind(data, new_row)
+  # Append results to poly
+  if ("mean" %in% stats) poly[[paste0(var, "_mean")]] <- rast_means
+  if ("min" %in% stats)  poly[[paste0(var, "_min")]]  <- rast_mins
+  if ("max" %in% stats)  poly[[paste0(var, "_max")]]  <- rast_maxs
+  if ("range" %in% stats) poly[[paste0(var, "_range")]] <- rast_ranges
   
-  return(data)
+  return(poly)
+}
+
+#---------------------------------- Function to compute SPECIFIC terra::terrain indices ------------------
+
+compute_selected_terrain_ind <- function(rast, folder_path, neighbors, name, indices = c("slope", "aspect", "flowdir", "TPI", "TRI", "roughness")) {
+  
+  tile_name <- name  
+  
+  if ("slope" %in% indices) {
+    filename_slope <- paste0(folder_path, "slope", neighbors, "_", tile_name, ".tif")
+    terra::terrain(x = rast, v = "slope", unit = "degrees", neighbors = neighbors, filename = filename_slope)
+  }
+  
+  if ("aspect" %in% indices) {
+    filename_aspect <- paste0(folder_path, "aspect", neighbors, "_", tile_name, ".tif")
+    terra::terrain(x = rast, v = "aspect", unit = "degrees", neighbors = neighbors, filename = filename_aspect)
+  }
+  
+  if ("flowdir" %in% indices) {
+    filename_flowdir <- paste0(folder_path, "flowdir", neighbors, "_", tile_name, ".tif")
+    terra::terrain(x = rast, v = "flowdir", neighbors = neighbors, filename = filename_flowdir)
+  }
+  
+  if ("TPI" %in% indices) {
+    filename_TPI <- paste0(folder_path, "TPI", neighbors, "_", tile_name, ".tif")
+    terra::terrain(x = rast, v = "TPI", neighbors = neighbors, filename = filename_TPI)
+  }
+  
+  if ("TRI" %in% indices) {
+    filename_TRI <- paste0(folder_path, "TRI", neighbors, "_", tile_name, ".tif")
+    terra::terrain(x = rast, v = "TRI", neighbors = neighbors, filename = filename_TRI)
+  }
+  
+  if ("roughness" %in% indices) {
+    filename_roughness <- paste0(folder_path, "roughness", neighbors, "_", tile_name, ".tif")
+    terra::terrain(x = rast, v = "roughness", neighbors = neighbors, filename = filename_roughness)
+  }
 }
