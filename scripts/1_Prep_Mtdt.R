@@ -745,7 +745,7 @@ mtdt_5 <- mtdt_5 %>%
     protection = first(na.omit(protection)),
     mpa_name = first(na.omit(mpa_name)),
     replicates_geometry = first(na.omit(replicates_geometry)),
-    proeject = first(na.omit(proeject)),
+    project = first(na.omit(project)),
     Tele01 = first(na.omit(Tele01)),
     Pleo = first(na.omit(Pleo)),  
     Mamm01 = first(na.omit(Mamm01)),
@@ -754,8 +754,7 @@ mtdt_5 <- mtdt_5 %>%
     Bact02 = first(na.omit(Bact02)), 
     Euka02 = first(na.omit(Euka02)),
     estimated_volume_total = sum(na.omit(estimated_volume)),
-    duration_total = sum(na.omit(duration))
-,
+    duration_total = sum(na.omit(duration)),
     
   # if comments differ combine them by copy pasting them with their associated replicates id :
     comments = paste(unique(na.omit(comments)), collapse = "; "),  # Combine unique comments with a semicolon

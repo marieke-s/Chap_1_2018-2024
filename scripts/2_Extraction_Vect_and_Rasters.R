@@ -39,7 +39,7 @@ source("./utils/Fct_Data-Prep.R")
 
 #------------- VECTOR DATA ----------------
 
-############## Distance to shore ############
+###### Distance to shore ############
 # Explanation : distance to shore is computed from the coastline shapefile using '2.1_Distance_shore.py'.
 # Important methodological considerations : 
 # Distance to shore is computed from replicates group's buffer centroids.
@@ -52,7 +52,7 @@ system("python3 ./scripts/2.1_Distance_shore.py")
 
 # Load buff with dist_shore  ----
 buff <- st_read("./data/processed_data/predictors/mtdt_5_dist-shore.gpkg")
-############## Sampling effort ############
+###### Sampling effort ############
 # Explanation : the aim is to compute variables that represent the sampling effort in each replicate group : 
 # 1. Total volume filtered in the replicate group = estimated_volume_total -->  Already exists
 # 2. Nb of PCR replicates = 12 * nb of pooled samples + 12 nb of unpooled samples --> computed here 
@@ -94,7 +94,8 @@ buff <- st_transform(buff, crs = 2154)
 buff$area_km2 <- st_area(buff) / 1e6  # Convert from m^2 to km^2
 buff$area_km2 <- units::set_units(st_area(buff), km^2)
 
-############## MPA : in or out reserve #############
+######################## Vessel presence (Luka) ############
+############## MPA : in or out reserve : LAURE #############
 # Explanation : variable that states whether or not the replicates were done within a fully protected MPA (ie a reserve).
 
 # MPA data used : protectionMed_fr_modif.gpkg made by Lola Romant during her internship. She assigned protection levels to the French Mediterranean MPA based on MPA Guide Categories. This data was then modified by Laure Velez to keep only the MPA with the highest protection level when several were overlapping (protectionMed_fr.shp). Then it was manually (QGIS) modified by Marieke Schultz to keep correct like this : 
@@ -145,15 +146,8 @@ buff$mpa_fully <- vapply(buff$replicates, get_mpa_fully_status, FUN.VALUE = nume
 
 
 
-################################################################################################  
-#########################  /!\ MISSING IPOCOM IN LAURE'S DATA######################## 
-################################################################################################  
 
-
-
-######################## Vessel presence (Luka) ############
-
-
+##############  /!\ MISSING IPOCOM IN LAURE'S DATA ######################## 
 
 ######################## Canyon : distance to canyon : MARTIN ####
 
@@ -163,7 +157,7 @@ buff$mpa_fully <- vapply(buff$replicates, get_mpa_fully_status, FUN.VALUE = nume
 ######################## MPA : distance to reserve : MARTIN ####
 
 #------------- RASTER DATA ----------------
-######################## Gravity (1 km) : weighted mean, min, max, range ####
+###### Gravity (1 km) : weighted mean, min, max, range ####
 # Data : From Laure Velez (MARBEC)
 
 # Parameters
@@ -177,7 +171,7 @@ buff <- spatial_extraction(var = var, rast = rast, poly = poly, stat = c("min", 
 
 
 
-######################## Bathymetry (0.001°) : weighted mean, min, max, range ####
+###### Bathymetry (0.001°) : weighted mean, min, max, range ####
 # Data : we use the SHOM MNT at 100m resolution
 
 # Parameters
@@ -193,117 +187,140 @@ buff <- spatial_extraction(var = var, rast = rast, poly = poly)
 
 
 ######################## Terrain index : slope, aspect, TPI, TRI, roughness ####
+# Explanation : we compute terrain indices from the SHOM MNT at 100m resolution.
+# Methodological choices : 
+# Lecours et al. 2017; Rees et al. (2014)
+# We compute the following terrain indices: 
+# slope, aspect, TPI, TRI and roughness.
+# Slope and aspect are computed with 8 neighbors.
+# TPI, TRI and roughness are automatically fixed to 8 neighbors.
+
+
 # Compute terrain indices ----
-# Data : we use the SHOM MNT at 100m resolution
-
-
-#------------- Load data ------------------
-# Load the bathy data
-rast <- terra::rast("./data/processed_data/data_prep/predictors/Bathymetry/MNT_MED_CORSE_SHOM100m_merged.tif")
+# Data : we use the SHOM MNT at 100m resolution (loaded in previous section)
 
 # Reproject the raster to WGS84
 rast <- terra::project(rast, "EPSG:4326") # default method is "bilinear" if the first layer of rast is numeric (not categorical).
 
-# Set values > or = to 0 to NA
-rast[rast >= 0] <- NA
-
-# Plot rast
-plot(rast)
-
-
-
-
-
-
-
-
-#------------- Compute terrain indices ------------------
+# Compute terrain indices 
 compute_selected_terrain_ind(rast = rast, 
-                             folder_path = "./data/processed_data/data_prep/predictors/terrain_indices/SHOM_100m/", 
+                             folder_path = "./data/processed_data/predictors/terrain_indices/SHOM_100m/", 
                              neighbors = 8, 
                              name = "SHOM100m_merged", # string to add in the filname before ".tif"
                              indices = c("slope", "aspect", "TRI", "TPI", "roughness"))
 
-# Check the results
-tif_files <- list.files("./data/processed_data/data_prep/predictors/terrain_indices/SHOM_100m/", pattern = ".tif", full.names = TRUE)
-
-rasters <- lapply(tif_files, rast)
-
-names(rasters) <- tools::file_path_sans_ext(basename(tif_files))
-
-# Plot each raster
-for (i in seq_along(rasters)) {
-  plot(rasters[[i]], main = names(rasters)[i])
-}
-
-# Concatenate the rasters
-rasters <- terra::concats(rasters)
-
-
-#------------- Plot results ------------------
-# Load terrain indices
-filelist_temp <- list.files("./data/processed_data/data_prep/predictors/terrain_indices/SHOM_100m/", pattern = ".tif", full.names = TRUE)
-rast <- terra::rast(filelist_temp)
-rm(filelist_temp)
-plot(rast)
+# [OPTIONAL] Check the results ----
+# tif_files <- list.files("./data/processed_data/predictors/terrain_indices/SHOM_100m/", pattern = ".tif", full.names = TRUE)
+# 
+# rasters <- lapply(tif_files, rast)
+# 
+# names(rasters) <- tools::file_path_sans_ext(basename(tif_files))
+# 
+# # Plot each raster
+# for (i in seq_along(rasters)) {
+#   plot(rasters[[i]], main = names(rasters)[i])
+# }
+# 
+# rm(tif_files, rasters) 
 
 
-# Compute layer 2 - layer 5 and pot
-d <- terra::subset(rast, 2) - terra::subset(rast, 5)
-plot(d)
+
+
 # Extract terrain indices ----
 # Load terrain indices
-filelist_temp <- list.files("./data/processed_data/data_prep/predictors/terrain_indices/SHOM_100m/", pattern = ".tif", full.names = TRUE)
+filelist_temp <- list.files("./data/processed_data/predictors/terrain_indices/SHOM_100m/", pattern = ".tif", full.names = TRUE)
+
 rast <- terra::rast(filelist_temp)
-rm(filelist_temp)
-plot(rast)
 
 # Iterate through each habitat layer in the raster
+
+# Initialize accumulator
+buff_all <- buff 
+
+# Loop through each raster layer
 for (layer in names(rast)) {
-  # Call spatial_extraction function for the current habitat layer
-  df <- spatial_extraction(
-    var = layer,  # Current habitat name
-    rast = rast[[layer]],  
-    df = df,  
-    poly = poly, 
-    stats = c("min", "max","mean")  # Averages the pixel values within the buffer
+  tmp <- spatial_extraction(
+    var = layer,
+    rast = rast[[layer]],
+    poly = poly,
+    stats = c("min", "max", "mean")
   )
+  
+  # Extract only the columns: replicates + {layer}_min, _max, _mean
+  tmp <- tmp %>%
+    st_drop_geometry() %>%
+    dplyr::select(replicates,
+           all_of(paste0(layer, "_min")),
+           all_of(paste0(layer, "_max")),
+           all_of(paste0(layer, "_mean")))
+  
+  # Join to original buff_all
+  buff_all <- left_join(buff_all, tmp, by = "replicates")
 }
+beepr::beep() # Beep to indicate completion
+
+
+buff <- buff_all
+
+rm(filelist_temp, tmp, layer, buff_all)
+
 
 
 ######################## Habitat : LOIC #########################
-r_bioce <- terra::rast(filepath_bioce) %>% as.factor() %>% segregate()
+# Explanation : we retreive different variables : 
+# main habitat within buffer, number of habitats within buffer, surface proportion of each habitat within buffer. 
+# We do this twice : once for detailed habitats and once for the main habitats categories (ie grouped habitats)
+# Data :
+# A 100m resolution raster file from Andromed with 14 bands representing the surface of different habitats in m² :
+# 1	Association a rhodolithes
+# 2	Association de la matte morte de Posidonia oceanica
+# 3	Biocenose Coralligene
+# 4	Biocenose de l herbier a Posidonia oceanica
+# 5	Biocenose de la roche du large
+# 6	Biocenose des algues infralittorales
+# 7	Biocenose des galets infralittoraux
+# 8	Fonds meubles circalittoraux
+# 9	Fonds meubles infralittoraux
+# 10	Habitats artificiels
+# 11	Herbiers a Cymodocees
+# 12	Zone bathyale
+# 13	Herbier mixte a Zostera noltii, Zostera marina, Cymodocea nodosa et Ruppia cirrhosa
+# 14	Herbiers a Zostera noltei
 
-names(r_bioce) <-  c("Association rhodolithes", "Association matte morte P.oceanica",
+# Load raster ----
+rast <- terra::rast("./data/raw_data/predictors/Habitat/bioc_2023_medfr_100m_2154.tif")
+
+# Create 1 layer of presence/absence for each habitat
+rast <- rast %>% as.factor() %>% segregate()
+
+# Rename bands
+names(rast) <-  c("Association rhodolithes", "matte_morte_P.oceanica",
                      "Coralligene","P.oceanica","Roche du large", "Algues infralittorales",
                      "Galets infralittoraux","fonds meubles circalittoraux",
                      "Fonds meubles infralittoraux", "Habitats artificiels",
                      "Herbiers Cymodocess", "Zone bathyale","Herbier mixte", "Z.noltei")
 
-r_bioce <- project(r_bioce, r, "sum") # project to r which has a lower resolution. The function "sum" compute ...
+# Group habitats ----
+rast_grouped <- rast
 
-r_bioce$meadow_p = r_bioce$P.oceanica
-r_bioce$meadow_c = r_bioce$`Herbiers Cymodocess`
+# Put "fonds meubles" together
+rast_grouped$soft_bottom <- app(rast_grouped[[names(rast_grouped) %in% c("fonds meubles circalittoraux","Fonds meubles infralittoraux")]], fun = "sum")
+rast_grouped <- rast_grouped[[!(names(rast_grouped) %in% c("fonds meubles circalittoraux","Fonds meubles infralittoraux"))]]
 
-r_bioce$soft_bottom <- app(r_bioce[[names(r_bioce) %in% c("fonds meubles circalittoraux","Fonds meubles infralittoraux")]], fun = "sum")
+# Put "P.oceanica" "Herbier mixte" "Z.noltei" and "Herbiers Cymodocess" together
+rast_grouped$meadow <- app(rast_grouped[[names(rast_grouped) %in% c("P.oceanica","Herbiers Cymodocess", "Z.noltei", "Herbier mixte" )]], fun = "sum")
+rast_grouped <- rast_grouped[[!(names(rast_grouped) %in% c("P.oceanica","Herbiers Cymodocess", "Z.noltei", "Herbier mixte"))]]
 
-# r_bioce$caillou <- app(r_bioce[[names(r_bioce) %in% c("Roche du large","Galets infralittoraux")]], fun = "sum")
+# Put "Roche du large" and "Galets infralittoraux" together 
+rast_grouped$rock <- app(rast_grouped[[names(rast_grouped) %in% c("Roche du large","Galets infralittoraux")]], fun = "sum")
+rast_grouped <- rast_grouped[[!(names(rast_grouped) %in% c("Roche du large","Galets infralittoraux"))]]
 
-r_bioce$coralligenous <- app(r_bioce[[names(r_bioce) %in% c("Association rhodolithes","Coralligene")]], fun = "sum")
+# Put "Association rhodolithes" and "Coralligene" together
+rast_grouped$coralligenous <- app(rast_grouped[[names(rast_grouped) %in% c("Association rhodolithes","Coralligene")]], fun = "sum")
+rast_grouped <- rast_grouped[[!(names(rast_grouped) %in% c("Association rhodolithes","Coralligene"))]]
 
-r_bioce <- r_bioce[[!(names(r_bioce) %in% c("P.oceanica",
-                                            "Herbiers Cymodocess",
-                                            "Herbier mixte",
-                                            "Z.noltei",
-                                            "fonds meubles circalittoraux",
-                                            "Roche du large",
-                                            "Galets infralittoraux",
-                                            "Zone bathyale",
-                                            "Fonds meubles infralittoraux",
-                                            "Association rhodolithes",
-                                            "Coralligene"))]]
+plot(rast_grouped)
 
-names(r_bioce)
 
 ## main biocenose in a cell ----
 
