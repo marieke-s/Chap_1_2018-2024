@@ -90,7 +90,7 @@ replicate_groups <- list(
   # 2021
   c("SPY212716", "SPY212756", "SPY212715", "SPY212717"),
   c("SPY212711", "SPY212759", "SPY212713", "SPY212758"),
-  c("SPY212710", "SPY212712", "SPY212719"),
+  c("SPY212710", "SPY212712"),
   
   # 2022 - split, so handled separately later
   
@@ -127,6 +127,11 @@ mtdtfull <- mtdtfull %>%
     TRUE ~ replicates
   ))
 
+# Remove SPY212719 --> it could be associated with SPY212710/SPY212712 but one is the MPA whether the 2 other are not. It doesn't have any replicates but is well to close to SPY212710/SPY212712 to be kept alone. 
+
+mtdtfull <- mtdtfull %>%
+  filter(!(spygen_code == "SPY212719"))
+ 
 # Optional: ensure consistency in naming
 mtdtfull <- mtdtfull %>%
   mutate(replicates = ifelse(is.na(replicates) | replicates == "", "no", replicates))

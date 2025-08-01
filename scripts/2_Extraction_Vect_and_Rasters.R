@@ -112,6 +112,22 @@ buff$mpa_fully <- vapply(buff$replicates, get_mpa_fully_status, FUN.VALUE = nume
 # Clean
 rm(get_mpa_fully_status, mpa_lookup, in_out)
 
+# Check results
+buff %>% 
+  group_by(mpa_fully) %>%
+  summarise(count = n()) %>%
+  print()
+
+# print the replicates column of buff where mpa_fully is NA
+buff %>% filter(is.na(mpa_fully)) %>% dplyr::select(replicates, mpa_fully) %>%
+  print()
+
+
+# SPY212710/SPY212712/SPY212719 = NA
+# SPY212710 = 0
+# SPY212712 = 0
+# SPY212719 = 1
+
 ###### Sampling effort ############
 # Explanation : the aim is to compute variables that represent the sampling effort in each replicate group : 
 # 1. Total volume filtered in the replicate group = estimated_volume_total -->  Already exists
