@@ -1,0 +1,26 @@
+This file details methodological choices made in the scripts of this folder. 
+
+1_Prep_Mtdt ----------------------------------------------------------------------------------------------------
+
+# Replicates as point data : 
+To avoid pseudo-replication and ensure independence of our observations, we pooled together samples occuring at the same site (within a 1km buffer around the sampling transect) and the same 1/2 day (i.e the same 6 hours slot). 
+
+
+
+
+
+
+
+
+
+
+2_Extraction_Vect_and_Rasters.R ------------------------------------------------------------------------------ 
+
+# Computing distances : 
+
+
+
+# Habitat : 
+Important methodological considerations : "Zone bathyale" is not considered as a habitat in this analysis, thus it is ignored when it appears to be the main habitat (we take the next more important habitat) and when counting the number of habitats per km².
+
+

@@ -45,13 +45,73 @@ source("./utils/Fct_Data-Prep.R")
 # Distance to shore is computed from replicates group's buffer centroids.
 # When a centroid is on land (which happened for ~ 67/792 centroids) we set the distance to shore to 1 meter because it was actually not sampled on land (obviously) and it ended up there only because we simplified transects into straight lines between transect start and end points.
 
-# Run 2.1_Distance_shore.py ----
-# Basic bash call
+# Run 2.1_Distance_shore.py 
+# Bash call
 system("python3 ./scripts/2.1_Distance_shore.py")
 
 
-# Load buff with dist_shore  ----
+# Load buff with dist_shore  
 buff <- st_read("./data/processed_data/predictors/mtdt_5_dist-shore.gpkg")
+
+
+
+
+
+
+###### Distance to port (Martin) ############
+# Explanation : distance to port was computed by Martin Paquet in 07/2025 with the distance pipeline explained in Methods.txt.
+###### Distance to canyon (Martin) ############
+###### Distance to reserve (Martin) ############
+###### In or out reserve (Laure) #############
+# Explanation : variable that states whether or not the replicates were done within a fully protected MPA (ie a reserve).
+
+# MPA data used : protectionMed_fr_modif.gpkg made by Lola Romant during her internship. She assigned protection levels to the French Mediterranean MPA based on MPA Guide Categories. This data was then modified by Laure Velez to keep only the MPA with the highest protection level when several were overlapping (protectionMed_fr.shp). Then it was manually (QGIS) modified by Marieke Schultz to keep correct like this : 
+# Passe de la Réserve naturelle de Cerbicale (Bouches De Bonifacio) du niveau 3 au niveau 4
+# Passe de l'Archipel des îles de Lavezzi (Bouches De Bonifacio) du niveau 3 au niveau 4
+# J'ai créée la colonne "Fully" dans laquelle les niveaux 1, 2 et 3 sont en "YES" et le reste en "NO"
+# --> protectionMed_fr_modif.gpkg
+
+# In/Out data used : mtd_mpafully_2018-2024_complete.csv made by Laure Velez in 07/2025. She checked for each eDNA samples whether or not they belonged to a fully protected MPA, cheking both start point, end point, and transect (eg when start and end points were outside but transect crossing the reserve). 
+
+# Load In/Out data
+in_out <- read.csv("./data/raw_data/predictors/MPA/mtd_mpafully_2018-2024_complete.csv")
+unique(in_out$mpa_fully)
+
+
+# Here we assign the variable "mpa_fully" to the buff data. 
+# When all samples of the replicates have mpa_fully = 1 we set buff$mpa_fully = 1, when all samples of the replicates have mpa_fully = 0 we set buff$mpa_fully = 0, else we set buff$mpa_fully = NA.
+
+# Step 1: Create a named vector of spygen_code -> mpa_fully
+mpa_lookup <- setNames(in_out$mpa_fully, in_out$spygen_code)
+
+# Step 2: Function to calculate mpa_fully for one buff row
+get_mpa_fully_status <- function(replicate_str) {
+  # Extract SPY codes from the string (handles both '/' and '_')
+  codes <- unlist(strsplit(replicate_str, "[/_]"))
+  
+  # Lookup corresponding mpa_fully values
+  values <- mpa_lookup[codes]
+  
+  # Remove any missing spygen_codes
+  values <- values[!is.na(values)]
+  
+  if (length(values) == 0) {
+    return(NA)
+  } else if (all(values == 1)) {
+    return(1)
+  } else if (all(values == 0)) {
+    return(0)
+  } else {
+    return(NA)
+  }
+}
+
+# Step 3: Apply to buff
+buff$mpa_fully <- vapply(buff$replicates, get_mpa_fully_status, FUN.VALUE = numeric(1))
+
+# Clean
+rm(get_mpa_fully_status, mpa_lookup, in_out)
+
 ###### Sampling effort ############
 # Explanation : the aim is to compute variables that represent the sampling effort in each replicate group : 
 # 1. Total volume filtered in the replicate group = estimated_volume_total -->  Already exists
@@ -93,68 +153,10 @@ buff <- st_transform(buff, crs = 2154)
 # Compute area in km2
 buff$area_km2 <- st_area(buff) / 1e6  # Convert from m^2 to km^2
 buff$area_km2 <- units::set_units(st_area(buff), km^2)
+buff$area_km2 <- as.numeric(buff$area_km2)  # Convert to numeric for easier handling
 
 ######################## Vessel presence (Luka) ############
-############## MPA : in or out reserve : LAURE #############
-# Explanation : variable that states whether or not the replicates were done within a fully protected MPA (ie a reserve).
 
-# MPA data used : protectionMed_fr_modif.gpkg made by Lola Romant during her internship. She assigned protection levels to the French Mediterranean MPA based on MPA Guide Categories. This data was then modified by Laure Velez to keep only the MPA with the highest protection level when several were overlapping (protectionMed_fr.shp). Then it was manually (QGIS) modified by Marieke Schultz to keep correct like this : 
-# Passe de la Réserve naturelle de Cerbicale (Bouches De Bonifacio) du niveau 3 au niveau 4
-# Passe de l'Archipel des îles de Lavezzi (Bouches De Bonifacio) du niveau 3 au niveau 4
-# J'ai créée la colonne "Fully" dans laquelle les niveaux 1, 2 et 3 sont en "YES" et le reste en "NO"
-# --> protectionMed_fr_modif.gpkg
-
-# In/Out data used : mtd_2018_2024_ampfully.csv made by Laure Velez in 07/2025. She checked for each eDNA samples whether or not they belonged to a fully protected MPA, cheking both start point, end point, and transect (eg when start and end points were outside but transect crossing the reserve). 
-
-# Load In/Out data
-in_out <- read.csv("./data/raw_data/predictors/MPA/mtd_2018_2024_ampfully.csv")
-unique(in_out$mpa_fully)
-
-
-# Here we assign the variable "mpa_fully" to the buff data. 
-# When all samples of the replicates have mpa_fully = 1 we set buff$mpa_fully = 1, when all samples of the replicates have mpa_fully = 0 we set buff$mpa_fully = 0, else we set buff$mpa_fully = NA.
-
-# Step 1: Create a named vector of spygen_code -> mpa_fully
-mpa_lookup <- setNames(in_out$mpa_fully, in_out$spygen_code)
-
-# Step 2: Function to calculate mpa_fully for one buff row
-get_mpa_fully_status <- function(replicate_str) {
-  # Extract SPY codes from the string (handles both '/' and '_')
-  codes <- unlist(strsplit(replicate_str, "[/_]"))
-  
-  # Lookup corresponding mpa_fully values
-  values <- mpa_lookup[codes]
-  
-  # Remove any missing spygen_codes
-  values <- values[!is.na(values)]
-  
-  if (length(values) == 0) {
-    return(NA)
-  } else if (all(values == 1)) {
-    return(1)
-  } else if (all(values == 0)) {
-    return(0)
-  } else {
-    return(NA)
-  }
-}
-
-# Step 3: Apply to buff
-buff$mpa_fully <- vapply(buff$replicates, get_mpa_fully_status, FUN.VALUE = numeric(1))
-
-
-
-
-
-
-##############  /!\ MISSING IPOCOM IN LAURE'S DATA ######################## 
-
-######################## Canyon : distance to canyon : MARTIN ####
-
-
-######################## Port : distance to port : MARTIN ####
-
-######################## MPA : distance to reserve : MARTIN ####
 
 #------------- RASTER DATA ----------------
 ###### Gravity (1 km) : weighted mean, min, max, range ####
@@ -186,7 +188,7 @@ rast[rast >= 0] <- NA
 buff <- spatial_extraction(var = var, rast = rast, poly = poly)
 
 
-######################## Terrain index : slope, aspect, TPI, TRI, roughness ####
+######################## Terrain index ####
 # Explanation : we compute terrain indices from the SHOM MNT at 100m resolution.
 # Methodological choices : 
 # Lecours et al. 2017; Rees et al. (2014)
@@ -266,10 +268,13 @@ rm(filelist_temp, tmp, layer, buff_all)
 
 
 
-######################## Habitat : LOIC #########################
-# Explanation : we retreive different variables : 
-# main habitat within buffer, number of habitats within buffer, surface proportion of each habitat within buffer. 
-# We do this twice : once for detailed habitats and once for the main habitats categories (ie grouped habitats)
+######################## Habitat #########################
+# Explanation : we retreive 3 different variables : 
+# 1. main habitat within buffer, 
+# 2. number of habitats per km² = number of different habitats / buffer area, 
+# 3. surface proportion of each habitat within buffer --> To do so we need to apply transformation to avoid compositional data bias (see here for details : https://docs.google.com/document/d/1cN9vJ6I4fHzPXZfXjOm77Klk5hCSFBBkOj6Mhgum_S8/edit?tab=t.0 and https://medium.com/@nextgendatascientist/a-guide-for-data-scientists-log-ratio-transformations-in-machine-learning-a2db44e2a455) 
+
+# We compute these variables twice : once for detailed habitats and once for the main habitats categories (ie grouped habitats)
 # Data :
 # A 100m resolution raster file from Andromed with 14 bands representing the surface of different habitats in m² :
 # 1	Association a rhodolithes
@@ -300,6 +305,14 @@ names(rast) <-  c("Association rhodolithes", "matte_morte_P.oceanica",
                      "Fonds meubles infralittoraux", "Habitats artificiels",
                      "Herbiers Cymodocess", "Zone bathyale","Herbier mixte", "Z.noltei")
 
+
+
+
+
+
+
+
+
 # Group habitats ----
 rast_grouped <- rast
 
@@ -319,8 +332,141 @@ rast_grouped <- rast_grouped[[!(names(rast_grouped) %in% c("Roche du large","Gal
 rast_grouped$coralligenous <- app(rast_grouped[[names(rast_grouped) %in% c("Association rhodolithes","Coralligene")]], fun = "sum")
 rast_grouped <- rast_grouped[[!(names(rast_grouped) %in% c("Association rhodolithes","Coralligene"))]]
 
-plot(rast_grouped)
 
+
+
+
+
+
+
+
+
+
+
+# Main habitat and Number of habitat / km² ----
+# Important methodological considerations : "Zone bathyale" is not considered as a habitat in this analysis, thus it is ignored when it appears to be the main habitat (we take the next more important habitat) and when counting the number of habitats per km².
+
+calculate_habitats <- function(buff, rast, id_column_name, name = "", buff_area) {
+  # Check inputs
+  if (!inherits(buff, "sf") && !inherits(buff, "SpatVector")) stop("buff must be an sf or SpatVector object")
+  if (!inherits(rast, "SpatRaster")) stop("rast must be a SpatRaster object")
+  if (!id_column_name %in% colnames(buff)) stop(paste("Column", id_column_name, "not found in buff"))
+  if (!buff_area %in% colnames(buff)) stop(paste("Area column", buff_area, "not found in buff"))
+  if (!is.character(name)) stop("name must be a character string")
+  
+  # Define layers to exclude
+  exclude_layers <- "Zone bathyale"
+  
+  # Filter out excluded layers
+  included_bands <- setdiff(names(rast), exclude_layers)
+  rast <- rast[[included_bands]]  # Subset raster to included layers only
+  
+  # Define dynamic column names
+  main_habitat_col <- paste0(name, "main_habitat")
+  nb_habitat_col <- paste0(name, "nb_habitat_per_km2")
+  
+  # Initialize output columns
+  buff[[main_habitat_col]] <- NA_character_
+  buff[[nb_habitat_col]] <- NA_real_
+  
+  # Total number of raster bands (after exclusion)
+  total_bands <- terra::nlyr(rast)
+  band_names <- names(rast)
+  
+  for (i in seq_len(nrow(buff))) {
+    polygon_id <- buff[[id_column_name]][i]
+    area_km2 <- buff[[buff_area]][i]
+    
+    message(
+      "--------------------------------------------\n",
+      "Processed polygon: ", polygon_id, "\n",
+      "Polygon number: ", i, "\n",
+      "--------------------------------------------"
+    )
+    
+    polygon_sums <- list()
+    
+    for (band in seq_len(total_bands)) {
+      band_name <- band_names[band]
+      raster_band <- terra::subset(rast, band)
+      
+      val <- terra::extract(raster_band, buff[i, ], weights = TRUE, na.rm = TRUE)
+      
+      if (!is.null(val) && nrow(val) > 0) {
+        weighted_values <- val[, 2] * val[, 3]
+        weighted_sum <- if (all(is.na(weighted_values))) 0 else sum(weighted_values, na.rm = TRUE)
+      } else {
+        weighted_sum <- 0
+      }
+      
+      polygon_sums[[band_name]] <- weighted_sum
+      message(band_name, " weighted sum: ", weighted_sum)
+    }
+    
+    sums_vector <- unlist(polygon_sums)
+    max_band <- if (all(sums_vector == 0)) NA else names(sums_vector)[which.max(sums_vector)]
+    number_habitat <- sum(sums_vector != 0)
+    
+    habitat_density <- if (is.na(area_km2) || area_km2 == 0) NA else number_habitat / area_km2
+    
+    buff[[main_habitat_col]][i] <- max_band
+    buff[[nb_habitat_col]][i] <- habitat_density
+    
+    message(" - Main habitat for ", polygon_id, ": ", ifelse(is.na(max_band), "None", max_band))
+    message(" - Habitat density (/km2) for ", polygon_id, ": ", habitat_density)
+  }
+  
+  return(buff)
+}
+
+# For all habitats
+buff1 <- calculate_habitats(buff = buff[0:3,], 
+                            rast = rast, 
+                            id_column_name = "replicates",
+                           buff_area = "area_km2")
+
+
+# For grouped habitats
+buff1 <- calculate_habitats(buff = buff1, 
+                            rast = rast_grouped, 
+                            id_column_name = "replicates", 
+                           name = "grouped_",
+                           buff_area = "area_km2")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Surface proportion of each habitat  (ALR transformed) ----
 
 ## main biocenose in a cell ----
 
@@ -353,95 +499,6 @@ names(r_n_bioce) <- "n_bioce"
 writeRaster(r_n_bioce, file = "Outputs/01_read_cleaning/r_n_bioce.tif", overwrite = TRUE)
 
 
-
-######################## Habitat : main habitat and number of habitat ####
-# Data :
-# A raster file with 7 bands representing the surface of different habitats in m² :
-# 1 posidonia_seagrass	surface of posidonia in m²	
-# 2 coralligeneous	surface of coralligeneous in m²	
-# 3 rocks	surface of rocks in m²
-# 4 sand	surface of sand in m²	
-# 5 dead_matte	surface of dead_matte in m²	
-# 5 other_seagrass	surface of other_seagrass in m²	
-# 6 infralitoral_algae	surface of infralitoral_algae in m²	
-# 7 infralitoral_algae	surface of infralitoral_algae in m²
-# from Andromede
-
-# Load necessary data
-rast <- terra::rast("./data/raw_data/predictors/Habitat_and_Anchoring/bioc_landscape_indices_bathy_anchorings_2023_medfr_1000m_2154.tif", lyrs = c(1:7))
-rast <- terra::project(rast, "EPSG:4326")
-df <- df
-poly <- as(buff, "SpatVector")
-
-# Rename bands
-names(rast) <- c("Posidonia", "Coralligeneous", "Rocks", "Sand", "Dead_Matte", "Other_Seagrass", "Infralitoral_Algae")
-
-# Initialize results columns in df
-df$main_habitat <- NA
-df$number_habitat <- NA
-
-# Find main habitat and number of habitats for each polygon
-for (i in 1:nrow(poly)) {  
-  spygn_code <- poly$spygen_code[i]
-  print(paste(
-    "--------------------------------------------",
-    "Processed polygon:", spygn_code,
-    "Polygon number:", i,
-    "--------------------------------------------"
-  ))
-  
-  polygon_sums <- list()
-  
-  for (band in 1:7) {
-    band_name <- names(rast)[band]
-    raster_band <- terra::subset(rast, band)
-    
-    # Extraction with weights
-    val <- terra::extract(raster_band, poly[i, ], weights = TRUE, na.rm = TRUE)
-    
-    # Check if extraction returned any values
-    if (!is.null(val) && nrow(val) > 0) {
-      # Compute weighted sum, ignoring NA values
-      weighted_values <- val[, 2] * val[, 3]
-      weighted_sum <- sum(weighted_values, na.rm = TRUE)
-      
-      # If all values were NA, set weighted_sum to 0
-      if (all(is.na(weighted_values))) {
-        weighted_sum <- 0
-      }
-    } else {
-      weighted_sum <- 0
-    }
-    
-    polygon_sums[[band_name]] <- weighted_sum
-    
-    print(paste(band_name, "weighted sum:", weighted_sum))
-  }
-  
-  # Convert polygon_sums to a named numeric vector
-  sums_vector <- unlist(polygon_sums)
-  
-  # Determine the main habitat (band with the highest weighted sum)
-  # If all sums are zero, set main_habitat to NA or a specific value indicating no habitat
-  if (all(sums_vector == 0)) {
-    max_band <- NA
-  } else {
-    max_band <- names(sums_vector)[which.max(sums_vector)]
-  }
-  
-  # Determine the number of habitats with non-zero sums
-  number_habitat <- sum(sums_vector != 0)
-  
-  # Store results in the corresponding row in df
-  df$main_habitat[df$spygen_code == spygn_code] <- max_band
-  df$number_habitat[df$spygen_code == spygn_code] <- number_habitat
-  
-  print(paste(" - Main habitat for", spygn_code, ":", ifelse(is.na(max_band), "None", max_band)))
-  print(paste(" - Number of habitats for", spygn_code, ":", number_habitat))
-}
-
-
-write.csv(df, "./data/processed_data/data_prep/predictors/Extracted_Predictors/mtdt_101220242_COV_protection_habitat.csv")
 
 
 
