@@ -2,14 +2,68 @@ This file details methodological choices made in the scripts of this folder.
 
 1_Prep_Mtdt ----------------------------------------------------------------------------------------------------
 
-# Replicates as point data : 
-To avoid pseudo-replication and ensure independence of our observations, we pooled together samples occuring at the same site (within a 1km buffer around the sampling transect) and the same 1/2 day (i.e the same 6 hours slot). 
+
+# Group samples by replicates : 
+
+To avoid pseudo-replication and ensure independence of our observations, we pooled together samples occurring at the same site (within a 500m radius around the sampling transect), within the same 1/2 day (≤ 6h difference), at the same sampling depth (< 5m difference), with the same sampling method.
+
+This definition allows to group together samples for which the extraction of MARS3D environmental variables will be virtually the same. It doesn't necessarily correspond to the replicates as they were intended in the field.
+
+The replicates were first pooled together by Amandine Avouac: (see R scripts 1.1_extraction_replicates_mtd_Med.R and 1.1_verif_replicates_distance.R) 
+
+- same date, time, site name and duration
+- when time was missing, using same site, subsite and date
+- some projects were individually looked at to pool together replicates as intended on field
+- replicates needed to be ≤ 1 km away. 
+
+We then checked manually and modified the replicate's pooling to make sure they match the above definition. Full description of modifications is made here : https://docs.google.com/document/d/1MyAs5c67hBPmW2C0piZrX5Qr4XVLwduplSN-G7GwBFQ/edit?tab=t.0 (mail sent on 22/07/2025 to Amandine and Laure). These modifications are implemented in the   
+1_Prep_Mtdt.R script at section # Replicates errors
 
 
 
 
 
 
+
+# Subsets of samples : 
+
+We remove of the full dataset samples uneeded for our study : 
+- Selection of points sampled in France 
+- Selection of marine points: outside harbours, lagoons, ports, rivers, estuaries 
+- Filtering out the seamount, canyon and open_ocean samples
+- Selection of coastal points : we want to remove samples far away from the coast, thus we keep all samples <3km away from the coast (samples with component = 'coastal') and 'offshore' samples with < 50m depth. This is because some 'offshore' samples are in fact very close to the shore. 
+
+At least one sample within a replicate group must match these criteria for the all the samples of the replicate groups to be kept (i.e. we keep all samples of a replicate group if one matches the criteria even if the other samples do not match all criteria).
+
+
+
+
+
+
+# Buffer : 
+To take into account spatial uncertainty linked to were the transect occurred and eDNA signal dispersion, we apply a 500 meters around the replicate groups. To do so, we first compute 500 meters buffers around each sample transect (straight line between start and end point location). Then, we computed a concave hull to create a polygon thightly wrapping all the buffers of a replicate group.  
+
+
+
+
+# Output : 
+mtdt_2.gpkg
+Per-sample buffers (500 m) with original per-sample attributes. 
+
+mtdt_3.gpkg
+Same rows as mtdt_2, but geometry is replicate-level hull when a replicate exists; otherwise the sample buffer. 
+
+mtdt_4_date_time.csv
+Minimal table of replicates, date, time_start.
+
+mtdt_4.gpkg
+Lightweight replicate-level geometry with only the essentials (date/time, country/region, depth_sampling). Intended for MARS3D extraction workflows (Pauline).
+
+mtdt_5.gpkg
+Full replicate-level dataset: geometry, harmonized metadata, plus totals (estimated_volume_total, duration_total) and combined comments. 
+
+788 replicate groups
+1667 samples
 
 
 
@@ -19,6 +73,12 @@ To avoid pseudo-replication and ensure independence of our observations, we pool
 # Computing distances : 
 
 
+# Distance to shore (Pauline / Marieke) :
+Important methodological considerations : Distance to shore is computed from replicates group's buffer centroids. When a centroid is on land (which happened for ~ 67/792 centroids) we set the distance to shore to 1 meter because it was actually not sampled on land (obviously) and it ended up there only because we simplified transects into straight lines between transect start and end points.
+
+# Distance to port canyon and reserve (Martin) : 
+cf. marbec-data.ird.fr/BiodivMed/Distance_to_port_MPA_canyon/README_DATA.md and README_TRAITEMENT.md 
+cf. GitHub : https://github.com/LaVoituretteProductive/marineDistance/tree/main
 
 # Habitat : 
 Important methodological considerations : "Zone bathyale" is not considered as a habitat in this analysis, thus it is ignored when it appears to be the main habitat (we take the next more important habitat) and when counting the number of habitats per km².

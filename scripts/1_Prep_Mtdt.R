@@ -356,7 +356,7 @@ rm(mtdtfull, ipocom)
 # - Selection of points sampled in France 
 # - Selection of marine points: outside harbours, lagoons, ports, rivers, estuaries 
 # - Filtering out the seamount, canyon and open_ocean samples 
-# - BUT: keep any sample in a replicate group if one of them passes the filters
+# - BUT: keep any sample in a replicate group if one of them matches these filters
 # - AND: if replicates == "no", it must pass the filters individually
 
 # STEP 1: Identify valid replicate groups (excluding "no")
@@ -437,7 +437,7 @@ mtdt_1 <- dt
 rm(dt, bathy, end_bathy, start_bathy)
 
 #------------- Subset n°2 : remove offshore > 50m depth --------------------
-# Explanation : we want to remove samples far away from the coast, yet some offshore samples are close enough to be kept (since offshore was assigned to samples > 6km away from the coast). Thus we remove samples that are BOTH offshore AND > 50m depth, this ensures keeping coastal samples relatively close to shore.
+# Explanation : we want to remove samples far away from the coast, yet some offshore samples are close enough to be kept (since offshore was assigned to samples > 3km away from the coast). Thus we remove samples that are BOTH offshore AND > 50m depth, this ensures keeping coastal samples relatively close to shore.
 
 # STEP 1: Identify valid replicate groups (excluding "no")
 valid_replicates_component_bathy <- mtdt_1 %>%

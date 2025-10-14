@@ -7,7 +7,7 @@
 # The expected result is a csv file with all original metedata info and a supplementary covariables columns each eDNA replicate.
 
 # Data source: 
-# Raster files of predictor (see data section for details)
+# Raster and vector files for predictors (see data section for details)
 # A subselection of metadata of the mediterranean eDNA samples grouped by replicates (see 1_Prep_Mtdt.R for details).
 
 # Author: Marieke Schultz
@@ -40,7 +40,7 @@ source("./utils/Fct_Data-Prep.R")
 #------------- VECTOR DATA ----------------
 
 ###### Distance to shore ############
-# Explanation : distance to shore is computed from the coastline shapefile using '2.1_Distance_shore.py'.
+# Explanation : distance to shore is computed from the coastline shapefile using '2.1_Distance_shore.py' from orignal code of Pauline Viguier. 
 # Important methodological considerations : 
 # Distance to shore is computed from replicates group's buffer centroids.
 # When a centroid is on land (which happened for ~ 67/792 centroids) we set the distance to shore to 1 meter because it was actually not sampled on land (obviously) and it ended up there only because we simplified transects into straight lines between transect start and end points.
@@ -58,8 +58,11 @@ buff <- st_read("./data/processed_data/predictors/mtdt_5_dist-shore.gpkg")
 
 
 
-###### Distance to port (Martin) ############
+###### Distance to port and canyon (Martin) ############
 # Explanation : distance to port was computed by Martin Paquet in 07/2025 with the distance pipeline explained in Methods.txt.
+
+
+
 ###### Distance to canyon (Martin) ############
 ###### Distance to reserve (Martin) ############
 ###### In or out reserve (Laure) #############
@@ -290,7 +293,12 @@ rm(filelist_temp, tmp, layer, buff_all)
 # 2. number of habitats per km² = number of different habitats / buffer area, 
 # 3. surface proportion of each habitat within buffer --> To do so we need to apply transformation to avoid compositional data bias (see here for details : https://docs.google.com/document/d/1cN9vJ6I4fHzPXZfXjOm77Klk5hCSFBBkOj6Mhgum_S8/edit?tab=t.0 and https://medium.com/@nextgendatascientist/a-guide-for-data-scientists-log-ratio-transformations-in-machine-learning-a2db44e2a455) 
 
+# ATTENTION
+# "la caro de la cymodocée est tres incomplete. je déconseille de l'utiliser comme predicteur" Julie Deter
+
+
 # We compute these variables twice : once for detailed habitats and once for the main habitats categories (ie grouped habitats)
+
 # Data :
 # A 100m resolution raster file from Andromed with 14 bands representing the surface of different habitats in m² :
 # 1	Association a rhodolithes
