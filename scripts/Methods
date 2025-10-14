@@ -1,5 +1,12 @@
 This file details methodological choices made in the scripts of this folder. 
 
+
+
+
+
+
+
+
 1_Prep_Mtdt ----------------------------------------------------------------------------------------------------
 
 
@@ -46,6 +53,9 @@ To take into account spatial uncertainty linked to were the transect occurred an
 
 
 
+
+
+
 # Output : 
 mtdt_2.gpkg
 Per-sample buffers (500 m) with original per-sample attributes. 
@@ -64,6 +74,19 @@ Full replicate-level dataset: geometry, harmonized metadata, plus totals (estima
 
 788 replicate groups
 1667 samples
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
