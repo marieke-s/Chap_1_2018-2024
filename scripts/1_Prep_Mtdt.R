@@ -484,6 +484,9 @@ mtdt_2 <- buffer_transect(
 #   theme_minimal() +
 #   ggtitle("500m samples buffer 2028-2022")
 
+# Export (mtdt_2) ------------
+# mtdt_2 = all rows (1 per sample), with a 500m buffer around each sample transect and with all associated metadata.
+
 # Save as gpkg
 mtdt_2$time_start <- as.character(mtdt_2$time_start)
 sf::write_sf(mtdt_2, "./data/processed_data/eDNA/mtdt_2.gpkg", delete_dsn = TRUE)
@@ -548,12 +551,14 @@ rm(replicates_buffer)
 
 
 
-#------------- Export ------------
+# Export (mtdt_3) ------------
+# mtdt_3 = all rows (1 per sample), as mtdt_2, but geometry is replicate-level when a replicate exists; otherwise the sample buffer. 
+
 # Save as gpkg
 mtdt_3$time_start <- as.character(mtdt_3$time_start)
 sf::write_sf(mtdt_3, "./data/processed_data/eDNA/mtdt_3.gpkg", delete_dsn = TRUE)
 
-#------------- Group Mtdt by replicates -----------------
+#------------- Group metadata by replicates -----------------
 # Explanation : make a simplified dataset grouped by replicates for NCDF extraction 
 
 
@@ -606,7 +611,11 @@ mtdt_4 <- mtdt_4 %>%
 
 
 
-# Export ----
+
+# Export (mtdt_4)----
+
+# mtdt_4 = simplified dataset grouped by replicates for predictors extraction
+
 # Date and time for Gaétan (aggregation of MARS3D data) and Martin (extraction Canyon) 
 # Sent on 24/07/2025
 mtdt_4 %>%
@@ -622,7 +631,7 @@ mtdt_4 %>%
 
 
 
-# Geom date, time, depth_sampling for Paule (MARS3D extraction) 
+# Geom date, time, depth_sampling for Pauline (MARS3D extraction) 
 st_write(mtdt_4, "./data/processed_data/eDNA/mtdt_4.gpkg", delete_dsn = TRUE)
 
 
@@ -649,7 +658,7 @@ st_write(mtdt_4, "./data/processed_data/eDNA/mtdt_4.gpkg", delete_dsn = TRUE)
 
 
 
-# --- Complete mtdt ----
+# --- Complete mtdt dataset grouped by replicates (mtdt_5)----
 # Prepare dataset ----
 mtdt_5 <- mtdt_3 
 
@@ -781,7 +790,9 @@ rm(cols_mtdt_3, cols_mtdt_5, only_in_mtdt_3, only_in_mtdt_5)
 
 
 
-# Export ----
+# Export (mtdt_5) ----
+# mtdt_5 = complete dataset grouped by replicates.
+
 # Save as gpkg
 mtdt_5$time_start <- as.character(mtdt_5$time_start)
 sf::write_sf(mtdt_5, "./data/processed_data/eDNA/mtdt_5.gpkg", delete_dsn = TRUE)
