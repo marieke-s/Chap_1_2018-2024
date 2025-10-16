@@ -331,8 +331,8 @@ beepr::beep() # Beep to indicate completion
 
 buff <- buff_all
 
-rm(filelist_temp, tmp, layer, buff_all)
-
+rm(filelist_temp, tmp, layer, buff_all, poly, rast, i, var)
+colnames(buff)
 
 
 ######################## Habitat #########################
@@ -341,11 +341,12 @@ rm(filelist_temp, tmp, layer, buff_all)
 # 2. number of habitats per km² = number of different habitats / buffer area, 
 # 3. surface proportion of each habitat within buffer --> To do so we need to apply transformation to avoid compositional data bias (see here for details : https://docs.google.com/document/d/1cN9vJ6I4fHzPXZfXjOm77Klk5hCSFBBkOj6Mhgum_S8/edit?tab=t.0 and https://medium.com/@nextgendatascientist/a-guide-for-data-scientists-log-ratio-transformations-in-machine-learning-a2db44e2a455) 
 
-# ATTENTION
-# "la carto de la cymodocée est tres incomplete. je déconseille de l'utiliser comme predicteur" Julie Deter
+# ATTENTION : Important methodological considerations :
+# "la carto de la cymodocée est tres incomplete. je déconseille de l'utiliser comme predicteur" Julie Deter --> we remove it from the analysis
+# "Zone bathyale" is not considered as a habitat in this analysis. 
+# Both are ignored when they appear to be the main habitat (we take the next more important habitat) and when counting the number of habitats per km².
 
-
-# We compute these variables twice : once for detailed habitats and once for the main habitats categories (ie grouped habitats)
+# We compute these variables twice : once for detailed habitats and once for the main habitats categories (ie grouped habitats).
 
 # Data :
 # A 100m resolution raster file from Andromed with 14 bands representing the surface of different habitats in m² :
@@ -378,7 +379,7 @@ names(rast) <-  c("Association rhodolithes", "matte_morte_P.oceanica",
                      "Herbiers Cymodocess", "Zone bathyale","Herbier mixte", "Z.noltei")
 
 
-
+plot(rast)
 
 
 
@@ -386,15 +387,17 @@ names(rast) <-  c("Association rhodolithes", "matte_morte_P.oceanica",
 
 
 # Group habitats ----
+# Here habitats are separatly named as a function of their location (infralittoral, circalittoral, large) and type (rocky, soft bottom, seagrass, algae, coralligenous) --> we group habitats to keep only types. 
+
 rast_grouped <- rast
 
 # Put "fonds meubles" together
 rast_grouped$soft_bottom <- app(rast_grouped[[names(rast_grouped) %in% c("fonds meubles circalittoraux","Fonds meubles infralittoraux")]], fun = "sum")
 rast_grouped <- rast_grouped[[!(names(rast_grouped) %in% c("fonds meubles circalittoraux","Fonds meubles infralittoraux"))]]
 
-# Put "P.oceanica" "Herbier mixte" "Z.noltei" and "Herbiers Cymodocess" together
-rast_grouped$meadow <- app(rast_grouped[[names(rast_grouped) %in% c("P.oceanica","Herbiers Cymodocess", "Z.noltei", "Herbier mixte" )]], fun = "sum")
-rast_grouped <- rast_grouped[[!(names(rast_grouped) %in% c("P.oceanica","Herbiers Cymodocess", "Z.noltei", "Herbier mixte"))]]
+# Put "P.oceanica" "Herbier mixte" "Z.noltei" together
+rast_grouped$meadow <- app(rast_grouped[[names(rast_grouped) %in% c("P.oceanica", "Z.noltei", "Herbier mixte" )]], fun = "sum")
+rast_grouped <- rast_grouped[[!(names(rast_grouped) %in% c("P.oceanica", "Z.noltei", "Herbier mixte"))]]
 
 # Put "Roche du large" and "Galets infralittoraux" together 
 rast_grouped$rock <- app(rast_grouped[[names(rast_grouped) %in% c("Roche du large","Galets infralittoraux")]], fun = "sum")
@@ -416,7 +419,7 @@ rast_grouped <- rast_grouped[[!(names(rast_grouped) %in% c("Association rhodolit
 
 
 # Main habitat and Number of habitat / km² ----
-# Important methodological considerations : "Zone bathyale" is not considered as a habitat in this analysis, thus it is ignored when it appears to be the main habitat (we take the next more important habitat) and when counting the number of habitats per km².
+# Important methodological considerations : "Zone bathyale" and "Cymodocees" are not considered as a habitat in this analysis, thus they are ignored when tehy appear to be the main habitat (we take the next more important habitat) and when counting the number of habitats per km².
 
 calculate_habitats <- function(buff, rast, id_column_name, name = "", buff_area) {
   # Check inputs
@@ -427,7 +430,7 @@ calculate_habitats <- function(buff, rast, id_column_name, name = "", buff_area)
   if (!is.character(name)) stop("name must be a character string")
   
   # Define layers to exclude
-  exclude_layers <- "Zone bathyale"
+  exclude_layers <- c("Zone bathyale", "Herbiers Cymodocess")
   
   # Filter out excluded layers
   included_bands <- setdiff(names(rast), exclude_layers)
@@ -492,7 +495,7 @@ calculate_habitats <- function(buff, rast, id_column_name, name = "", buff_area)
 }
 
 # For all habitats
-buff1 <- calculate_habitats(buff = buff[0:3,], 
+buff1 <- calculate_habitats(buff = buff, 
                             rast = rast, 
                             id_column_name = "replicates",
                            buff_area = "area_km2")
@@ -538,43 +541,10 @@ buff1 <- calculate_habitats(buff = buff1,
 
 
 
-# Surface proportion of each habitat  (ALR transformed) ----
-
-## main biocenose in a cell ----
-
-fun <- function(i) { i / sum(i) } # function to compute proportion of each habitats in the new cells (with lower resolution)
-
-r_bioce <- app(r_bioce, fun = fun)
-
-r_max_bioce <- which.max(r_bioce)
-names(r_max_bioce) <- "max_bioce"
-
-values(r_max_bioce) <- case_when(values(r_max_bioce)== 1 ~ "Association matte morte P.oceanica",
-                                 values(r_max_bioce)== 3 ~ "Algues infralittorales",
-                                 values(r_max_bioce) == 6 ~ "zone bathyale",
-                                 values(r_max_bioce) == 7 ~ "meadow",
-                                 values(r_max_bioce) == 8 ~ "soft bottom",
-                                 values(r_max_bioce) == 9 ~ "corralligenous")
-
-# save into a raster file (class SpatRaster)
-writeRaster(r_max_bioce, file = "Outputs/01_read_cleaning/r_max_bioce.tif", overwrite = TRUE)
-
-## number of biocenoses per cell ----
-
-fun1 <- function(i) {sum(i !=0)}
-
-r_n_bioce <- app(r_bioce, fun1)
-
-names(r_n_bioce) <- "n_bioce"
-
-# save into a raster file (class SpatRaster)
-writeRaster(r_n_bioce, file = "Outputs/01_read_cleaning/r_n_bioce.tif", overwrite = TRUE)
+# Surface proportion of each habitat  (ALR transformed) #### TO DO #### ----
 
 
-
-
-
-######################## Habitat : surface of each habitat ####
+######################## BROUILLON / Habitat : surface of each habitat ####
 # Load data
 rast <- terra::rast("./data/raw_data/predictors/Habitat_and_Anchoring/bioc_landscape_indices_bathy_anchorings_2023_medfr_1000m_2154.tif", lyrs = c(1:7))
 rast <- terra::project(rast, "EPSG:4326")
@@ -695,19 +665,18 @@ write.csv(df, "./data/processed_data/data_prep/predictors/Extracted_Predictors/m
 
 
 ################ Check data for homogenous sampling effort ##############
+
+buff <- as.data.frame(buff)
 buff %>%
   group_by(PCR_replicates) %>%
   summarise(count = n()) %>%
   print()
 
 
-
 buff %>%
   group_by(estimated_volume_total) %>%
   summarise(count = n()) %>%
   print()
-
-
 
 buff %>%
   filter(estimated_volume_total > 55 & estimated_volume_total < 67 & PCR_replicates == 24) %>%
@@ -716,6 +685,8 @@ buff %>%
 
 summary(buff$area_km2)
 hist(buff$area_km2, breaks = 10)
+sd(buff$area_km2, na.rm = TRUE)
+
 
 buff$area_km2 <- as.numeric(buff$area_km2)
 buff %>%

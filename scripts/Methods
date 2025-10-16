@@ -141,9 +141,19 @@ In this section of the code, we assign the variable "mpa_fully" (i.e., whether o
 
 
 # Habitat : 
+
+We use the DONIA expert monitoring network (www.medtrix.fr, “Donia Expert” project), at a ~0.001° resolution, providing spatial coverage of rocky, soft, artificial, and coralligenous substrates, but also of seagrass meadows (Posidonia oceanica and Cymodocea nodosa sp.), and the associated dead mattes of Posidonia oceanica (what remains when the seagrass is dead). 
+
+The habitat data (bioc_2023_medfr_100m_2154.tif) comes from Andromede updated in 2023. 
+
+Key assumption : habitats did not change from 2018 to 2024.
+
+
+
 Important methodological considerations : "Zone bathyale" is not considered as a habitat in this analysis, thus it is ignored when it appears to be the main habitat (we take the next more important habitat) and when counting the number of habitats per km².
 
 
+We transformed habitat cover values so that their sum reached 1, and computed the number of distinct habitats per cell, providing an estimate of habitat diversity. Soft bottom was highly correlated to Posidonia oceanica meadows (r = -0.91) and so was not included in further analyses. 
 
 
 
