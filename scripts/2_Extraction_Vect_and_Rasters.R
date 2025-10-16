@@ -39,10 +39,10 @@ source("./utils/Fct_Data-Prep.R")
 
 #------------- VECTOR DATA ----------------
 
-###### Distance to shore ############
+###### Distance to shore (Pauline/Marieke) ############
 # Explanation : distance to shore is computed from the coastline shapefile using '2.1_Distance_shore.py' from orignal code of Pauline Viguier. 
 # Important methodological considerations : 
-# Distance to shore is computed from replicates group's buffer centroids.
+# Di(Paulostance to shore is computed from replicates group's buffer centroids.
 # When a centroid is on land (which happened for ~ 67/792 centroids) we set the distance to shore to 1 meter because it was actually not sampled on land (obviously) and it ended up there only because we simplified transects into straight lines between transect start and end points.
 
 # Run 2.1_Distance_shore.py 
@@ -58,31 +58,49 @@ buff <- st_read("./data/processed_data/predictors/mtdt_5_dist-shore.gpkg")
 
 
 
-###### Distance to port and canyon (Martin) ############
-# Explanation : distance to port was computed by Martin Paquet in 07/2025 with the distance pipeline explained in Methods.txt.
+###### Distance to port, canyon and reserve (Martin) ############
+# Explanation : distances to several entities (port, canyons, MPA reserve) were computed by Martin Paquet in 07/2025 with the distance pipeline explained in Methods.txt.
 
+# Load Martin's distance 
+dist <- st_read("./data/raw_data/predictors/Distances/buffer_with_closest_feats.gpkg")
+dist <- as.data.frame(dist)
 
+# Merge buff and dist by replicates
+# Detect columns in dist that are not in buff
+extra_cols <- setdiff(names(dist), names(buff))
 
-###### Distance to canyon (Martin) ############
-###### Distance to reserve (Martin) ############
+# left_join keeps all rows in buff and brings matching columns from dist by 'replicates'
+buff <- buff %>%
+  left_join(dist %>% dplyr::select(replicates, all_of(extra_cols)), by = "replicates")
+
+rm(dist, extra_cols)
+
 ###### In or out reserve (Laure) #############
-# Explanation : variable that states whether or not the replicates were done within a fully protected MPA (ie a reserve).
+# Explanation : variable that states whether or not the replicates were done within a fully protected MPA (i.e. a reserve).
 
-# MPA data used : protectionMed_fr_modif.gpkg made by Lola Romant during her internship. She assigned protection levels to the French Mediterranean MPA based on MPA Guide Categories. This data was then modified by Laure Velez to keep only the MPA with the highest protection level when several were overlapping (protectionMed_fr.shp). Then it was manually (QGIS) modified by Marieke Schultz to keep correct like this : 
-# Passe de la Réserve naturelle de Cerbicale (Bouches De Bonifacio) du niveau 3 au niveau 4
-# Passe de l'Archipel des îles de Lavezzi (Bouches De Bonifacio) du niveau 3 au niveau 4
-# J'ai créée la colonne "Fully" dans laquelle les niveaux 1, 2 et 3 sont en "YES" et le reste en "NO"
+# MPA data used : The MPA data used was made in several steps :
+# 1) 2024 : Lola Romant assigned protection levels to the French Mediterranean MPA based on MPA Guide Categories during her internship. # --> protectionMed_fr_modif.gpkg
+
+# 2) This data was then modified by Laure Velez to keep only the MPA with the highest protection level when several were overlapping. 
+# --> protectionMed_fr.shp
+
+# 3) 07/2025 : Marieke Schultz manually (QGIS) modified the data to correct errors based on current legislation : 
+# "Passe de la Réserve naturelle de Cerbicale (Bouches De Bonifacio)" : from level 3 to 4
+# "Passe de l'Archipel des îles de Lavezzi (Bouches De Bonifacio)" : from level 3 to 4
+# I created the column ‘Fully’ in which levels 1, 2 and 3 are marked “YES” and the rest ‘NO’.
 # --> protectionMed_fr_modif.gpkg
 
-# In/Out data used : mtd_mpafully_2018-2024_complete.csv made by Laure Velez in 07/2025. She checked for each eDNA samples whether or not they belonged to a fully protected MPA, cheking both start point, end point, and transect (eg when start and end points were outside but transect crossing the reserve). 
+# 4) 07/2025 : Laure Velez assigned to each sample whether or not it belonged to a fully protected MPA, using the protectionMed_fr_modif.gpkg data. She checked for each eDNA samples whether or not they belonged to a fully protected MPA, cheking both start point, end point, and transect (eg when start and end points were outside but transect crossing the reserve). 
+# --> mtd_mpafully_2018-2024_complete.csv with column "mpa_fully". 
 
-# Load In/Out data
+
+# Load data
 in_out <- read.csv("./data/raw_data/predictors/MPA/mtd_mpafully_2018-2024_complete.csv")
 unique(in_out$mpa_fully)
 
 
 # Here we assign the variable "mpa_fully" to the buff data. 
-# When all samples of the replicates have mpa_fully = 1 we set buff$mpa_fully = 1, when all samples of the replicates have mpa_fully = 0 we set buff$mpa_fully = 0, else we set buff$mpa_fully = NA.
+# When all samples of the replicate group have mpa_fully = 1 we set buff$mpa_fully = 1, when all samples of the replicate group have mpa_fully = 0 we set buff$mpa_fully = 0, else we set buff$mpa_fully = NA.
 
 # Step 1: Create a named vector of spygen_code -> mpa_fully
 mpa_lookup <- setNames(in_out$mpa_fully, in_out$spygen_code)
@@ -126,10 +144,40 @@ buff %>% filter(is.na(mpa_fully)) %>% dplyr::select(replicates, mpa_fully) %>%
   print()
 
 
-# SPY212710/SPY212712/SPY212719 = NA
-# SPY212710 = 0
-# SPY212712 = 0
-# SPY212719 = 1
+# No NA found 
+
+###### Comparison distance to reserve Martin with in_out Laure ############
+
+# Make column reserve_martin : if $mpa_dist_m_min = 0 then reserve_martin = 1 else reserve_martin = 0
+buff$reserve_martin <- ifelse(buff$mpa_dist_m_min == 0, 1, 0)
+
+# Compare buff$mpa_fully with buff$reserve_martin
+comparison <- buff %>%
+  dplyr::select(replicates, mpa_fully, reserve_martin) %>%
+  mutate(match = ifelse(mpa_fully == reserve_martin, TRUE, FALSE))
+
+# Count matches and mismatches
+comparison %>%
+  group_by(match) %>%
+  summarise(count = n()) %>%
+  print()
+
+61/788 *100 # 7.7% mismatch
+
+
+# Map the mismatches to see where they are located
+mismatches <- buff %>%
+  filter(mpa_fully != reserve_martin | is.na(mpa_fully) | is.na(reserve_martin))
+
+# Plot mismatches
+plot(st_geometry(mismatches), col = ifelse(mismatches$mpa_fully == 1, "blue", "red"), main = "Mismatches between mpa_fully and reserve_martin")
+
+
+rm(comparison, mismatches)
+
+# remove buff$reserve_martin
+buff <- buff %>% dplyr::select(-reserve_martin)
+
 
 ###### Sampling effort ############
 # Explanation : the aim is to compute variables that represent the sampling effort in each replicate group : 
@@ -207,7 +255,7 @@ rast[rast >= 0] <- NA
 buff <- spatial_extraction(var = var, rast = rast, poly = poly)
 
 
-######################## Terrain index ####
+###### Terrain index ####
 # Explanation : we compute terrain indices from the SHOM MNT at 100m resolution.
 # Methodological choices : 
 # Lecours et al. 2017; Rees et al. (2014)
@@ -242,7 +290,7 @@ compute_selected_terrain_ind(rast = rast,
 #   plot(rasters[[i]], main = names(rasters)[i])
 # }
 # 
-# rm(tif_files, rasters) 
+# rm(tif_files, rasters)
 
 
 
@@ -288,13 +336,13 @@ rm(filelist_temp, tmp, layer, buff_all)
 
 
 ######################## Habitat #########################
-# Explanation : we retreive 3 different variables : 
+# Explanation : we retrieve 3 different variables : 
 # 1. main habitat within buffer, 
 # 2. number of habitats per km² = number of different habitats / buffer area, 
 # 3. surface proportion of each habitat within buffer --> To do so we need to apply transformation to avoid compositional data bias (see here for details : https://docs.google.com/document/d/1cN9vJ6I4fHzPXZfXjOm77Klk5hCSFBBkOj6Mhgum_S8/edit?tab=t.0 and https://medium.com/@nextgendatascientist/a-guide-for-data-scientists-log-ratio-transformations-in-machine-learning-a2db44e2a455) 
 
 # ATTENTION
-# "la caro de la cymodocée est tres incomplete. je déconseille de l'utiliser comme predicteur" Julie Deter
+# "la carto de la cymodocée est tres incomplete. je déconseille de l'utiliser comme predicteur" Julie Deter
 
 
 # We compute these variables twice : once for detailed habitats and once for the main habitats categories (ie grouped habitats)
@@ -560,6 +608,27 @@ for (layer in names(rast)) {
 
 # Check the updated data frame
 print(colnames(df))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

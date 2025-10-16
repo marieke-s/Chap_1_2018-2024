@@ -93,17 +93,101 @@ Full replicate-level dataset: geometry, harmonized metadata, plus totals (estima
 
 2_Extraction_Vect_and_Rasters.R ------------------------------------------------------------------------------ 
 
+
+
+
 # Computing distances : 
 
 
 # Distance to shore (Pauline / Marieke) :
 Important methodological considerations : Distance to shore is computed from replicates group's buffer centroids. When a centroid is on land (which happened for ~ 67/792 centroids) we set the distance to shore to 1 meter because it was actually not sampled on land (obviously) and it ended up there only because we simplified transects into straight lines between transect start and end points.
 
+
 # Distance to port canyon and reserve (Martin) : 
 cf. marbec-data.ird.fr/BiodivMed/Distance_to_port_MPA_canyon/README_DATA.md and README_TRAITEMENT.md 
 cf. GitHub : https://github.com/LaVoituretteProductive/marineDistance/tree/main
 
+
+
+
+
+
+# Inside/Outside MPA :
+
+MPA data used : The MPA data used was made in several steps :
+ 1) 2024 : Lola Romant assigned protection levels to the French Mediterranean MPA based on MPA Guide Categories during her internship. # --> protectionMed_fr_modif.gpkg
+
+ 2) This data was then modified by Laure Velez to keep only the MPA with the highest protection level when several were overlapping. 
+ --> protectionMed_fr.shp
+
+ 3) 07/2025 : Marieke Schultz manually (QGIS) modified the data to correct errors based on current legislation : 
+ 	- "Passe de la Réserve naturelle de Cerbicale (Bouches De Bonifacio)" : from level 3 to 4
+ 	- "Passe de l'Archipel des îles de Lavezzi (Bouches De Bonifacio)" : from level 3 to 4
+ 	- I created the column ‘Fully’ in which levels 1, 2 and 3 are marked “YES” and the rest ‘NO’.
+ --> protectionMed_fr_modif.gpkg
+
+# 4) 07/2025 : Laure Velez assigned to each sample whether or not it belonged to a fully protected MPA, using the protectionMed_fr_modif.gpkg data. She checked for each eDNA samples whether or not they belonged to a fully protected MPA, cheking both start point, end point, and transect (eg when start and end points were outside but transect crossing the reserve). 
+# --> mtd_mpafully_2018-2024_complete.csv with column "mpa_fully". 
+
+
+In this section of the code, we assign the variable "mpa_fully" (i.e., whether or not a replicate group was done inside a fully protected area according to MPA Guide definition) to each replicate group. When all samples of the replicate group have mpa_fully = 1 we set buff$mpa_fully = 1, when all samples of the replicate group have mpa_fully = 0 we set buff$mpa_fully = 0, else we set buff$mpa_fully = NA. In mtdt_5 with 788 rows no NA was found. 
+
+
+
+
+# Sampling effort 
+
+
+
+
 # Habitat : 
 Important methodological considerations : "Zone bathyale" is not considered as a habitat in this analysis, thus it is ignored when it appears to be the main habitat (we take the next more important habitat) and when counting the number of habitats per km².
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
