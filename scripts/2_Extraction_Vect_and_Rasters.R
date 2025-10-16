@@ -339,9 +339,9 @@ colnames(buff)
 # Explanation : we retrieve 3 different variables : 
 # 1. main habitat within buffer, 
 # 2. number of habitats per km² = number of different habitats / buffer area, 
-# 3. surface proportion of each habitat within buffer --> To do so we need to apply transformation to avoid compositional data bias (see here for details : https://docs.google.com/document/d/1cN9vJ6I4fHzPXZfXjOm77Klk5hCSFBBkOj6Mhgum_S8/edit?tab=t.0 and https://medium.com/@nextgendatascientist/a-guide-for-data-scientists-log-ratio-transformations-in-machine-learning-a2db44e2a455) 
+# 3. surface proportion of each habitat within buffer 
 
-# ATTENTION : Important methodological considerations :
+# WARNING : Important methodological considerations :
 # "la carto de la cymodocée est tres incomplete. je déconseille de l'utiliser comme predicteur" Julie Deter --> we remove it from the analysis
 # "Zone bathyale" is not considered as a habitat in this analysis. 
 # Both are ignored when they appear to be the main habitat (we take the next more important habitat) and when counting the number of habitats per km².
@@ -378,8 +378,12 @@ names(rast) <-  c("Association rhodolithes", "matte_morte_P.oceanica",
                      "Fonds meubles infralittoraux", "Habitats artificiels",
                      "Herbiers Cymodocess", "Zone bathyale","Herbier mixte", "Z.noltei")
 
+# Remove "zone bathyale" and "Cymodocees" from raster
+rast <- rast[[!(names(rast) %in% c("Zone bathyale", "Herbiers Cymodocess"))]]
 
 plot(rast)
+
+
 
 
 
@@ -408,6 +412,10 @@ rast_grouped$coralligenous <- app(rast_grouped[[names(rast_grouped) %in% c("Asso
 rast_grouped <- rast_grouped[[!(names(rast_grouped) %in% c("Association rhodolithes","Coralligene"))]]
 
 
+plot(rast_grouped)
+
+
+
 
 
 
@@ -428,13 +436,6 @@ calculate_habitats <- function(buff, rast, id_column_name, name = "", buff_area)
   if (!id_column_name %in% colnames(buff)) stop(paste("Column", id_column_name, "not found in buff"))
   if (!buff_area %in% colnames(buff)) stop(paste("Area column", buff_area, "not found in buff"))
   if (!is.character(name)) stop("name must be a character string")
-  
-  # Define layers to exclude
-  exclude_layers <- c("Zone bathyale", "Herbiers Cymodocess")
-  
-  # Filter out excluded layers
-  included_bands <- setdiff(names(rast), exclude_layers)
-  rast <- rast[[included_bands]]  # Subset raster to included layers only
   
   # Define dynamic column names
   main_habitat_col <- paste0(name, "main_habitat")
@@ -515,6 +516,15 @@ buff1 <- calculate_habitats(buff = buff1,
 
 
 
+# Bind new columns to buff
+# Detect columns in dist that are not in buff
+extra_cols <- setdiff(names(buff1), names(buff))
+
+# left_join keeps all rows in buff and brings matching columns from dist by 'replicates'
+buff <- buff %>%
+  left_join(buff1 %>% dplyr::select(replicates, all_of(extra_cols)), by = "replicates")
+
+rm(buff1)
 
 
 
@@ -541,68 +551,49 @@ buff1 <- calculate_habitats(buff = buff1,
 
 
 
-# Surface proportion of each habitat  (ALR transformed) #### TO DO #### ----
+# Surface proportion of each habitat ----
 
+# Make buff a spatial object
+buff <- sf::st_as_sf(buff)
 
-######################## BROUILLON / Habitat : surface of each habitat ####
-# Load data
-rast <- terra::rast("./data/raw_data/predictors/Habitat_and_Anchoring/bioc_landscape_indices_bathy_anchorings_2023_medfr_1000m_2154.tif", lyrs = c(1:7))
-rast <- terra::project(rast, "EPSG:4326")
+# Initialize df
+df <- buff
 
-# Rename bands
-names(rast) <- c("Posidonia", "Coralligeneous", "Rocks", "Sand", "Dead_Matte", "Other_Seagrass", "Infralitoral_Algae")
-plot(rast)
-
-# df <- readRDS("./data/processed_data/data_prep/Med_TOT_2023_P0_R0_Idalongeville.rds")
-# poly <- readRDS('./data/processed_data/data_prep/Med_TOT_2023_P0.rds')
-# poly <- poly %>% dplyr::select(spygen_code, geometry)
-
-# Convert poly df to SpatVector
-# poly <- st_as_sf(poly)
-# poly <- terra::vect(poly)
-# dim(poly)
-# plot(poly)
-# class(poly)
-
-# Iterate through each habitat layer in the raster
-for (layer in names(rast)) {
-  # Call spatial_extraction function for the current habitat layer
-  df <- spatial_extraction(
-    var = layer,  # Current habitat name
-    rast = rast[[layer]],  
-    df = df,  
-    poly = poly, 
-    stats = c("mean")  # Averages the pixel values within the buffer
+for (layer in names(rast_grouped)) {
+  
+  temp <- spatial_extraction(
+    var   = layer,
+    rast  = rast_grouped[[layer]],
+    poly  = df,               # pass the sf object
+    stats = c("mean")
   )
+  
+  # Find newly created column names
+  new_cols <- setdiff(names(temp), names(df))
+  
+  if (length(new_cols) > 0) {
+    # Drop geometry from temp and bind only the new attribute columns
+    df <- bind_cols(df, sf::st_drop_geometry(temp)[, new_cols, drop = FALSE])
+  } else {
+    message(sprintf("No new columns returned for layer '%s'", layer))
+  }
 }
 
-# Check the updated data frame
-print(colnames(df))
+
+# Bind new columns to buff
+# Detect columns in dist that are not in buff
+extra_cols <- setdiff(names(df), names(buff))
+
+# left_join keeps all rows in buff and brings matching columns from dist by 'replicates'
+buff <- buff %>%
+  left_join(df %>% dplyr::select(replicates, all_of(extra_cols)), by = "replicates")
+
+rm(df)
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+  
+  
+  
 ######################## GFW : Vessel Presence (0.01°) : weighted mean, min, max, range ####
 # Parameters
 var <- "Vessel_Presence"
