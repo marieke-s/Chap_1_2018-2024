@@ -62,7 +62,7 @@ buff <- st_read("./data/processed_data/predictors/mtdt_5_dist-shore.gpkg")
 # Explanation : distances to several entities (port, canyons, MPA reserve) were computed by Martin Paquet in 07/2025 with the distance pipeline explained in Methods.txt.
 
 # Load Martin's distance 
-dist <- st_read("./data/raw_data/predictors/Distances/buffer_with_closest_feats.gpkg")
+dist <- st_read("./data/raw_data/predictors/Distances/buffer_with_closest_feats_search_outlier_treshold_recalibrated.gpkg")
 dist <- as.data.frame(dist)
 
 # Merge buff and dist by replicates
@@ -127,6 +127,36 @@ get_mpa_fully_status <- function(replicate_str) {
   }
 }
 
+
+
+
+################### CHECKS """""""""""""""""""""""""
+get_mpa_fully_status <- function(replicate_str) {
+  # Extract SPY codes from the string (handles both '/' and '_')
+  codes <- unlist(strsplit(replicate_str, "[/_]"))
+  
+  # Lookup corresponding mpa_fully values
+  values <- mpa_lookup[codes]
+  
+  # If any spygen_code is missing (NA in lookup), return NA immediately
+  if (any(is.na(values))) {
+    return(NA)
+  }
+  
+  # Apply rules based on mpa_fully values
+  if (all(values == 1)) {
+    return(1)
+  } else if (all(values == 0)) {
+    return(0)
+  } else {
+    return(NA)
+  }
+}
+
+#################################################"
+
+
+
 # Step 3: Apply to buff
 buff$mpa_fully <- vapply(buff$replicates, get_mpa_fully_status, FUN.VALUE = numeric(1))
 
@@ -163,15 +193,35 @@ comparison %>%
   print()
 
 61/788 *100 # 7.7% mismatch
+63/788 # 7.9% mismatch 
 
 
-# Map the mismatches to see where they are located
-mismatches <- buff %>%
-  filter(mpa_fully != reserve_martin | is.na(mpa_fully) | is.na(reserve_martin))
+# Add a column to buff indicating whether there is a mismatch
+buff2 <- buff %>% dplyr::select(replicates, mpa_dist_m_min, geom)
 
-# Plot mismatches
-plot(st_geometry(mismatches), col = ifelse(mismatches$mpa_fully == 1, "blue", "red"), main = "Mismatches between mpa_fully and reserve_martin")
+# spatial join: attach attributes from 'comparison' to 'buff' where geometries intersect
+buff2 <- st_join(buff2, comparison)
 
+
+# merge buff2 with comparison by replicates
+
+buff2 <- buff2 %>%
+  as.data.frame() %>%
+  left_join(comparison, by = "replicates")
+
+# now write
+buff2 <- sf::st_as_sf(buff2)
+st_write(buff2, "./data/processed_data/predictors/check_reserve_match.gpkg", delete_dsn = TRUE)
+
+
+
+
+
+
+
+
+
+s# Clean
 
 rm(comparison, mismatches)
 
@@ -656,12 +706,55 @@ write.csv(df, "./data/processed_data/data_prep/predictors/Extracted_Predictors/m
 
 
 ######################## MARS3D : merge en add to buff TODO #####################################
-######################## Chlorophylle : extract and add to buff TODO #####################################
 
 
-# Load nc 
-chl <- ncdf4::nc_open("./20170101_cmems_obs-oc_med_bgc-plankton_my_l4-gapfree-multi-1km_P1D.nc")
-chl
+# Load MARS3D data (.geojson)
+
+# Current and Wind data
+cur_wind <- st_read("./data/raw_data/predictors/MARS3D/adne_extract_curent_wind/mtdt_mars3d_current_wind_2018-2024.geojson")
+
+# chekc extraction 5 years, type of clip/ extraction, weighted mean ??? 
+# Weighted mean : for raster extraction in R + exact extraction
+# For Copernicus : all_touched = FALSE rio.clip --> not weighted mean but exact extraction
+
+
+######################## Chlorophyll : extract and add to buff TODO #####################################
+# Chlorophylle data is extracted from Copernicus data : cmems_obs-oc_med_bgc-plankton_my_l4-gapfree-multi-1km_P1D (DOI : https://doi.org/10.48670/moi-00300). It has a daily temporal resolution and a 1km spatial resolution. It is a L4 product meaning :
+# - Level 4 data result from analyses of L3 data (e.g., variables derived from multiple measurements).
+# - L4 are those products for which a temporal averaging method or an interpolation procedure is applied to fill in missing data values. Temporal averaging is performed on a monthly basis. The L4 daily products is also called “interpolated” or “cloud free” products. 
+# Product user Manual (https://documentation.marine.copernicus.eu/PUM/CMEMS-OC-PUM.pdf)
+
+# The extraction is made on the ncdf "./data/raw_data/predictors/Chl/cmems_obs-oc_med_bgc-plankton_my_l4-gapfree-multi-1km_P1D_20130101-20250101.nc" with the script 2.2_Extract_NCDF.ipynb in python.
+
+# Load CHL extracted data (.geojson)
+chl <- read.csv("./data/processed_data/predictors/mtdt_5_CHL.csv")
+
+# Check chl values 
+colnames(chl)
+
+# Hist
+for (c in colnames(chl)[-1]) {
+  hist(chl[[c]], main = paste("Histogram of", c), xlab = c, breaks = 50)
+}
+
+# NA
+for (c in colnames(chl)[-1]) {
+  na_count <- sum(is.na(chl[[c]]))
+  cat("Number of NA in", c, ":", na_count, "\n")
+}
+
+# Merge with buff by replicates
+buff2 <- buff %>%
+  dplyr::select(c(replicates, geom)) %>%
+  left_join(chl, by = "replicates")
+
+colnames(buff2)
+
+# Export as gpkg
+st_write(buff2, "./data/processed_data/predictors/mtdt_5_CHL-geom-only.gpkg", delete_dsn = TRUE)
+
+
+
 
 ################ Check data for homogenous sampling effort ##############
 
