@@ -91,12 +91,12 @@ Full replicate-level dataset: geometry, harmonized metadata, plus totals (estima
 
 
 
-2_Extraction_Vect_and_Rasters.R ------------------------------------------------------------------------------ 
+2_Extraction_Predictors.R ------------------------------------------------------------------------------ 
 
 
 
 
-# Computing distances : 
+# Distances : 
 
 
 # Distance to shore (Pauline / Marieke) :
@@ -153,12 +153,15 @@ Key assumption : habitats did not change from 2018 to 2024.
 Important methodological considerations : "Zone bathyale" is not considered as a habitat in this analysis, thus it is ignored when it appears to be the main habitat (we take the next more important habitat) and when counting the number of habitats per km².
 
 
-We transformed habitat cover values so that their sum reached 1, and computed the number of distinct habitats per cell, providing an estimate of habitat diversity. Soft bottom was highly correlated to Posidonia oceanica meadows (r = -0.91) and so was not included in further analyses. 
 
 
 
 
+# Chlorophylle : 
 
+Mediterranean Sea, Bio-Geo-Chemical, L4, monthly means, daily gapfree and climatology Satellite Observations (1997-ongoing) (https://doi.org/10.48670/moi-00300) : 
+spatial resolution for chl : 
+Temporal resolutions: monthly and daily (for "gap-free" and climatology data)
 
 
 
