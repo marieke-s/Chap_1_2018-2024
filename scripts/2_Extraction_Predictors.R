@@ -37,6 +37,10 @@ library(stringr)
 # Load functions
 source("./utils/Fct_Data-Prep.R")
 
+
+
+
+
 #------------- VECTOR DATA ----------------
 
 ###### Distance to shore (Pauline/Marieke) ############
@@ -74,6 +78,20 @@ buff <- buff %>%
   left_join(dist %>% dplyr::select(replicates, all_of(extra_cols)), by = "replicates")
 
 rm(dist, extra_cols)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ###### In or out reserve (Laure) #############
 # Explanation : variable that states whether or not the replicates were done within a fully protected MPA (i.e. a reserve).
@@ -130,51 +148,29 @@ get_mpa_fully_status <- function(replicate_str) {
 
 
 
-################### CHECKS """""""""""""""""""""""""
-get_mpa_fully_status <- function(replicate_str) {
-  # Extract SPY codes from the string (handles both '/' and '_')
-  codes <- unlist(strsplit(replicate_str, "[/_]"))
-  
-  # Lookup corresponding mpa_fully values
-  values <- mpa_lookup[codes]
-  
-  # If any spygen_code is missing (NA in lookup), return NA immediately
-  if (any(is.na(values))) {
-    return(NA)
-  }
-  
-  # Apply rules based on mpa_fully values
-  if (all(values == 1)) {
-    return(1)
-  } else if (all(values == 0)) {
-    return(0)
-  } else {
-    return(NA)
-  }
-}
+###### CHECKS ############################
+# get_mpa_fully_status <- function(replicate_str) {
+#   # Extract SPY codes from the string (handles both '/' and '_')
+#   codes <- unlist(strsplit(replicate_str, "[/_]"))
+#   
+#   # Lookup corresponding mpa_fully values
+#   values <- mpa_lookup[codes]
+#   
+#   # If any spygen_code is missing (NA in lookup), return NA immediately
+#   if (any(is.na(values))) {
+#     return(NA)
+#   }
+#   
+#   # Apply rules based on mpa_fully values
+#   if (all(values == 1)) {
+#     return(1)
+#   } else if (all(values == 0)) {
+#     return(0)
+#   } else {
+#     return(NA)
+#   }
+# }
 
-#################################################"
-
-
-
-# Step 3: Apply to buff
-buff$mpa_fully <- vapply(buff$replicates, get_mpa_fully_status, FUN.VALUE = numeric(1))
-
-# Clean
-rm(get_mpa_fully_status, mpa_lookup, in_out)
-
-# Check results
-buff %>% 
-  group_by(mpa_fully) %>%
-  summarise(count = n()) %>%
-  print()
-
-# print the replicates column of buff where mpa_fully is NA
-buff %>% filter(is.na(mpa_fully)) %>% dplyr::select(replicates, mpa_fully) %>%
-  print()
-
-
-# No NA found 
 
 ###### Comparison distance to reserve Martin VS in_out Laure ############
 
@@ -229,6 +225,91 @@ rm(comparison, mismatches)
 buff <- buff %>% dplyr::select(-reserve_martin)
 
 
+###### Comparison distance to port Martin VS distance to port GFW ############
+
+
+
+# Extraction GFW ----
+
+# Data :
+# From GFW
+
+# Parameters
+var <- "dist_port"
+rast <- terra::rast("/media/marieke/Shared/Chap-1/Model/Scripts/Chap_1/data/raw_data/predictors/Dist_port/distance-from-port-v1.tiff")
+rast <- terra::project(rast, "EPSG:4326")
+poly <- buff
+
+# Extraction
+df <- spatial_extraction(var = var, rast = rast, poly = buff)  
+
+
+# Comparison ----
+
+# Compare dff$port_dist_m_weight with df$dist_port_mean with pearson correlation
+# Compute Pearson correlation
+cor_pearson <- cor(df$port_dist_m_mean, df$dist_port_mean, use = "complete.obs", method = "pearson")
+
+cor(df$port_dist_m_mean, df$dist_port_mean, use = "complete.obs", method = "pearson")
+cor(df$port_dist_m_weight, df$dist_port_mean, use = "complete.obs", method = "pearson")
+cor(df$port_dist_m_min, df$dist_port_min, use = "complete.obs", method = "pearson")
+cor(df$port_dist_m_max, df$dist_port_max, use = "complete.obs", method = "pearson")
+
+# Compute R² (square of correlation)
+r2 <- cor_pearson^2
+
+# Load ggplot2 if not already
+library(ggplot2)
+
+# Create the plot
+ggplot(data = NULL, aes(x = df$dist_port_mean, y = df$port_dist_m_mean)) +
+  geom_point(color = "steelblue", alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, color = "darkred", linetype = "dashed") +
+  labs(
+    x = "Mean Distance to Port",
+    y = "Weighted Port Distance",
+    title = "Relationship between Port Distance Metrics",
+    subtitle = sprintf("Pearson r = %.3f | R² = %.3f", cor_pearson, r2)
+  ) +
+  theme_minimal(base_size = 14)
+
+
+
+
+
+
+
+
+
+
+
+
+###### Comparison distance to shore Martin VS Pauline ------
+dist <- st_read("./data/raw_data/predictors/Distances/buffer_with_closest_feats_search_outlier_treshold_recalibrated.gpkg")
+colnames(dist)
+
+# Merge buff and dist by replicates
+buff2 <- left_join(buff, dist, by = "replicates")
+
+# Compare buff2$shore_dist_m_weight with buff2$dist_shore_m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ###### Sampling effort ############
 # Explanation : the aim is to compute variables that represent the sampling effort in each replicate group : 
 # 1. Total volume filtered in the replicate group = estimated_volume_total -->  Already exists
@@ -275,7 +356,226 @@ buff$area_km2 <- as.numeric(buff$area_km2)  # Convert to numeric for easier hand
 ######################## Vessel presence (Luka) ############
 
 
+
+
+
+
 #------------- RASTER DATA ----------------
+###### METHODOLIGAL CHECK Comparison of 2 extract methods : weight vs exact ####
+
+# terra::extract weights=TRUE vs exact=TRUE ----
+spatial_extraction <- function(var, rast, poly, stats = c("mean", "min", "max", "range")) {
+  
+  # Load necessary libraries
+  require(terra)
+  require(sf)
+  require(dplyr)
+  
+  # Ensure stats contains only allowed values
+  stats <- intersect(stats, c("mean", "min", "max", "range"))
+  
+  # Reproject polygons if CRS differs
+  raster_crs <- sf::st_crs(terra::crs(rast))
+  poly_crs <- sf::st_crs(poly)
+  
+  if (!identical(poly_crs, raster_crs)) {
+    poly <- sf::st_transform(poly, crs = raster_crs)
+  }
+  
+  # Initialize vectors to store the statistics
+  rast_means <- numeric(length = nrow(poly))
+  rast_mins <- numeric(length = nrow(poly))
+  rast_maxs <- numeric(length = nrow(poly))
+  rast_ranges <- numeric(length = nrow(poly))
+  
+  for (i in 1:nrow(poly)) {
+    
+    # Extract raster values within the current polygon with weights
+    extracted_values <- terra::extract(x = rast, y = poly[i, ], weights = TRUE) # The documentation says that with "weights", "the approximate fraction of each cell" is used whereas with "exact", "the exact fraction" is used. The reason for having both is in part because the argument "weights" predates the argument "exact". "weights" was kept because it could be faster and close enough in most cases.
+    
+    # Filter out NA values
+    extracted_values <- extracted_values[!is.na(extracted_values[, 2]), ]
+    
+    values <- extracted_values[, 2]
+    weights <- extracted_values[, 3]
+    
+    if (length(values) > 0) {
+      if ("mean" %in% stats) {
+        rast_means[i] <- sum(values * weights, na.rm = TRUE) / sum(weights, na.rm = TRUE)
+      }
+      if ("min" %in% stats) {
+        rast_mins[i] <- min(values, na.rm = TRUE)
+      }
+      if ("max" %in% stats) {
+        rast_maxs[i] <- max(values, na.rm = TRUE)
+      }
+      if ("range" %in% stats) {
+        rast_ranges[i] <- max(values, na.rm = TRUE) - min(values, na.rm = TRUE)
+      }
+    } else {
+      if ("mean" %in% stats) rast_means[i] <- NA
+      if ("min" %in% stats)  rast_mins[i]  <- NA
+      if ("max" %in% stats)  rast_maxs[i]  <- NA
+      if ("range" %in% stats) rast_ranges[i] <- NA
+    }
+  }
+  
+  # Append results to poly
+  if ("mean" %in% stats) poly[[paste0(var, "_mean")]] <- rast_means
+  if ("min" %in% stats)  poly[[paste0(var, "_min")]]  <- rast_mins
+  if ("max" %in% stats)  poly[[paste0(var, "_max")]]  <- rast_maxs
+  if ("range" %in% stats) poly[[paste0(var, "_range")]] <- rast_ranges
+  
+  return(poly)
+}
+
+spatial_extraction_2 <- function(var, rast, poly, stats = c("mean", "min", "max", "range")) {
+  
+  # Load necessary libraries
+  require(terra)
+  require(sf)
+  require(dplyr)
+  
+  # Ensure stats contains only allowed values
+  stats <- intersect(stats, c("mean", "min", "max", "range"))
+  
+  # Reproject polygons if CRS differs
+  raster_crs <- sf::st_crs(terra::crs(rast))
+  poly_crs <- sf::st_crs(poly)
+  
+  if (!identical(poly_crs, raster_crs)) {
+    poly <- sf::st_transform(poly, crs = raster_crs)
+  }
+  
+  # Initialize vectors to store the statistics
+  rast_means <- numeric(length = nrow(poly))
+  rast_mins <- numeric(length = nrow(poly))
+  rast_maxs <- numeric(length = nrow(poly))
+  rast_ranges <- numeric(length = nrow(poly))
+  
+  for (i in 1:nrow(poly)) {
+    
+    # Extract raster values within the current polygon with exact weights
+    extracted_values <- terra::extract(x = rast, y = poly[i, ], exact = TRUE) 
+    
+    # Filter out NA values
+    extracted_values <- extracted_values[!is.na(extracted_values[, 2]), ]
+    
+    values <- extracted_values[, 2]
+    weights <- extracted_values[, 3]
+    
+    if (length(values) > 0) {
+      if ("mean" %in% stats) {
+        rast_means[i] <- sum(values * weights, na.rm = TRUE) / sum(weights, na.rm = TRUE)
+      }
+      if ("min" %in% stats) {
+        rast_mins[i] <- min(values, na.rm = TRUE)
+      }
+      if ("max" %in% stats) {
+        rast_maxs[i] <- max(values, na.rm = TRUE)
+      }
+      if ("range" %in% stats) {
+        rast_ranges[i] <- max(values, na.rm = TRUE) - min(values, na.rm = TRUE)
+      }
+    } else {
+      if ("mean" %in% stats) rast_means[i] <- NA
+      if ("min" %in% stats)  rast_mins[i]  <- NA
+      if ("max" %in% stats)  rast_maxs[i]  <- NA
+      if ("range" %in% stats) rast_ranges[i] <- NA
+    }
+  }
+  
+  # Append results to poly
+  if ("mean" %in% stats) poly[[paste0(var, "_mean")]] <- rast_means
+  if ("min" %in% stats)  poly[[paste0(var, "_min")]]  <- rast_mins
+  if ("max" %in% stats)  poly[[paste0(var, "_max")]]  <- rast_maxs
+  if ("range" %in% stats) poly[[paste0(var, "_range")]] <- rast_ranges
+  
+  return(poly)
+}
+
+## terra::extract exact=TRUE vs exactextract ####
+install.packages("exactextractr")
+
+
+spatial_extraction_3 <- function(var, rast, poly, stats = c("mean", "min", "max", "range")) {
+  
+  # Load necessary libraries
+  require(terra)
+  require(sf)
+  require(dplyr)
+  
+  # Ensure stats contains only allowed values
+  stats <- intersect(stats, c("mean", "min", "max", "range"))
+  
+  # Reproject polygons if CRS differs
+  raster_crs <- sf::st_crs(terra::crs(rast))
+  poly_crs <- sf::st_crs(poly)
+  
+  if (!identical(poly_crs, raster_crs)) {
+    poly <- sf::st_transform(poly, crs = raster_crs)
+  }
+  
+  # Initialize vectors to store the statistics
+  rast_means <- numeric(length = nrow(poly))
+  rast_mins <- numeric(length = nrow(poly))
+  rast_maxs <- numeric(length = nrow(poly))
+  rast_ranges <- numeric(length = nrow(poly))
+  
+  for (i in 1:nrow(poly)) {
+    
+    # Extract raster values within the current polygon with exact weights
+    extracted_values <- terra::extract(x = rast, y = poly[i, ], exact = TRUE) 
+    
+    # Filter out NA values
+    extracted_values <- extracted_values[!is.na(extracted_values[, 2]), ]
+    
+    values <- extracted_values[, 2]
+    weights <- extracted_values[, 3]
+    
+    if (length(values) > 0) {
+      if ("mean" %in% stats) {
+        rast_means[i] <- sum(values * weights, na.rm = TRUE) / sum(weights, na.rm = TRUE)
+      }
+      if ("min" %in% stats) {
+        rast_mins[i] <- min(values, na.rm = TRUE)
+      }
+      if ("max" %in% stats) {
+        rast_maxs[i] <- max(values, na.rm = TRUE)
+      }
+      if ("range" %in% stats) {
+        rast_ranges[i] <- max(values, na.rm = TRUE) - min(values, na.rm = TRUE)
+      }
+    } else {
+      if ("mean" %in% stats) rast_means[i] <- NA
+      if ("min" %in% stats)  rast_mins[i]  <- NA
+      if ("max" %in% stats)  rast_maxs[i]  <- NA
+      if ("range" %in% stats) rast_ranges[i] <- NA
+    }
+  }
+  
+  # Append results to poly
+  if ("mean" %in% stats) poly[[paste0(var, "_mean")]] <- rast_means
+  if ("min" %in% stats)  poly[[paste0(var, "_min")]]  <- rast_mins
+  if ("max" %in% stats)  poly[[paste0(var, "_max")]]  <- rast_maxs
+  if ("range" %in% stats) poly[[paste0(var, "_range")]] <- rast_ranges
+  
+  return(poly)
+}
+
+
+
+buff2 <- spatial_extraction_2(var = var, rast = rast, poly = poly, stat = c("min", "max", "mean", "range"))
+
+# make correlations of c("gravity_mean", "gravity_min","gravity_max","gravity_range") in buff vs in buff2 
+cor(buff$gravity_mean, buff2$gravity_mean, use = "complete.obs", method = "pearson")
+cor(buff$gravity_min, buff2$gravity_min, use = "complete.obs", method = "pearson")
+cor(buff$gravity_max, buff2$gravity_max, use = "complete.obs", method = "pearson")
+cor(buff$gravity_range, buff2$gravity_range, use = "complete.obs", method = "pearson")
+
+# Conclusion : 1, 1, 0.9999994, 0.9999989. We change to "exact" because also very quick. 
+
+
 ###### Gravity (1 km) : weighted mean, min, max, range ####
 # Data : From Laure Velez (MARBEC)
 
@@ -286,8 +586,7 @@ poly <- buff
 
 # Extraction
 buff <- spatial_extraction(var = var, rast = rast, poly = poly, stat = c("min", "max", "mean", "range"))
-
-
+buff2 <- spatial_extraction_2(var = var, rast = rast, poly = poly, stat = c("min", "max", "mean", "range"))
 
 
 ###### Bathymetry (0.001°) : weighted mean, min, max, range ####
@@ -385,7 +684,7 @@ rm(filelist_temp, tmp, layer, buff_all, poly, rast, i, var)
 colnames(buff)
 
 
-######  Habitat ####
+######  Habitat (100m) ####
 # Explanation : we retrieve 3 different variables : 
 # 1. main habitat within buffer, 
 # 2. number of habitats per km² = number of different habitats / buffer area, 
@@ -705,20 +1004,111 @@ df_2 <- df
 write.csv(df, "./data/processed_data/data_prep/predictors/Extracted_Predictors/mtdt_101220242_COV_fishing_eff.csv")
 
 
-######################## MARS3D : merge en add to buff TODO #####################################
 
 
-# Load MARS3D data (.geojson)
 
-# Current and Wind data
-cur_wind <- st_read("./data/raw_data/predictors/MARS3D/adne_extract_curent_wind/mtdt_mars3d_current_wind_2018-2024.geojson")
 
-# chekc extraction 5 years, type of clip/ extraction, weighted mean ??? 
+
+
+#------------- NCDF DATA ----------------
+
+
+###### MARS3D (1.2km) #####################################
+# MARS3D data was extracted by Pauline using scripts "...". 
+
+# Load MARS3D and combine data
+
+# Current and Wind ----
+
+# List all .geojson files 
+geojson_files <- list.files("./data/raw_data/predictors/MARS3D/adne_extract_curent_wind/", pattern = "\\.geojson$", 
+                            full.names = TRUE)
+
+# Open all GeoJSONs and store in a list 
+sf_list <- lapply(geojson_files[1:3], function(f) {
+  sf::st_read(f, quiet = TRUE)
+})
+
+# Check name and dimensions of each geojson
+for (i in seq(1:3)){
+  print(sf_list[[i]][1,]$layer)
+  print(dim(sf_list[[i]]))
+}
+
+# Combine 
+cur_wind <- dplyr::bind_rows(sf_list)
+
+
+
+
+
+
+# Temperature and Salinity ----
+# List all .geojson files 
+geojson_files <- list.files("./data/raw_data/predictors/MARS3D/adne_extract_sal_temp/", pattern = "\\.geojson$", 
+                            full.names = TRUE)
+
+# Open all GeoJSONs and store in a list 
+sf_list <- lapply(geojson_files[1:3], function(f) {
+  sf::st_read(f, quiet = TRUE)
+})
+
+# Check name and dimensions of each geojson
+for (i in seq(1:3)){
+  print(sf_list[[i]][1,]$layer)
+  print(dim(sf_list[[i]]))
+}
+
+# Combine 
+sal_temp <- dplyr::bind_rows(sf_list)
+
+
+
+
+
+# Combine sal_temp and cur_wind -----
+
+# Detect columns in sal_temp that are not in cur_wind
+extra_cols <- setdiff(names(sal_temp), names(cur_wind))
+
+# left_join keeps all rows in buff and brings matching columns from dist by 'replicates'
+mars3d <- cur_wind %>%
+  as.data.frame() %>%
+  left_join(as.data.frame(sal_temp) %>% dplyr::select(replicates, all_of(extra_cols)), by = "replicates")
+
+# Keep only necessary columns
+mars3d <- mars3d %>%
+  dplyr::select(-c("date", "depth_sampling", "depth_seafloor", "datetime", "day_24h", "date_7j", "date_1mois", "date_1an", "layer", "path", "geometry"))
+
+
+
+
+
+# Add mards3d to buff ----
+buff <- left_join(buff, mars3d, by = "replicates")
+colnames(buff)
+
+# Clean
+rm(cur_wind, sal_temp, mars3d, geojson_files, sf_list, extra_cols, i)
+
+# Check extraction : 5 years, type of clip/ extraction, weighted mean
+# --> Réu avec Paulin et Celia le 20/10
+# 5 years : not possible because we have MARS3D data from 2017 to 2024.
+# Extraction : now no weighted mean compute nor exacte extraction (=/= rio.clip) --> Pauline will try to do it and re-run extractions this week. 
+
+
+
 # Weighted mean : for raster extraction in R + exact extraction
 # For Copernicus : all_touched = FALSE rio.clip --> not weighted mean but exact extraction
 
 
-######################## Chlorophyll : extract and add to buff TODO #####################################
+########## CHECKS #########"
+# open ncdf 
+nc <- ncdf4::nc_open("./20220610000000-GOS-L4_GHRSST-SSTfnd-OISST_UHR_NRT-MED-v02.0-fv03.0.nc")
+nc
+
+
+###### Chlorophyll (1km)#####################################
 # Chlorophylle data is extracted from Copernicus data : cmems_obs-oc_med_bgc-plankton_my_l4-gapfree-multi-1km_P1D (DOI : https://doi.org/10.48670/moi-00300). It has a daily temporal resolution and a 1km spatial resolution. It is a L4 product meaning :
 # - Level 4 data result from analyses of L3 data (e.g., variables derived from multiple measurements).
 # - L4 are those products for which a temporal averaging method or an interpolation procedure is applied to fill in missing data values. Temporal averaging is performed on a monthly basis. The L4 daily products is also called “interpolated” or “cloud free” products. 
@@ -756,7 +1146,9 @@ st_write(buff2, "./data/processed_data/predictors/mtdt_5_CHL-geom-only.gpkg", de
 
 
 
-################ Check data for homogenous sampling effort ##############
+############### SST Oxygen pH ... #####################################
+
+###### Check data for homogenous sampling effort ##############
 
 buff <- as.data.frame(buff)
 buff %>%
@@ -784,4 +1176,9 @@ buff$area_km2 <- as.numeric(buff$area_km2)
 buff %>%
   filter(estimated_volume_total > 55 & estimated_volume_total < 67 & PCR_replicates == 24 & area_km2 < 2) %>%
   dim()
+
+
+
+
+
 

@@ -63,7 +63,7 @@ spatial_extraction <- function(var, rast, poly, stats = c("mean", "min", "max", 
   for (i in 1:nrow(poly)) {
     
     # Extract raster values within the current polygon with weights
-    extracted_values <- terra::extract(x = rast, y = poly[i, ], weights = TRUE) # The documentation says that with "weights", "the approximate fraction of each cell" is used whereas with "exact", "the exact fraction" is used. The reason for having both is in part because the argument "weights" predates the argument "exact". "weights" was kept because it could be faster and close enough in most cases.
+    extracted_values <- terra::extract(x = rast, y = poly[i, ], exact = TRUE) 
     
     # Filter out NA values
     extracted_values <- extracted_values[!is.na(extracted_values[, 2]), ]
@@ -100,6 +100,8 @@ spatial_extraction <- function(var, rast, poly, stats = c("mean", "min", "max", 
   
   return(poly)
 }
+
+
 
 #---------------------------------- Function to compute SPECIFIC terra::terrain indices ------------------
 
