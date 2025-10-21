@@ -494,78 +494,23 @@ spatial_extraction_2 <- function(var, rast, poly, stats = c("mean", "min", "max"
   return(poly)
 }
 
-## terra::extract exact=TRUE vs exactextract ####
-install.packages("exactextractr")
-
-
-spatial_extraction_3 <- function(var, rast, poly, stats = c("mean", "min", "max", "range")) {
-  
-  # Load necessary libraries
-  require(terra)
-  require(sf)
-  require(dplyr)
-  
-  # Ensure stats contains only allowed values
-  stats <- intersect(stats, c("mean", "min", "max", "range"))
-  
-  # Reproject polygons if CRS differs
-  raster_crs <- sf::st_crs(terra::crs(rast))
-  poly_crs <- sf::st_crs(poly)
-  
-  if (!identical(poly_crs, raster_crs)) {
-    poly <- sf::st_transform(poly, crs = raster_crs)
-  }
-  
-  # Initialize vectors to store the statistics
-  rast_means <- numeric(length = nrow(poly))
-  rast_mins <- numeric(length = nrow(poly))
-  rast_maxs <- numeric(length = nrow(poly))
-  rast_ranges <- numeric(length = nrow(poly))
-  
-  for (i in 1:nrow(poly)) {
-    
-    # Extract raster values within the current polygon with exact weights
-    extracted_values <- terra::extract(x = rast, y = poly[i, ], exact = TRUE) 
-    
-    # Filter out NA values
-    extracted_values <- extracted_values[!is.na(extracted_values[, 2]), ]
-    
-    values <- extracted_values[, 2]
-    weights <- extracted_values[, 3]
-    
-    if (length(values) > 0) {
-      if ("mean" %in% stats) {
-        rast_means[i] <- sum(values * weights, na.rm = TRUE) / sum(weights, na.rm = TRUE)
-      }
-      if ("min" %in% stats) {
-        rast_mins[i] <- min(values, na.rm = TRUE)
-      }
-      if ("max" %in% stats) {
-        rast_maxs[i] <- max(values, na.rm = TRUE)
-      }
-      if ("range" %in% stats) {
-        rast_ranges[i] <- max(values, na.rm = TRUE) - min(values, na.rm = TRUE)
-      }
-    } else {
-      if ("mean" %in% stats) rast_means[i] <- NA
-      if ("min" %in% stats)  rast_mins[i]  <- NA
-      if ("max" %in% stats)  rast_maxs[i]  <- NA
-      if ("range" %in% stats) rast_ranges[i] <- NA
-    }
-  }
-  
-  # Append results to poly
-  if ("mean" %in% stats) poly[[paste0(var, "_mean")]] <- rast_means
-  if ("min" %in% stats)  poly[[paste0(var, "_min")]]  <- rast_mins
-  if ("max" %in% stats)  poly[[paste0(var, "_max")]]  <- rast_maxs
-  if ("range" %in% stats) poly[[paste0(var, "_range")]] <- rast_ranges
-  
-  return(poly)
-}
 
 
 
+# Parameters
+var <- "gravity"
+rast <- terra::rast("./data/raw_data/predictors/Gravity/rastGravity.tif")
+poly <- buff 
+
+# Extraction
+buff <- spatial_extraction(var = var, rast = rast, poly = poly, stat = c("min", "max", "mean", "range"))
 buff2 <- spatial_extraction_2(var = var, rast = rast, poly = poly, stat = c("min", "max", "mean", "range"))
+
+
+
+
+
+
 
 # make correlations of c("gravity_mean", "gravity_min","gravity_max","gravity_range") in buff vs in buff2 
 cor(buff$gravity_mean, buff2$gravity_mean, use = "complete.obs", method = "pearson")
@@ -574,6 +519,20 @@ cor(buff$gravity_max, buff2$gravity_max, use = "complete.obs", method = "pearson
 cor(buff$gravity_range, buff2$gravity_range, use = "complete.obs", method = "pearson")
 
 # Conclusion : 1, 1, 0.9999994, 0.9999989. We change to "exact" because also very quick. 
+
+
+
+
+
+# terra::extract exact=TRUE vs exactextract ####
+
+
+t <- exact_extract(x = rast, y = poly[1:3, ]) 
+tt <- terra::extract(x = rast, y = poly[1:3, ], exact = TRUE)
+
+# Looks like the same extraction is computed. To simplified procedures we can use exact extract everywhere so that is the same with python codes. 
+
+rm(t, tt)
 
 
 ###### Gravity (1 km) : weighted mean, min, max, range ####
@@ -586,7 +545,6 @@ poly <- buff
 
 # Extraction
 buff <- spatial_extraction(var = var, rast = rast, poly = poly, stat = c("min", "max", "mean", "range"))
-buff2 <- spatial_extraction_2(var = var, rast = rast, poly = poly, stat = c("min", "max", "mean", "range"))
 
 
 ###### Bathymetry (0.001°) : weighted mean, min, max, range ####
