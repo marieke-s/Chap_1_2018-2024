@@ -25,6 +25,7 @@ setwd("/media/marieke/Shared/Chap-1/Model/Scripts/Chap_1_2018-2024")
 
 # Libraries
 library(dplyr)
+library(exactextractr)
 library(sf)
 library(raster)
 library(ncdf4)
@@ -37,7 +38,8 @@ library(stringr)
 # Load functions
 source("./utils/Fct_Data-Prep.R")
 
-
+# Load buff with dist_shore  
+buff <- st_read("./data/processed_data/predictors/mtdt_5_dist-shore.gpkg")
 
 
 
@@ -66,7 +68,7 @@ buff <- st_read("./data/processed_data/predictors/mtdt_5_dist-shore.gpkg")
 # Explanation : distances to several entities (port, canyons, MPA reserve) were computed by Martin Paquet in 07/2025 with the distance pipeline explained in Methods.txt.
 
 # Load Martin's distance 
-dist <- st_read("./data/raw_data/predictors/Distances/buffer_with_closest_feats_search_outlier_treshold_recalibrated.gpkg")
+dist <- st_read("./data/raw_data/predictors/Distances/buffer_euclidian_port.gpkg")
 dist <- as.data.frame(dist)
 
 # Merge buff and dist by replicates
@@ -244,11 +246,17 @@ poly <- buff
 df <- spatial_extraction(var = var, rast = rast, poly = buff)  
 
 
+
+
 # Comparison ----
 
 # Compare dff$port_dist_m_weight with df$dist_port_mean with pearson correlation
 # Compute Pearson correlation
-cor_pearson <- cor(df$port_dist_m_mean, df$dist_port_mean, use = "complete.obs", method = "pearson")
+cor_pearson <- cor(df$port_dist_euclid_m_min, df$dist_port_min, use = "complete.obs", method = "pearson")
+
+
+
+
 
 cor(df$port_dist_m_mean, df$dist_port_mean, use = "complete.obs", method = "pearson")
 cor(df$port_dist_m_weight, df$dist_port_mean, use = "complete.obs", method = "pearson")
@@ -262,18 +270,48 @@ r2 <- cor_pearson^2
 library(ggplot2)
 
 # Create the plot
-ggplot(data = NULL, aes(x = df$dist_port_mean, y = df$port_dist_m_mean)) +
+
+
+# euclid martin MIN vs GFW MIN
+cor_pearson <- cor(df$dist_port_min, df$port_dist_euclid_m_min, use = "complete.obs", method = "pearson")
+r2 <- cor_pearson^2
+ggplot(data = NULL, aes(x = df$dist_port_min, y = df$port_dist_euclid_m_min)) +
   geom_point(color = "steelblue", alpha = 0.7) +
   geom_smooth(method = "lm", se = FALSE, color = "darkred", linetype = "dashed") +
   labs(
-    x = "Mean Distance to Port",
-    y = "Weighted Port Distance",
+    x = "Distance to Port GFW ",
+    y = "Distance to Port Martin",
     title = "Relationship between Port Distance Metrics",
     subtitle = sprintf("Pearson r = %.3f | R² = %.3f", cor_pearson, r2)
   ) +
   theme_minimal(base_size = 14)
 
 
+
+
+
+# euclid martin MIN vs martin MIN
+cor_pearson <- cor(df$port_dist_m_min, df$port_dist_euclid_m_min, use = "complete.obs", method = "pearson")
+r2 <- cor_pearson^2
+ggplot(data = NULL, aes(x = df$port_dist_m_min, y = df$port_dist_euclid_m_min)) +
+  geom_point(color = "steelblue", alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, color = "darkred", linetype = "dashed") +
+  labs(
+    x = "Distance to Port Martin ",
+    y = "Distance to Port Martin euclid ",
+    title = "Relationship between Port Distance Metrics",
+    subtitle = sprintf("Pearson r = %.3f | R² = %.3f", cor_pearson, r2)
+  ) +
+  theme_minimal(base_size = 14)
+
+
+
+
+# Potential reasons for differences between GFW and Martin's distances to port :
+
+# raw data port 
+# algo distance (euclid or accost)
+# spatial resolution
 
 
 
@@ -526,13 +564,43 @@ cor(buff$gravity_range, buff2$gravity_range, use = "complete.obs", method = "pea
 
 # terra::extract exact=TRUE vs exactextract ####
 
+# Reproject polygons if CRS differs
+raster_crs <- sf::st_crs(terra::crs(rast))
+poly_crs <- sf::st_crs(poly)
 
-t <- exact_extract(x = rast, y = poly[1:3, ]) 
-tt <- terra::extract(x = rast, y = poly[1:3, ], exact = TRUE)
+ee <- exactextractr::exact_extract(x = rast, y = poly) 
+te <- terra::extract(x = rast, y = poly, exact = TRUE)
 
-# Looks like the same extraction is computed. To simplified procedures we can use exact extract everywhere so that is the same with python codes. 
+# ee legèrement plus rapide 
 
-rm(t, tt)
+# bind ee and ted 
+df <- merge(
+  do.call(rbind, lapply(seq_along(ee), \(i) transform(ee[[i]], ID = i, row = seq_len(nrow(ee[[i]]))))),
+  transform(te, row = ave(ID, ID, FUN = seq_along)),
+  by = c("ID", "row"),
+  all = TRUE
+)[, c("ID", "value", "coverage_fraction", "layer", "fraction")]
+
+names(df) <- c("ID", "value_ee", "fraction_ee", "value_te", "fraction_te")
+
+
+
+# correlation df$value_te vs df$value_ee 
+cor(df$value_te, df$value_ee, use = "complete.obs", method = "pearson")
+
+# correlation df$fraction_te vs df$fraction_ee
+cor(df$fraction_te, df$fraction_ee, use = "complete.obs", method = "pearson")
+
+
+
+
+
+
+
+
+
+
+
 
 
 ###### Gravity (1 km) : weighted mean, min, max, range ####
