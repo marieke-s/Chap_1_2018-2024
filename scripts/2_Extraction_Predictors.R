@@ -38,48 +38,45 @@ library(stringr)
 # Load functions
 source("./utils/Fct_Data-Prep.R")
 
-# Load buff with dist_shore  
-buff <- st_read("./data/processed_data/predictors/mtdt_5_dist-shore.gpkg")
+# Load buff  
+buff <- st_read("./data/processed_data/eDNA/mtdt_5.gpkg")
+
+
+
+
+
+
 
 
 
 #------------- VECTOR DATA ----------------
-
-###### Distance to shore (Pauline/Marieke) ############
-# Explanation : distance to shore is computed from the coastline shapefile using '2.1_Distance_shore.py' from orignal code of Pauline Viguier. 
-# Important methodological considerations : 
-# Di(Paulostance to shore is computed from replicates group's buffer centroids.
-# When a centroid is on land (which happened for ~ 67/792 centroids) we set the distance to shore to 1 meter because it was actually not sampled on land (obviously) and it ended up there only because we simplified transects into straight lines between transect start and end points.
-
-# Run 2.1_Distance_shore.py 
-# Bash call
-system("python3 ./scripts/2.1_Distance_shore.py")
+###### Sampling effort ############
+# Explanation : the aim is to compute variables that represent the sampling effort in each replicate group : 
+# 1. Total volume filtered in the replicate group = estimated_volume_total -->  Already exists
+# 2. Nb of PCR replicates = 12 * nb of pooled samples + 12 nb of unpooled samples --> computed here 
+# 3. Area covered = area of replicate group buffer --> computed here
 
 
-# Load buff with dist_shore  
-buff <- st_read("./data/processed_data/predictors/mtdt_5_dist-shore.gpkg")
+# Nb of PCR replicates ----
+# Function to compute PCR replicate count
+compute_pcr_replicates <- function(rep_string) {
+  if (is.na(rep_string) || rep_string == "") return(NA_integer_)
+  
+  # Split on `/` to get number of samples
+  parts <- strsplit(rep_string, "/")[[1]]
+  
+  # Count each pooled group (with `_`) or single sample as 1 unit
+  replicate_units <- sum(sapply(parts, function(x) length(strsplit(x, "_")[[1]]) == 1)) +  # unpooled
+    sum(sapply(parts, function(x) length(strsplit(x, "_")[[1]]) > 1))     # pooled
+  
+  return(12 * replicate_units)
+}
 
+# Apply to your data
+buff$PCR_replicates <- sapply(buff$replicates, compute_pcr_replicates)
 
-
-
-
-
-###### Distance to port, canyon and reserve (Martin) ############
-# Explanation : distances to several entities (port, canyons, MPA reserve) were computed by Martin Paquet in 07/2025 with the distance pipeline explained in Methods.txt.
-
-# Load Martin's distance 
-dist <- st_read("./data/raw_data/predictors/Distances/buffer_euclidian_port.gpkg")
-dist <- as.data.frame(dist)
-
-# Merge buff and dist by replicates
-# Detect columns in dist that are not in buff
-extra_cols <- setdiff(names(dist), names(buff))
-
-# left_join keeps all rows in buff and brings matching columns from dist by 'replicates'
-buff <- buff %>%
-  left_join(dist %>% dplyr::select(replicates, all_of(extra_cols)), by = "replicates")
-
-rm(dist, extra_cols)
+# Clean
+rm(compute_pcr_replicates)
 
 
 
@@ -87,15 +84,18 @@ rm(dist, extra_cols)
 
 
 
+# Area covered ----
+# Project in CRS=2154
+buff <- st_transform(buff, crs = 2154)
+
+# Compute area in km2
+buff$area_km2 <- st_area(buff) / 1e6  # Convert from m^2 to km^2
+buff$area_km2 <- units::set_units(st_area(buff), km^2)
+buff$area_km2 <- as.numeric(buff$area_km2)  # Convert to numeric for easier handling
 
 
 
-
-
-
-
-
-###### In or out reserve (Laure) #############
+###### Reserve : in or out (Laure) #############
 # Explanation : variable that states whether or not the replicates were done within a fully protected MPA (i.e. a reserve).
 
 # MPA data used : The MPA data used was made in several steps :
@@ -116,7 +116,7 @@ rm(dist, extra_cols)
 
 # Load data
 in_out <- read.csv("./data/raw_data/predictors/MPA/mtd_mpafully_2018-2024_complete.csv")
-unique(in_out$mpa_fully)
+
 
 
 # Here we assign the variable "mpa_fully" to the buff data. 
@@ -150,28 +150,74 @@ get_mpa_fully_status <- function(replicate_str) {
 
 
 
-###### CHECKS ############################
-# get_mpa_fully_status <- function(replicate_str) {
-#   # Extract SPY codes from the string (handles both '/' and '_')
-#   codes <- unlist(strsplit(replicate_str, "[/_]"))
-#   
-#   # Lookup corresponding mpa_fully values
-#   values <- mpa_lookup[codes]
-#   
-#   # If any spygen_code is missing (NA in lookup), return NA immediately
-#   if (any(is.na(values))) {
-#     return(NA)
-#   }
-#   
-#   # Apply rules based on mpa_fully values
-#   if (all(values == 1)) {
-#     return(1)
-#   } else if (all(values == 0)) {
-#     return(0)
-#   } else {
-#     return(NA)
-#   }
-# }
+###### Distances : to port, canyon and reserve (Martin) ############
+# Explanation : distances to several entities (port, canyons, MPA reserve) were computed by Martin Paquet in 07/2025 with the distance pipeline explained in Methods.txt.
+
+# Load data ----
+dist <- st_read("./data/raw_data/predictors/Distances/buffer_euclidian_port.gpkg")
+dist <- as.data.frame(dist)
+
+# Clean ----
+
+# Merge -----
+# Detect columns in dist that are not in buff
+extra_cols <- setdiff(names(dist), names(buff))
+
+# left_join keeps all rows in buff and brings matching columns from dist by 'replicates'
+buff <- buff %>%
+  left_join(dist %>% dplyr::select(replicates, all_of(extra_cols)), by = "replicates")
+
+rm(dist, extra_cols)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+###### Comparison distance to shore Martin VS Pauline -----
+# Load data ############
+# Explanation : distance to shore is computed from the coastline shapefile using '2.1_Distance_shore.py' from orignal code of Pauline Viguier. 
+# Important methodological considerations : 
+# Di(Paulostance to shore is computed from replicates group's buffer centroids.
+# When a centroid is on land (which happened for ~ 67/792 centroids) we set the distance to shore to 1 meter because it was actually not sampled on land (obviously) and it ended up there only because we simplified transects into straight lines between transect start and end points.
+
+# Run 2.1_Distance_shore.py 
+# Bash call
+system("python3 ./scripts/2.1_Distance_shore.py")
+
+
+# Load buff with dist_shore  
+dist_shore <- st_read("./data/processed_data/predictors/mtdt_5_dist-shore.gpkg")
+
+# Comparison ----
+# Add dist_shore$dist_shore to buff
+df <- dist_shore %>%
+  as.data.frame() %>%
+  dplyr::select(replicates, dist_shore) %>%
+  left_join(
+    buff %>%
+      as.data.frame() %>%
+    by = "replicates"
+  )
+
+# Correlation df$shore_dist_m_weight vs df$dist_shore
+  
+
+
+
+
+
+
+
 
 
 ###### Comparison distance to reserve Martin VS in_out Laure ############
@@ -322,75 +368,6 @@ ggplot(data = NULL, aes(x = df$port_dist_m_min, y = df$port_dist_euclid_m_min)) 
 
 
 
-###### Comparison distance to shore Martin VS Pauline ------
-dist <- st_read("./data/raw_data/predictors/Distances/buffer_with_closest_feats_search_outlier_treshold_recalibrated.gpkg")
-colnames(dist)
-
-# Merge buff and dist by replicates
-buff2 <- left_join(buff, dist, by = "replicates")
-
-# Compare buff2$shore_dist_m_weight with buff2$dist_shore_m
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-###### Sampling effort ############
-# Explanation : the aim is to compute variables that represent the sampling effort in each replicate group : 
-# 1. Total volume filtered in the replicate group = estimated_volume_total -->  Already exists
-# 2. Nb of PCR replicates = 12 * nb of pooled samples + 12 nb of unpooled samples --> computed here 
-# 3. Area covered = area of replicate group buffer --> computed here
-
-
-# Nb of PCR replicates ----
-# Function to compute PCR replicate count
-compute_pcr_replicates <- function(rep_string) {
-  if (is.na(rep_string) || rep_string == "") return(NA_integer_)
-  
-  # Split on `/` to get number of samples
-  parts <- strsplit(rep_string, "/")[[1]]
-  
-  # Count each pooled group (with `_`) or single sample as 1 unit
-  replicate_units <- sum(sapply(parts, function(x) length(strsplit(x, "_")[[1]]) == 1)) +  # unpooled
-    sum(sapply(parts, function(x) length(strsplit(x, "_")[[1]]) > 1))     # pooled
-  
-  return(12 * replicate_units)
-}
-
-# Apply to your data
-buff$PCR_replicates <- sapply(buff$replicates, compute_pcr_replicates)
-
-# Clean
-rm(compute_pcr_replicates)
-
-
-
-
-
-
-
-# Area covered ----
-# Project in CRS=2154
-buff <- st_transform(buff, crs = 2154)
-
-# Compute area in km2
-buff$area_km2 <- st_area(buff) / 1e6  # Convert from m^2 to km^2
-buff$area_km2 <- units::set_units(st_area(buff), km^2)
-buff$area_km2 <- as.numeric(buff$area_km2)  # Convert to numeric for easier handling
-
 ######################## Vessel presence (Luka) ############
 
 
@@ -399,7 +376,13 @@ buff$area_km2 <- as.numeric(buff$area_km2)  # Convert to numeric for easier hand
 
 
 #------------- RASTER DATA ----------------
-###### METHODOLIGAL CHECK Comparison of 2 extract methods : weight vs exact ####
+###### METHODOLIGAL CHECKS ####
+
+# Parameters
+var <- "gravity"
+rast <- terra::rast("./data/raw_data/predictors/Gravity/rastGravity.tif")
+poly <- buff 
+
 
 # terra::extract weights=TRUE vs exact=TRUE ----
 spatial_extraction <- function(var, rast, poly, stats = c("mean", "min", "max", "range")) {
@@ -466,7 +449,6 @@ spatial_extraction <- function(var, rast, poly, stats = c("mean", "min", "max", 
   
   return(poly)
 }
-
 spatial_extraction_2 <- function(var, rast, poly, stats = c("mean", "min", "max", "range")) {
   
   # Load necessary libraries
@@ -535,10 +517,7 @@ spatial_extraction_2 <- function(var, rast, poly, stats = c("mean", "min", "max"
 
 
 
-# Parameters
-var <- "gravity"
-rast <- terra::rast("./data/raw_data/predictors/Gravity/rastGravity.tif")
-poly <- buff 
+
 
 # Extraction
 buff <- spatial_extraction(var = var, rast = rast, poly = poly, stat = c("min", "max", "mean", "range"))
@@ -562,7 +541,7 @@ cor(buff$gravity_range, buff2$gravity_range, use = "complete.obs", method = "pea
 
 
 
-# terra::extract exact=TRUE vs exactextract ####
+# terra::extract exact=TRUE vs exactextractr::exactextract ####
 
 # Reproject polygons if CRS differs
 raster_crs <- sf::st_crs(terra::crs(rast))
@@ -571,7 +550,7 @@ poly_crs <- sf::st_crs(poly)
 ee <- exactextractr::exact_extract(x = rast, y = poly) 
 te <- terra::extract(x = rast, y = poly, exact = TRUE)
 
-# ee legèrement plus rapide 
+# ee légèrement plus rapide 
 
 # bind ee and ted 
 df <- merge(
@@ -592,9 +571,7 @@ cor(df$value_te, df$value_ee, use = "complete.obs", method = "pearson")
 cor(df$fraction_te, df$fraction_ee, use = "complete.obs", method = "pearson")
 
 
-
-
-
+# Conclusion : 1, 1. We keep exact=TRUE because also very quick.
 
 
 
@@ -612,7 +589,35 @@ rast <- terra::rast("./data/raw_data/predictors/Gravity/rastGravity.tif")
 poly <- buff 
 
 # Extraction
-buff <- spatial_extraction(var = var, rast = rast, poly = poly, stat = c("min", "max", "mean", "range"))
+gr <- spatial_extraction(var = var, rast = rast, poly = poly, stat = c("min", "max", "mean", "range"))
+
+
+# Merge -----
+# Detect columns in gr that are not in buff
+extra_cols <- setdiff(names(gr), names(buff))
+
+# left_join keeps all rows in buff and brings matching columns from dist by 'replicates'
+buff <- buff %>%
+  left_join(gr %>% dplyr::select(replicates, all_of(extra_cols)), by = "replicates")
+
+rm(gr, extra_cols)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 ###### Bathymetry (0.001°) : weighted mean, min, max, range ####
@@ -627,7 +632,36 @@ poly <- buff
 rast[rast >= 0] <- NA
 
 # Extraction
-buff <- spatial_extraction(var = var, rast = rast, poly = poly)
+bat <- spatial_extraction(var = var, rast = rast, poly = poly)
+
+
+# Merge -----
+# Detect columns in bat that are not in buff
+extra_cols <- setdiff(names(bat), names(buff))
+
+# left_join keeps all rows in buff and brings matching columns from dist by 'replicates'
+buff <- buff %>%
+  left_join(bat %>% dplyr::select(replicates, all_of(extra_cols)), by = "replicates")
+
+rm(bat, extra_cols)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 ###### Terrain index ####
@@ -703,11 +737,43 @@ for (layer in names(rast)) {
 }
 beepr::beep() # Beep to indicate completion
 
+rm(filelist_temp, tmp, layer, poly, rast, i, var)
 
-buff <- buff_all
 
-rm(filelist_temp, tmp, layer, buff_all, poly, rast, i, var)
-colnames(buff)
+
+
+
+
+
+# Merge -----
+# Detect columns in buff_all that are not in buff
+extra_cols <- setdiff(names(buff_all), names(buff))
+
+# left_join keeps all rows in buff and brings matching columns from dist by 'replicates'
+buff <- buff %>%
+  left_join(buff_all %>% dplyr::select(replicates, all_of(extra_cols)), by = "replicates")
+
+rm(buff_all, extra_cols)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 ######  Habitat (100m) ####
@@ -891,7 +957,7 @@ buff1 <- calculate_habitats(buff = buff1,
 
 
 
-# Bind new columns to buff
+# Merge -----
 # Detect columns in dist that are not in buff
 extra_cols <- setdiff(names(buff1), names(buff))
 
@@ -899,7 +965,7 @@ extra_cols <- setdiff(names(buff1), names(buff))
 buff <- buff %>%
   left_join(buff1 %>% dplyr::select(replicates, all_of(extra_cols)), by = "replicates")
 
-rm(buff1)
+rm(buff1, extra_cols)
 
 
 
@@ -955,7 +1021,7 @@ for (layer in names(rast_grouped)) {
 }
 
 
-# Bind new columns to buff
+# Merge -----
 # Detect columns in dist that are not in buff
 extra_cols <- setdiff(names(df), names(buff))
 
@@ -963,7 +1029,7 @@ extra_cols <- setdiff(names(df), names(buff))
 buff <- buff %>%
   left_join(df %>% dplyr::select(replicates, all_of(extra_cols)), by = "replicates")
 
-rm(df)
+rm(df, extra_cols)
 
 
   
@@ -1037,8 +1103,6 @@ write.csv(df, "./data/processed_data/data_prep/predictors/Extracted_Predictors/m
 
 
 #------------- NCDF DATA ----------------
-
-
 ###### MARS3D (1.2km) #####################################
 # MARS3D data was extracted by Pauline using scripts "...". 
 
@@ -1134,7 +1198,7 @@ nc <- ncdf4::nc_open("./20220610000000-GOS-L4_GHRSST-SSTfnd-OISST_UHR_NRT-MED-v0
 nc
 
 
-###### Chlorophyll (1km)#####################################
+###### Chlorophyll (1km) ----
 # Chlorophylle data is extracted from Copernicus data : cmems_obs-oc_med_bgc-plankton_my_l4-gapfree-multi-1km_P1D (DOI : https://doi.org/10.48670/moi-00300). It has a daily temporal resolution and a 1km spatial resolution. It is a L4 product meaning :
 # - Level 4 data result from analyses of L3 data (e.g., variables derived from multiple measurements).
 # - L4 are those products for which a temporal averaging method or an interpolation procedure is applied to fill in missing data values. Temporal averaging is performed on a monthly basis. The L4 daily products is also called “interpolated” or “cloud free” products. 
@@ -1145,7 +1209,7 @@ nc
 # Load CHL extracted data (.geojson)
 chl <- read.csv("./data/processed_data/predictors/mtdt_5_CHL.csv")
 
-# Check chl values 
+# Check chl values ----
 colnames(chl)
 
 # Hist
@@ -1159,12 +1223,18 @@ for (c in colnames(chl)[-1]) {
   cat("Number of NA in", c, ":", na_count, "\n")
 }
 
-# Merge with buff by replicates
-buff2 <- buff %>%
-  dplyr::select(c(replicates, geom)) %>%
-  left_join(chl, by = "replicates")
 
-colnames(buff2)
+# Merge buff and chl by replicates -----
+# Detect columns in dist that are not in buff
+extra_cols <- setdiff(names(chl), names(buff))
+
+# left_join keeps all rows in buff and brings matching columns from dist by 'replicates'
+buff <- buff %>%
+  left_join(chl %>% dplyr::select(replicates, all_of(extra_cols)), by = "replicates")
+
+rm(chl, extra_cols)
+
+
 
 # Export as gpkg
 st_write(buff2, "./data/processed_data/predictors/mtdt_5_CHL-geom-only.gpkg", delete_dsn = TRUE)
@@ -1172,9 +1242,53 @@ st_write(buff2, "./data/processed_data/predictors/mtdt_5_CHL-geom-only.gpkg", de
 
 
 
-############### SST Oxygen pH ... #####################################
+# Compare exactextract vs rio.clip data ----
+chl_rio <- read.csv("./data/processed_data/predictors/mtdt_5_CHL.csv")
+chl_ee <- read.csv("./data/processed_data/predictors/mtdt_5_CHL_exactextract.csv")
+colnames(chl_rio)
+colnames(chl_ee)
 
-###### Check data for homogenous sampling effort ##############
+common_cols <- intersect(colnames(chl_rio), colnames(chl_ee))[-1]  # exclude "replicates"
+
+for (col in common_cols) {
+  correlation <- cor(chl_rio[[col]], chl_ee[[col]], use = "complete.obs", method = "pearson")
+  cat("Correlation between rio.clip and exactextractr for", col, ":", correlation, "\n")
+}
+
+# Results :
+# corr : 0.99077330.98144640.98714470.99423190.98154780.98984130.99572940.97133930.98447660.99740910.91652120.98090670.99691270.92759980.9785911
+# Conclusion : very high correlation. We can keep exactextract extraction. 
+
+
+# count na in columns of chl_ee
+for (c in colnames(chl_ee)[-1]) {
+  na_count <- sum(is.na(chl_ee[[c]]))
+  cat("Number of NA in", c, ":", na_count, "\n")
+}
+
+# 14 na
+
+# count na in columns of chl_rio
+for (c in colnames(chl_rio)[-1]) {
+  na_count <- sum(is.na(chl_rio[[c]]))
+  cat("Number of NA in", c, ":", na_count, "\n")
+}
+
+
+# merge buff$geom with chl_ee by replicates
+buff_chl_ee <- buff %>%
+  left_join(chl_ee %>% dplyr::select(replicates, all_of(common_cols)), by = "replicates")
+
+# make spatial object and export
+st_write(buff_chl_ee, "./data/processed_data/predictors/mtdt_5_CHL_exactextract-geom-only.gpkg", delete_dsn = TRUE)
+
+
+###### SST (1km) ----
+
+
+
+
+#------------- Check data for homogenous sampling effort ##############
 
 buff <- as.data.frame(buff)
 buff %>%
