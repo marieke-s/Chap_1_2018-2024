@@ -12,7 +12,7 @@
 
 # Author: Marieke Schultz
 
-# Contributors : Marie Orblin (script MPA)
+# Contributors : Martin Paquet, Pauline Viguier, Laure Velez, Marie Orblin
 
 # Date script created: 25/07/2025
 
@@ -147,14 +147,30 @@ get_mpa_fully_status <- function(replicate_str) {
   }
 }
 
+# Step 3: Apply to buff
+buff$mpa_fully <- vapply(buff$replicates, get_mpa_fully_status, FUN.VALUE = numeric(1))
 
+# Clean
+rm(get_mpa_fully_status, mpa_lookup, in_out)
+
+# Check results
+buff %>% 
+  as.data.frame() %>%
+  group_by(mpa_fully) %>%
+  summarise(count = n()) %>%
+  print()
+
+# print the replicates column of buff where mpa_fully is NA
+any(is.nan(buff$mpa_fully))
+buff %>% filter(is.na(mpa_fully)) %>% dplyr::select(replicates, mpa_fully) %>%
+  print()
 
 
 ###### Distances : to port, canyon and reserve (Martin) ############
 # Explanation : distances to several entities (port, canyons, MPA reserve) were computed by Martin Paquet in 07/2025 with the distance pipeline explained in Methods.txt.
 
 # Load data ----
-dist <- st_read("./data/raw_data/predictors/Distances/buffer_euclidian_port.gpkg")
+dist <- st_read("./data/raw_data/predictors/Distances/buffer_with_closest_feats_search_outlier_treshold_shore_50m.gpkg")
 dist <- as.data.frame(dist)
 
 # Clean ----
@@ -183,34 +199,74 @@ rm(dist, extra_cols)
 
 
 
-###### Comparison distance to shore Martin VS Pauline -----
+###### METHODOLIGAL CHECKS : Comparison distance to shore Martin VS Euclidian centroid distance -----
 # Load data ############
 # Explanation : distance to shore is computed from the coastline shapefile using '2.1_Distance_shore.py' from orignal code of Pauline Viguier. 
 # Important methodological considerations : 
-# Di(Paulostance to shore is computed from replicates group's buffer centroids.
+# Distance to shore is computed from replicates group's buffer centroids with euclidian distance. 
 # When a centroid is on land (which happened for ~ 67/792 centroids) we set the distance to shore to 1 meter because it was actually not sampled on land (obviously) and it ended up there only because we simplified transects into straight lines between transect start and end points.
 
-# Run 2.1_Distance_shore.py 
-# Bash call
-system("python3 ./scripts/2.1_Distance_shore.py")
-
+# Run 2.1_Distance_shore.py to compute distance to shore with euclidian buffer centroid distance.
+system("python3 ./scripts/2_Euclidian_Distance_shore.py")
 
 # Load buff with dist_shore  
 dist_shore <- st_read("./data/processed_data/predictors/mtdt_5_dist-shore.gpkg")
 
-# Comparison ----
-# Add dist_shore$dist_shore to buff
+
+# Add dist_shore$dist_shore_m to buff
 df <- dist_shore %>%
   as.data.frame() %>%
-  dplyr::select(replicates, dist_shore) %>%
+  dplyr::select(replicates, dist_shore_m) %>%
   left_join(
-    buff %>%
-      as.data.frame() %>%
+    buff %>% as.data.frame(),
     by = "replicates"
   )
 
-# Correlation df$shore_dist_m_weight vs df$dist_shore
-  
+# Comparison ----
+
+
+
+# Correlation df$shore_dist_m_weight (accCost) vs df$dist_shore_m (euclidian)
+cor_pearson <- cor(df$shore_dist_m_weight, df$dist_shore_m, use = "complete.obs", method = "pearson")
+
+# Plot 
+r2 <- cor_pearson^2
+ggplot(data = NULL, aes(x = df$shore_dist_m_weight, y = df$dist_shore_m)) +
+  geom_point(color = "steelblue", alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, color = "darkred", linetype = "dashed") +
+  labs(
+    x = "Weighted mean distance to Shore accCost ",
+    y = "Distance to Shore euclidian from buffer centroid",
+    title = "Relationship between Port Distance Metrics",
+    subtitle = sprintf("Pearson r = %.3f | R² = %.3f", cor_pearson, r2)
+  ) +
+  theme_minimal(base_size = 14)
+
+
+
+
+# Correlation df$shore_dist_m_min (accCost) vs df$dist_shore_m (euclidian)
+cor_pearson <- cor(df$shore_dist_m_min, df$dist_shore_m, use = "complete.obs", method = "pearson")
+
+# Plot 
+r2 <- cor_pearson^2
+ggplot(data = NULL, aes(x = df$shore_dist_m_min, y = df$dist_shore_m)) +
+  geom_point(color = "steelblue", alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, color = "darkred", linetype = "dashed") +
+  labs(
+    x = "min distance to Shore accCost ",
+    y = "Distance to Shore euclidian from buffer centroid",
+    title = "Relationship between Port Distance Metrics",
+    subtitle = sprintf("Pearson r = %.3f | R² = %.3f", cor_pearson, r2)
+  ) +
+  theme_minimal(base_size = 14)
+
+
+
+
+# Clean
+rm(df, dist_shore, cor_pearson, r2)
+# dev.off() # close plots
 
 
 
@@ -220,7 +276,9 @@ df <- dist_shore %>%
 
 
 
-###### Comparison distance to reserve Martin VS in_out Laure ############
+###### METHODOLIGAL CHECKS : Comparison distance to reserve Martin VS in_out Laure ############
+
+# Min dist ----
 
 # Make column reserve_martin : if $mpa_dist_m_min = 0 then reserve_martin = 1 else reserve_martin = 0
 buff$reserve_martin <- ifelse(buff$mpa_dist_m_min == 0, 1, 0)
@@ -232,48 +290,111 @@ comparison <- buff %>%
 
 # Count matches and mismatches
 comparison %>%
+  as.data.frame() %>%
   group_by(match) %>%
   summarise(count = n()) %>%
   print()
 
-61/788 *100 # 7.7% mismatch
-63/788 # 7.9% mismatch 
+61/788 *100 # 7.7% mismatch avant jointure ? 
+63/788 # 7.9% mismatch après jointure ?
+61/788 *100 # 7.7% mismatch à 50m
+
+# Add a column "Who_is_1", when match = TRUE = NA, when match = FALSE and mpa_fully = 1 then "Laure", when match = FALSE and reserve_martin = 1 then "Martin"
+comparison <- comparison %>%
+  mutate(
+    Who_is_1 = case_when(
+      match == TRUE ~ NA_character_,
+      match == FALSE & mpa_fully == 1 ~ "Laure",
+      match == FALSE & reserve_martin == 1 ~ "Martin"
+    )
+  )
+
+# [OPTIONAL] Export to check in QGIS
+st_write(comparison, "./data/processed_data/predictors/MPA/check_reserve_match_50m.gpkg", delete_dsn = TRUE)
+
+#---
+# All mismatch are due to Laure = 0 and Martin = 1. This is because Martins's distances to reserve are computed on buffer while Laure is checking each sample point. Thus, close but not inside transects, whn buffer touch the reserve and are thus considered by Martin as "in reserve".
 
 
-# Add a column to buff indicating whether there is a mismatch
-buff2 <- buff %>% dplyr::select(replicates, mpa_dist_m_min, geom)
+# Max dist ----
 
-# spatial join: attach attributes from 'comparison' to 'buff' where geometries intersect
-buff2 <- st_join(buff2, comparison)
+# We check if this remains true when using the "max distance to reserve" from Martin instead of the "min distance to reserve".
+buff$reserve_martin_max <- ifelse(buff$mpa_dist_m_max == 0, 1, 0)
 
+comparison <- buff %>%
+  dplyr::select(replicates, mpa_fully, reserve_martin_max) %>%
+  mutate(match = ifelse(mpa_fully == reserve_martin_max, TRUE, FALSE))
 
-# merge buff2 with comparison by replicates
-
-buff2 <- buff2 %>%
+comparison %>%
   as.data.frame() %>%
-  left_join(comparison, by = "replicates")
+  group_by(match) %>%
+  summarise(count = n()) %>%
+  print()
 
-# now write
-buff2 <- sf::st_as_sf(buff2)
-st_write(buff2, "./data/processed_data/predictors/check_reserve_match.gpkg", delete_dsn = TRUE)
+105/788 *100 # 13.32% mismatch  
+
+comparison <- comparison %>%
+  mutate(
+    Who_is_1 = case_when(
+      match == TRUE ~ NA_character_,
+      match == FALSE & mpa_fully == 1 ~ "Laure",
+      match == FALSE & reserve_martin_max == 1 ~ "Martin"
+    )
+  )
+
+#---
+# In thas case mismatches are all due to Laure = 1 and Martin = 0. 
+
+
+# Mean dist ----
+
+# We check with "weighted mean distance to reserve"
+buff$reserve_martin_mean <- ifelse(buff$mpa_dist_m_weight == 0, 1, 0)
+comparison <- buff %>%
+  dplyr::select(replicates, mpa_fully, reserve_martin_mean, mpa_dist_m_weight) %>%
+  mutate(match = ifelse(mpa_fully == reserve_martin_mean, TRUE, FALSE))
+
+comparison %>%
+  as.data.frame() %>%
+  group_by(match) %>%
+  summarise(count = n()) %>%
+  print()
+
+105/788 *100 # 13.32% mismatch
+
+comparison <- comparison %>%
+  mutate(
+    Who_is_1 = case_when(
+      match == TRUE ~ NA_character_,
+      match == FALSE & mpa_fully == 1 ~ "Laure",
+      match == FALSE & reserve_martin_mean == 1 ~ "Martin"
+    )
+  )
+
+
+comparison %>%
+  as.data.frame() %>%
+  dplyr::filter(match == FALSE) %>%
+  print()
+
+# [OPTIONAL] Export to check in QGIS
+st_write(comparison, "./data/processed_data/predictors/MPA/check_reserve_match_mean_50m.gpkg", delete_dsn = TRUE)
+
+#---
+# In thas case mismatches are all due to Laure = 1 and Martin = 0. 
 
 
 
 
+# Clean
 
-
-
-
-
-s# Clean
-
-rm(comparison, mismatches)
+rm(comparison)
 
 # remove buff$reserve_martin
 buff <- buff %>% dplyr::select(-reserve_martin)
 
 
-###### Comparison distance to port Martin VS distance to port GFW ############
+###### METHODOLIGAL CHECKS: Comparison distance to port Martin VS distance to port GFW ############
 
 
 
@@ -298,24 +419,10 @@ df <- spatial_extraction(var = var, rast = rast, poly = buff)
 
 # Compare dff$port_dist_m_weight with df$dist_port_mean with pearson correlation
 # Compute Pearson correlation
-cor_pearson <- cor(df$port_dist_euclid_m_min, df$dist_port_min, use = "complete.obs", method = "pearson")
-
-
-
-
-
-cor(df$port_dist_m_mean, df$dist_port_mean, use = "complete.obs", method = "pearson")
-cor(df$port_dist_m_weight, df$dist_port_mean, use = "complete.obs", method = "pearson")
-cor(df$port_dist_m_min, df$dist_port_min, use = "complete.obs", method = "pearson")
-cor(df$port_dist_m_max, df$dist_port_max, use = "complete.obs", method = "pearson")
-
-# Compute R² (square of correlation)
-r2 <- cor_pearson^2
-
-# Load ggplot2 if not already
-library(ggplot2)
-
-# Create the plot
+cor(df$port_dist_m_mean, df$dist_port_mean, use = "complete.obs", method = "pearson") # 50m: 0.6154648
+cor(df$port_dist_m_weight, df$dist_port_mean, use = "complete.obs", method = "pearson") # 50m : 0.6153183
+cor(df$port_dist_m_min, df$dist_port_min, use = "complete.obs", method = "pearson") # 50m : 0.6142686
+cor(df$port_dist_m_max, df$dist_port_max, use = "complete.obs", method = "pearson") # 50m : 0.6254746
 
 
 # euclid martin MIN vs GFW MIN
@@ -351,12 +458,13 @@ ggplot(data = NULL, aes(x = df$port_dist_m_min, y = df$port_dist_euclid_m_min)) 
   theme_minimal(base_size = 14)
 
 
-
+# Clean
+rm(df, cor_pearson, r2, var, rast, poly)
 
 # Potential reasons for differences between GFW and Martin's distances to port :
 
 # raw data port 
-# algo distance (euclid or accost)
+# algo distance (euclid or accCost)
 # spatial resolution
 
 
@@ -1260,28 +1368,7 @@ for (col in common_cols) {
 # Conclusion : very high correlation. We can keep exactextract extraction. 
 
 
-# count na in columns of chl_ee
-for (c in colnames(chl_ee)[-1]) {
-  na_count <- sum(is.na(chl_ee[[c]]))
-  cat("Number of NA in", c, ":", na_count, "\n")
-}
-
-# 14 na
-
-# count na in columns of chl_rio
-for (c in colnames(chl_rio)[-1]) {
-  na_count <- sum(is.na(chl_rio[[c]]))
-  cat("Number of NA in", c, ":", na_count, "\n")
-}
-
-
-# merge buff$geom with chl_ee by replicates
-buff_chl_ee <- buff %>%
-  left_join(chl_ee %>% dplyr::select(replicates, all_of(common_cols)), by = "replicates")
-
-# make spatial object and export
-st_write(buff_chl_ee, "./data/processed_data/predictors/mtdt_5_CHL_exactextract-geom-only.gpkg", delete_dsn = TRUE)
-
+rm(chl_ee, chl_rio, common_cols, col, correlation)
 
 ###### SST (1km) ----
 

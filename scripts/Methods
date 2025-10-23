@@ -16,7 +16,7 @@ To avoid pseudo-replication and ensure independence of our observations, we pool
 
 This definition allows to group together samples for which the extraction of MARS3D environmental variables will be virtually the same. It doesn't necessarily correspond to the replicates as they were intended in the field.
 
-The replicates were first pooled together by Amandine Avouac: (see R scripts 1.1_extraction_replicates_mtd_Med.R and 1.1_verif_replicates_distance.R) 
+The replicates were first pooled together by Amandine Avouac: (see R scripts in /1_Replicates_pooling : extraction_replicates_mtd_Med.R and verif_replicates_distance.R) 
 
 - same date, time, site name and duration
 - when time was missing, using same site, subsite and date

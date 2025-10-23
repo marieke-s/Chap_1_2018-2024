@@ -139,3 +139,20 @@ compute_selected_terrain_ind <- function(rast, folder_path, neighbors, name, ind
     terra::terrain(x = rast, v = "roughness", neighbors = neighbors, filename = filename_roughness)
   }
 }
+
+#---------------------------------- Function : identify_columns   ------------------
+ # identify species and predictors columns from total dataframe 
+identify_columns <- function(df) {
+  # Identify response variables (species columns) based on the pattern "Genus.species"
+  response_vars <- grep("^[A-Za-z]+\\.[A-Za-z]+$", colnames(df), value = TRUE)
+  
+  # Identify predictor variables as the columns that are not species columns
+  predictor_vars <- setdiff(colnames(df), response_vars)
+  
+  # Get the column numbers for response_vars and predictor_vars
+  response_columns <- which(colnames(df) %in% response_vars)
+  predictor_columns <- which(colnames(df) %in% predictor_vars)
+  
+  # Return the result as a list containing the column numbers
+  return(list(response_columns = response_columns, predictor_columns = predictor_columns))
+}
