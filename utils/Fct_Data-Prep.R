@@ -156,3 +156,44 @@ identify_columns <- function(df) {
   # Return the result as a list containing the column numbers
   return(list(response_columns = response_columns, predictor_columns = predictor_columns))
 }
+#-------------- Function to list species under a certain occurrence threshold --------------
+list_rare_sp <- function(df, sum = NULL, exact = TRUE) {
+  # Initialize an empty character vector to store column names
+  result <- character()  # Using character() instead of list()
+  
+  # Loop through each column in df
+  for (col_name in colnames(df)) {
+    # Calculate the sum of the column
+    column_sum <- sum(df[[col_name]], na.rm = TRUE)  # Handling NA values
+    
+    # Check the condition based on the parameters
+    if (exact) {  # If exact is TRUE
+      if (column_sum == sum) {
+        result <- c(result, col_name)  # Append to character vector
+      }
+    } else {  # If exact is FALSE
+      if (column_sum <= sum) {
+        result <- c(result, col_name)  # Append to character vector
+      }
+    }
+  }
+  
+  # Return the result (character vector of column names)
+  return(result)
+}
+
+# Function to species columns and predictor columns
+identify_columns <- function(df) {
+  # Identify response variables (species columns) based on the pattern "Genus.species"
+  response_vars <- grep("^[A-Za-z]+\\.[A-Za-z]+$", colnames(df), value = TRUE)
+  
+  # Identify predictor variables as the columns that are not species columns
+  predictor_vars <- setdiff(colnames(df), response_vars)
+  
+  # Get the column numbers for response_vars and predictor_vars
+  response_columns <- which(colnames(df) %in% response_vars)
+  predictor_columns <- which(colnames(df) %in% predictor_vars)
+  
+  # Return the result as a list containing the column numbers
+  return(list(response_columns = response_columns, predictor_columns = predictor_columns))
+}

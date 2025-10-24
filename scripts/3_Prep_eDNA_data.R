@@ -1,3 +1,7 @@
+#------------ TODO ---------------------
+# Replace matrix with V2 version of the matrix (without species correction)
+
+
 #------------- Description ---------------------
 # Purpose: 
 # This script aims to 
@@ -36,17 +40,30 @@ library(stringr)
 source("./utils/Fct_Data-Prep.R")
 
 
-#------------- Load data ------------------
+#------------- Load and prep data ------------------
+# Occurences
 occ <- read.csv("./data/raw_data/eDNA/data_MED_teleo_pres_1824_V1.csv", sep = ";")
 
+# Rename code_spygen 
+occ <- occ %>%
+  rename(spygen_code = code_spygen)
 
+# Metadata
+mtdt_3 <- sf::st_read("./data/processed_data/eDNA/mtdt_3.gpkg")
 
+# Replace replicates = "no" by "spygen_code"
+mtdt_3$replicates[mtdt_3$replicates == "no"] <- mtdt_3$spygen_code[mtdt_3$replicates == "no"]
+
+# When pool =/= "no" --> spygen_code = pool
+mtdt_3$spygen_code[mtdt_3$pool != "no"] <- mtdt_3$pool[mtdt_3$pool != "no"]
 
 #------------- Check and clean species assignations  ----------------
+# Load species lists from different sources ----
+
 sp_edna <- colnames(occ[-1])
 
-sp_celia <- read.csv("./data/raw_data/eDNA/out_of_range_species1.1.csv")
-sp_celia <- sp_celia$Species
+outcelia <- read.csv("./data/raw_data/eDNA/out_of_range_species1.2.csv")
+sp_celia <- outcelia$Species
 
 sp_jeanne <- c(
   "Abramis brama",
@@ -101,44 +118,141 @@ sp_jeanne <- c(
   "Babka gymnotrachelus"
 )
 
-# Modif Alicia
+# Modif Alicia ----
 
-# Manually check synonyms and find the species
-species[species == "Chelon auratus"] <- "Liza aurata"
-rownames(adne)[rownames(adne) == "Chelon_auratus"] <- "Liza_aurata"
+# # Manually check synonyms and find the species
+# species[species == "Chelon auratus"] <- "Liza aurata"
+# rownames(adne)[rownames(adne) == "Chelon_auratus"] <- "Liza_aurata"
+# 
+# species[species == "Chelon ramada"] <- "Liza ramada"
+# rownames(adne)[rownames(adne) == "Chelon_ramada"] <- "Liza_ramada"
+# 
+# species[species == "Mullus barbatus"] <- "Mullus barbatus barbatus"
+# rownames(adne)[rownames(adne) == "Mullus_barbatus"] <- "Mullus_barbatus_barbatus"
+# 
+# species[species == "Diplodus sargus"] <- "Diplodus sargus sargus"
+# rownames(adne)[rownames(adne) == "Diplodus_sargus"] <- "Diplodus_sargus_sargus"
+# 
+# species[species == "Diplodus cervinus"] <- "Diplodus cervinus cervinus"
+# rownames(adne)[rownames(adne) == "Diplodus_cervinus"] <- "Diplodus_cervinus_cervinus"
 
-species[species == "Chelon ramada"] <- "Liza ramada"
-rownames(adne)[rownames(adne) == "Chelon_ramada"] <- "Liza_ramada"
-
-species[species == "Mullus barbatus"] <- "Mullus barbatus barbatus"
-rownames(adne)[rownames(adne) == "Mullus_barbatus"] <- "Mullus_barbatus_barbatus"
-
-species[species == "Diplodus sargus"] <- "Diplodus sargus sargus"
-rownames(adne)[rownames(adne) == "Diplodus_sargus"] <- "Diplodus_sargus_sargus"
-
-species[species == "Diplodus cervinus"] <- "Diplodus cervinus cervinus"
-rownames(adne)[rownames(adne) == "Diplodus_cervinus"] <- "Diplodus_cervinus_cervinus"
 
 
-
+# Check differences between species lists ----
 # Print species in sp_jeanne not in sp_celia
 setdiff(sp_jeanne, sp_celia)
 
-
 # Print species in sp_celia not in sp_jeanne
 setdiff(sp_celia, sp_jeanne)
-length(setdiff(sp_celia, sp_jeanne))
+length(setdiff(sp_celia, sp_jeanne)) # 14 spp.
+
+# Species to remove ----
+# Count species to remove
+outcelia %>% filter(Decision=="OUT") %>% dim() # 56 species to remove
+
+# List species to remove
+sp_to_remove <- outcelia %>%
+  filter(Decision == "OUT") %>%
+  pull(Species)
+
+# Replace " " by "." to match occ column names
+sp_to_remove <- gsub(" ", ".", sp_to_remove)
+
+length(setdiff(sp_to_remove, colnames(occ[-1]))) # 55/56 species to remove are not in occ V1. --> only 1 species will need to be removed from occ V1.
+intersect(sp_to_remove, colnames(occ[-1])) # "Cyprinus.carpio" (freshwater species)
+
+# Remove species from occ
+occ <- occ %>%
+  dplyr::select(-any_of(sp_to_remove))
+
+
+
+
 
 # Clean 
-rm(sp_edna, sp_celia, sp_jeanne)
+rm(sp_edna, sp_celia, sp_jeanne, outcelia, sp_to_remove)
 
 
 
 
 
-#---------------------------------------------------------------------------- 1. UNDETECTED AND RARE SPECIES --------------------------------------
+#------------- Pool occurences by replicates ------------------
+# CHECKS : Compare spygen_codes in occ and mtdt ---- ----
+length(occ) - length(mtdt_3) # 199 rows more in occ than in mtdt_3
 
-#---- CHECKS : Plot occurences and rarity ----
+# spygen_codes in occ not in mtdt_3
+setdiff(occ$spygen_code, mtdt_3$spygen_code)
+length(setdiff(occ$spygen_code, mtdt_3$spygen_code)) # 447
+
+# spygen_codes in mtdt_3 not in occ
+setdiff(mtdt_3$spygen_code, occ$spygen_code)
+length(setdiff(mtdt_3$spygen_code, occ$spygen_code)) # 40
+
+# Check remaining missing spygen_codes 
+missing_spygen <- mtdt_3 %>%
+  dplyr::filter(!spygen_code %in% occ$spygen_code)
+
+unique(missing_spygen$project) # All samples come from the project "Ange2mer" --> need to be removed because they were not analysed with Teleo markers (they were specifically analysed for Squatina squatina).
+
+# Remove Ange2Mer spygen_codes from mtdt_3 ----
+mtdt_3 <- mtdt_3 %>%
+  dplyr::filter(project != "Ange2Mer")
+
+rm(missing_spygen)
+
+# Merge rows per replicates ----
+# Add replicates column to occ
+occ <- occ %>%
+  left_join(mtdt_3 %>% dplyr::select(c(spygen_code, replicates)), by = "spygen_code")
+
+# Identify species columns (excluding 'spygen_code', 'replict', 'geometry')
+species_cols <- setdiff(colnames(occ), c("spygen_code", "replicates", "geom"))
+
+# Nb of expected rows after pooling
+length(unique(mtdt_3$replicates)) # 768 
+
+# Presence/Absence : Merge rows per replicates --> 0 or 1
+occ_pooled <- occ %>%
+  group_by(replicates) %>%
+  summarise(
+    pooled_name = paste(sort(spygen_code), collapse = "_"),  # Combine spygen_code separated by "_"
+    across(all_of(species_cols), ~ ifelse(any(. == 1), 1, 0)),  # Apply new merging rule
+  ) %>%
+  ungroup()
+
+length(setdiff(unique(mtdt_3$replicates), occ_incertitude$replicates))
+
+
+
+
+
+
+
+# Field replicate incertitude : Merge rows per replicates --> nb of "1" / nb of field replicates
+occ_incertitude <- occ %>%
+  group_by(replicates) %>%
+  summarise(
+    pooled_name = paste(sort(spygen_code), collapse = collapse = "_"),  # Combine spygen_code separated by "_"
+    across(all_of(species_cols), ~ ifelse(all(. == 0), 0, ifelse(all(. == 1), 1, 0.5))),  # Apply merging rule : 0.5 for mixed values
+  ) %>%
+  ungroup()
+
+
+# PCR replicate incertitude : Merge rows per replicates --> nb of PCR / tot nb of PCR
+
+
+# ????? Remove replicates column
+occ_pooled <- occ_pooled %>% dplyr::select(-replicates)
+occ_incertitude <- occ_incertitude %>% dplyr::select(-replicates)
+
+
+
+
+
+
+#------------- UNDETECTED AND RARE SPECIES --------------------------------------
+
+# CHECKS : Plot occurences and rarity ----
 # Explanation : This part plots the number of occurence per species distribution. It highlights the species that have few occurences (under a chosen rarity threshold).
 
 ### 1. Rare species plot (Occurence / species)
@@ -217,7 +331,7 @@ hist(plot_data$tot, breaks = 10, col = "lightblue", xlab = "Total Occurrences", 
 
 
 
-#---- RUN : Remove undetected species ----
+# RUN : Remove undetected species ----
 # List undetected species (i.e., species with no occurrence)
 undetected <- list_rare_sp(occ[,-1], sum = 0, exact = TRUE)  # Using occ[,-1] to exclude spygen_code column
 print(length(undetected))  
@@ -230,7 +344,7 @@ rm(undetected)
 
 
 
-#---- [DO NOT RUN] Remove rare species ----
+# [DO NOT RUN] Remove rare species ----
 # # List rare species (i.e., species under a certain occurrence threshold)
 # rare <- list_rare_sp(occ[,-1], sum = 5, exact = FALSE)  # sum = X sets the number of occurrences under which a species is considered rare
 # print(length(rare)) # 60 spp < 5 occurences 
@@ -244,21 +358,4 @@ rm(undetected)
 # occ <- occ[, !colnames(occ) %in% rare] # 60 spp with < 5 occurences : 142 spp --> 82 spp
 # rm(rare)
 
-
-#---- Save results ----
-# Explanation of file naming : P0 for Processing 0 (from data processing computed in analyses/data_prep/4_Data_Processing.R) _RX for Rarity set to threshold 0 (species with less than X occurences of removed).
-
-# Merge back occ to tot
-# remove occ columns from tot
-result <- identify_columns(tot) 
-occ1 <- colnames(tot)[result$response_columns]
-# Remove occ1 columns from tot
-tot <- tot[, -which(colnames(tot) %in% occ1)]
-
-# Merge occ to tot
-tot <- merge(tot, occ, by = "spygen_code", all.x = TRUE)
-
-colnames(tot)
-
-write_rds(occ, "./data/processed_data/data_prep/Med_TOT_2023_P0_R0.rds")
 

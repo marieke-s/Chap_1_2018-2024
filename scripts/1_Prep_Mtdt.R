@@ -508,7 +508,6 @@ replicates_buffer <- mtdt_2 |>
   }) |>
   st_as_sf(crs = 4326)
 
-
 # Drop Z and M dimensions (convert ZM to XY)
 replicates_buffer <- st_zm(replicates_buffer, drop = TRUE, what = "ZM")
 
