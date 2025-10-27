@@ -29,6 +29,63 @@ buffer_transect <- function(df,
   # Apply buffer and return
   st_buffer(sf_obj, dist = buffer_dist)
 }
+
+
+
+
+
+
+
+#---------------------------------- Function to compute field replicate count
+compute_field_replicates <- function(rep_string) {
+  if (is.na(rep_string) || rep_string == "") return(NA_integer_)
+  
+  # Split on `/` to get number of samples
+  parts <- strsplit(rep_string, "/")[[1]]
+  
+  # Count each pooled group (with `_`) or single sample as 1 unit
+  replicate_units <- sum(sapply(parts, function(x) length(strsplit(x, "_")[[1]]) == 1)) +  # unpooled
+    sum(sapply(parts, function(x) length(strsplit(x, "_")[[1]]) > 1))     # pooled
+  
+  return(replicate_units)
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#---------------------------------- Function to compute PCR replicate count
+compute_pcr_replicates <- function(rep_string) {
+  if (is.na(rep_string) || rep_string == "") return(NA_integer_)
+  
+  # Split on `/` to get number of samples
+  parts <- strsplit(rep_string, "/")[[1]]
+  
+  # Count each pooled group (with `_`) or single sample as 1 unit
+  replicate_units <- sum(sapply(parts, function(x) length(strsplit(x, "_")[[1]]) == 1)) +  # unpooled
+    sum(sapply(parts, function(x) length(strsplit(x, "_")[[1]]) > 1))     # pooled
+  
+  return(12 * replicate_units)
+}
+
+
+
+
+
+
+
+
+
+
 #---------------------------------- Function : spatial_extraction --------------------
 # This function extracts pixel values from a raster within a polygon (ie replicates buffer).
 # It reprojects the polygon to the raster's CRS if necessary.
@@ -156,7 +213,7 @@ identify_columns <- function(df) {
   # Return the result as a list containing the column numbers
   return(list(response_columns = response_columns, predictor_columns = predictor_columns))
 }
-#-------------- Function to list species under a certain occurrence threshold --------------
+#---------------------------------- Function to list species under a certain occurrence threshold --------------
 list_rare_sp <- function(df, sum = NULL, exact = TRUE) {
   # Initialize an empty character vector to store column names
   result <- character()  # Using character() instead of list()
