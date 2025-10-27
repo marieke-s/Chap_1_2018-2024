@@ -57,26 +57,16 @@ buff <- st_read("./data/processed_data/eDNA/mtdt_5.gpkg")
 # 3. Area covered = area of replicate group buffer --> computed here
 
 
-# Nb of PCR replicates ----
-# Function to compute PCR replicate count
-compute_pcr_replicates <- function(rep_string) {
-  if (is.na(rep_string) || rep_string == "") return(NA_integer_)
-  
-  # Split on `/` to get number of samples
-  parts <- strsplit(rep_string, "/")[[1]]
-  
-  # Count each pooled group (with `_`) or single sample as 1 unit
-  replicate_units <- sum(sapply(parts, function(x) length(strsplit(x, "_")[[1]]) == 1)) +  # unpooled
-    sum(sapply(parts, function(x) length(strsplit(x, "_")[[1]]) > 1))     # pooled
-  
-  return(12 * replicate_units)
-}
+# Nb of field replicates ----
+# Compute nb of field replicates using the function compute_field_replicates
+# Pooled_samples are counted as 1 field replicate
+buff$field_replicates <- sapply(buff$replicates, compute_field_replicates)
 
-# Apply to your data
+
+# Nb of PCR replicates ----
+# Compute nb of PCR replicates using the function compute_pcr_replicates
 buff$PCR_replicates <- sapply(buff$replicates, compute_pcr_replicates)
 
-# Clean
-rm(compute_pcr_replicates)
 
 
 

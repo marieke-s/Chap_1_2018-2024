@@ -45,8 +45,21 @@ source("./utils/Fct_Data-Prep.R")
 occ <- read.csv("./data/raw_data/eDNA/data_MED_teleo_pres_1824_V1.csv", sep = ";")
 
 # Rename code_spygen 
+# Rename pomatomus.saltatrix to Pomatomus.saltatrix
 occ <- occ %>%
-  rename(spygen_code = code_spygen)
+  rename(spygen_code = code_spygen) %>%
+  rename(Pomatomus.saltatrix = pomatomus.saltatrix)
+
+# Import PCR matrix 
+pcr <- read.csv("./data/raw_data/eDNA/data_MED_teleo_rep_1824_V1.csv", sep = ";")
+
+# Rename code_spygen
+# Remove "variable" column
+pcr <- pcr %>%
+  rename(spygen_code = code_spygen) %>%
+  dplyr::select(-variable)
+
+
 
 # Metadata
 mtdt_3 <- sf::st_read("./data/processed_data/eDNA/mtdt_3.gpkg")
@@ -161,8 +174,11 @@ sp_to_remove <- gsub(" ", ".", sp_to_remove)
 length(setdiff(sp_to_remove, colnames(occ[-1]))) # 55/56 species to remove are not in occ V1. --> only 1 species will need to be removed from occ V1.
 intersect(sp_to_remove, colnames(occ[-1])) # "Cyprinus.carpio" (freshwater species)
 
-# Remove species from occ
+# Remove species from occ and pcr 
 occ <- occ %>%
+  dplyr::select(-any_of(sp_to_remove))
+
+pcr <- pcr %>%
   dplyr::select(-any_of(sp_to_remove))
 
 
@@ -176,7 +192,9 @@ rm(sp_edna, sp_celia, sp_jeanne, outcelia, sp_to_remove)
 
 
 
-#------------- Pool occurences by replicates ------------------
+
+
+#------------- Pool occ by replicates ------------------
 # CHECKS : Compare spygen_codes in occ and mtdt ---- ----
 length(occ) - length(mtdt_3) # 199 rows more in occ than in mtdt_3
 
@@ -194,15 +212,37 @@ missing_spygen <- mtdt_3 %>%
 
 unique(missing_spygen$project) # All samples come from the project "Ange2mer" --> need to be removed because they were not analysed with Teleo markers (they were specifically analysed for Squatina squatina).
 
+
 # Remove Ange2Mer spygen_codes from mtdt_3 ----
 mtdt_3 <- mtdt_3 %>%
   dplyr::filter(project != "Ange2Mer")
 
 rm(missing_spygen)
 
-# Merge rows per replicates ----
+# CHECKS : Compare spygen_codes in pcr and mtdt ---- ----
+length(pcr) - length(mtdt_3) # 199 rows more in pcr than in mtdt_3
+
+# spygen_codes in pcr not in mtdt_3
+setdiff(pcr$spygen_code, mtdt_3$spygen_code)
+length(setdiff(pcr$spygen_code, mtdt_3$spygen_code)) # 447
+
+# spygen_codes in mtdt_3 not in pcr
+setdiff(mtdt_3$spygen_code, pcr$spygen_code)
+length(setdiff(mtdt_3$spygen_code, pcr$spygen_code)) # 0
+
+# Remove spygen_codes not in mtdt_3 from occ and pcr ----
+occ <- occ %>%
+  dplyr::filter(spygen_code %in% mtdt_3$spygen_code)
+
+pcr <- pcr %>%
+  dplyr::filter(spygen_code %in% mtdt_3$spygen_code)
+
+# Pool per replicates ----
 # Add replicates column to occ
 occ <- occ %>%
+  left_join(mtdt_3 %>% dplyr::select(c(spygen_code, replicates)), by = "spygen_code")
+
+pcr <- pcr %>%
   left_join(mtdt_3 %>% dplyr::select(c(spygen_code, replicates)), by = "spygen_code")
 
 # Identify species columns (excluding 'spygen_code', 'replict', 'geometry')
@@ -211,7 +251,8 @@ species_cols <- setdiff(colnames(occ), c("spygen_code", "replicates", "geom"))
 # Nb of expected rows after pooling
 length(unique(mtdt_3$replicates)) # 768 
 
-# Presence/Absence : Merge rows per replicates --> 0 or 1
+# Presence/Absence Pooled -----
+# Merge rows per replicates --> 0 or 1 
 occ_pooled <- occ %>%
   group_by(replicates) %>%
   summarise(
@@ -220,30 +261,125 @@ occ_pooled <- occ %>%
   ) %>%
   ungroup()
 
-length(setdiff(unique(mtdt_3$replicates), occ_incertitude$replicates))
+# Check nb of rows after pooling
+nrow(occ_pooled)  # 768 rows after pooling
+length(setdiff(unique(mtdt_3$replicates), occ_pooled$replicates)) # 0
+length(setdiff(occ_pooled$replicates, unique(mtdt_3$replicates))) # 0 
 
 
 
 
+#-------------- Incertitude matrix ----------------------
+# Field replicate incertitude (occ) ----
+
+# Count number of field replicates 
+# Important methodological consideration : Pooled_samples are counted as 1 field replicate
+occ$field_replicates <- sapply(occ$replicates, compute_field_replicates)
 
 
 
-# Field replicate incertitude : Merge rows per replicates --> nb of "1" / nb of field replicates
-occ_incertitude <- occ %>%
+# Merge rows per replicates --> nb of "1" / nb of field replicates
+occ_f_incertitude <- occ %>%
   group_by(replicates) %>%
   summarise(
-    pooled_name = paste(sort(spygen_code), collapse = collapse = "_"),  # Combine spygen_code separated by "_"
-    across(all_of(species_cols), ~ ifelse(all(. == 0), 0, ifelse(all(. == 1), 1, 0.5))),  # Apply merging rule : 0.5 for mixed values
+    pooled_name = paste(sort(spygen_code), collapse = "_"),
+    across(
+      all_of(species_cols),
+      ~ ifelse(
+        first(field_replicates) > 0,
+        sum(. == 1, na.rm = TRUE) / first(field_replicates),
+        NA_real_
+      )
+    )
   ) %>%
   ungroup()
 
 
-# PCR replicate incertitude : Merge rows per replicates --> nb of PCR / tot nb of PCR
+# PCR replicate incertitude  (pcr) ----
+
+# Identify species columns 
+species_cols <- setdiff(colnames(pcr), c("spygen_code", "replicates", "geom"))
+
+# Count number of pcr replicates 
+pcr$pcr_replicates <- sapply(pcr$replicates, compute_pcr_replicates)
+
+# Merge rows per replicates --> nb >0 / nb of pcr replicates
+
+occ_pcr_incertitude <- pcr %>%
+  group_by(replicates) %>%
+  summarise(
+    pooled_name = paste(sort(spygen_code), collapse = "_"),
+    across(
+      all_of(species_cols),
+      ~ ifelse(
+        first(pcr_replicates) > 0,
+        sum(. > 0, na.rm = TRUE) / first(pcr_replicates),
+        NA_real_
+      )
+    )
+  ) %>%
+  ungroup()
 
 
-# ????? Remove replicates column
+
+
+# CHECKS pcr values -----
+
+# compute max per columns of df
+sort(sapply(pcr[ , species_cols], max, na.rm = TRUE))
+max(sapply(pcr[ , species_cols], max, na.rm = TRUE))
+
+# PCR values above 12 ? 
+t <- pcr %>% filter(Gobius.xanthocephalus == '48' ) %>% print() # 48 PCR replicates 
+t$spygen_code # "SPY210641" --> maximum should be 12
+
+# make an hist of pcr across all columns 
+hist(as.numeric(unlist(pcr[ , species_cols])), breaks = 50, main = "Histogram of PCR values", xlab = "PCR values", col = "lightblue")
+boxplot(as.numeric(unlist(pcr[ , species_cols])), main = "Boxplot of PCR values", ylab = "PCR values")
+min(as.numeric(unlist(pcr[ , species_cols])))
+max(as.numeric(unlist(pcr[ , species_cols])))
+median(as.numeric(unlist(pcr[ , species_cols])))
+mean(as.numeric(unlist(pcr[ , species_cols])))
+
+# count nb of as.numeric(unlist(pcr[ , species_cols])) > 12
+sum(as.numeric(unlist(pcr[ , species_cols])) > 12, na.rm = TRUE) # 579 values above 12 --> WHY ? 
+
+# Select rows containing species_cols values > 12
+pcr_above_12 <- pcr %>%
+  filter(if_any(all_of(species_cols), ~ . > 12))
+
+
+# in mtdt_3 select spygen_code in pcr_above_12
+mtdt_3_pcr_above_12 <- mtdt_3 %>%
+  filter(spygen_code %in% pcr_above_12$spygen_code)
+
+# Export mtdt_3_pcr_above_12 as csv
+# Drop geometry
+mtdt_3_pcr_above_12 <- st_drop_geometry(mtdt_3_pcr_above_12)
+write.csv(mtdt_3_pcr_above_12, "./data/processed_data/eDNA/mtdt_3_pcr_above_12.csv", row.names = FALSE)
+
+
+
+
+
+rm(species_cols)
+
+
+# ????? Remove replicates column ----
 occ_pooled <- occ_pooled %>% dplyr::select(-replicates)
 occ_incertitude <- occ_incertitude %>% dplyr::select(-replicates)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

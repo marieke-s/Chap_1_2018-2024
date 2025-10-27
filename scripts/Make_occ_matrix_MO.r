@@ -1,5 +1,8 @@
 #### Bibliothèques et espace de travail ####
 
+# Clean env
+rm(list = ls())
+
 library(ape)
 library(dplyr)
 library(entropart)
@@ -27,16 +30,18 @@ library(readxl)
 library(dplyr)
 library(tibble)
 
+
 #1) Charger la donnée ####
 
 #Charger la checklist Med - Atlantique
-check <- read.csv("Desktop/ADNe_MATRICES_sept25/checklist_Med_Atl_cleaned.csv", sep = ";")
+check <- read.csv("./data/raw_data/eDNA/checklist_Med_Atl_cleaned.csv", sep = ";")
 `%!in%` = Negate(`%in%`)  # Créer un opérateur pour la négation de `%in%`
 
 
 #Lire le fichier brut SPYGEN sans noms de colonnes (pour travailler sur les lignes)
-raw <- read_xlsx("Desktop/ADNe_MATRICES_sept25/Results_Teleo_2018-2024_with_IPOCOM.xlsx",
+raw <- readxl::read_xlsx("./data/raw_data/eDNA/Results_Teleo_2018-2024_with_IPOCOM.xlsx",
                  col_names = FALSE)
+
 #trouver la ligne qui contient "scientific_name" 
 header_row <- which(apply(raw, 1, function(r) any(grepl("^scientific_name$",
                                                         r, ignore.case = TRUE))))
@@ -70,7 +75,7 @@ raw_clean <- raw[-bad_species_rows, ]
 
 #2) Formater le dataframe ####
 data_all <- data.frame(t(raw_clean))                                                     # transposes the data frame  
-data_all <- rownames_to_column(data_all, var = "region")                                # add the row names as a new column 
+data_all <- tibble::rownames_to_column(data_all, var = "region")                                # add the row names as a new column 
 names(data_all) <- data_all[4,]                                                         # replace the Column names by the species names
 data_all <- data_all[,-1:-5] # colonnes
 names(data_all)[1] <- "code_spygen"
@@ -86,7 +91,28 @@ data_all[,3:length(data_all)] <- apply(data_all[,3:length(data_all)], 2,
 data_all[,3:length(data_all)] <- sapply(data_all[,3:length(data_all)], as.numeric)              # make sure the data are numeric
 
 
+#----- Check PCR replicates numbers [Marieke 27/10/2025] -----
+pcr_rep <- data_all %>%
+  dplyr::filter(variable == "nb_rep") 
 
+# Print max values per species column
+colnames(pcr_rep)
+sapply(pcr_rep[,3:ncol(pcr_rep)], max)  
+
+# Select rows with values > 12
+pcr_above_12 <- pcr_rep %>%
+  filter(if_any(-c(code_spygen, variable), ~ . > 12))
+
+# Compare with mtdt_3_pcr_above_12 from 3a_Prep_eDNA_data.R
+mtdt_3_pcr_above_12 <- read.csv("./data/processed_data/eDNA/mtdt_3_pcr_above_12.csv", sep = ",")
+
+# samples in pcr_above_12 (raw data) not in mtdt_3_pcr_above_12 (matrix data)
+length(setdiff(pcr_above_12$code_spygen, mtdt_3_pcr_above_12$pool))  
+
+# samples in mtdt_3_pcr_above_12 (matrix data) not in pcr_above_12 (raw data)
+setdiff(mtdt_3_pcr_above_12$pool, pcr_above_12$code_spygen)
+
+length(pcr_above_12$code_spygen)
 
 #3) CLEAN LA DATA (1.)#### 
 # Correct the identification of 'Dasyatis marmorata' into 'Dasyatis tortonesei'
