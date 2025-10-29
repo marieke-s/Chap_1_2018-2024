@@ -239,7 +239,7 @@ list_rare_sp <- function(df, sum = NULL, exact = TRUE) {
   return(result)
 }
 
-# Function to species columns and predictor columns
+#----------------------------------  Function to list species columns and predictor columns
 identify_columns <- function(df) {
   # Identify response variables (species columns) based on the pattern "Genus.species"
   response_vars <- grep("^[A-Za-z]+\\.[A-Za-z]+$", colnames(df), value = TRUE)
@@ -253,4 +253,257 @@ identify_columns <- function(df) {
   
   # Return the result as a list containing the column numbers
   return(list(response_columns = response_columns, predictor_columns = predictor_columns))
+}
+
+#---------------------------------- Function: plot_species_rarity --------------------
+plot_species_rarity <- function(df,
+                                threshold = 5,
+                                col_to_del = c("spygen_code", "field_replicates", "replicates", "geom"),
+                                round_digits = 0,
+                                plot_type = c("bar", "hist", "both")) {
+  # Load required packages
+  if (!requireNamespace("dplyr", quietly = TRUE) ||
+      !requireNamespace("tidyr", quietly = TRUE) ||
+      !requireNamespace("ggplot2", quietly = TRUE)) {
+    stop("Please install the packages: dplyr, tidyr, ggplot2")
+  }
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  
+  # Validate plot type
+  plot_type <- match.arg(plot_type)
+  
+  # Defensive: remove only existing columns
+  col_to_del <- intersect(col_to_del, names(df))
+  
+  # ---- Data preparation ----
+  plot_data <- df %>%
+    dplyr::select(-all_of(col_to_del)) %>%
+    summarise(across(everything(), ~ sum(.x, na.rm = TRUE))) %>%
+    tidyr::pivot_longer(cols = everything(), names_to = "species", values_to = "tot") %>%
+    mutate(
+      rank = rank(-tot),
+      above_mean = ifelse(tot > mean(tot, na.rm = TRUE), 1, 0),
+      below_mean = ifelse(tot < mean(tot, na.rm = TRUE), 1, 0)
+    ) %>%
+    arrange(desc(tot))
+  
+  # ---- Summary statistics ----
+  mean_df <- mean(plot_data$tot, na.rm = TRUE)
+  percentage_above_mean <- (sum(plot_data$above_mean) / nrow(plot_data)) * 100
+  percentage_below_mean <- (sum(plot_data$below_mean) / nrow(plot_data)) * 100
+  
+  highlighted_species <- plot_data %>% filter(tot < threshold)
+  num_highlighted <- nrow(highlighted_species)
+  percentage_highlighted <- (num_highlighted / nrow(plot_data)) * 100
+  
+  # ---- Plotting ----
+  plots <- list()
+  
+  # --- (1) Bar plot ---
+  if (plot_type %in% c("bar", "both")) {
+    n_species <- nrow(plot_data)
+    x_pos_base <- max(seq_len(n_species))
+    shift <- min(34, max(0, x_pos_base - 1))
+    x_pos <- x_pos_base - shift
+    
+    bar_plot <- ggplot(plot_data, aes(x = reorder(species, -tot), y = tot)) +
+      geom_bar(stat = "identity", aes(fill = ifelse(tot < threshold, "Rare", "Common"))) +
+      geom_hline(yintercept = threshold, linetype = "dashed", color = "darkslategrey", size = 0.5) +
+      geom_hline(yintercept = mean_df, linetype = "dashed", color = "firebrick4", size = 0.5) +
+      geom_text(
+        x = x_pos,
+        y = threshold,
+        label = paste0("Rarity threshold: ", round(threshold, round_digits)),
+        vjust = -1.5,
+        hjust = 0,
+        color = "darkslategrey",
+        size = 3.8
+      ) +
+      geom_text(
+        x = x_pos,
+        y = mean_df,
+        label = paste0("Mean occurrence: ", round(mean_df, round_digits)),
+        vjust = -1.5,
+        hjust = 0,
+        color = "firebrick4",
+        size = 3.8
+      ) +
+      scale_fill_manual(values = c("Rare" = "darkslategrey", "Common" = "darkslategray3"), name = "Species Type") +
+      theme_test() +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.caption = element_text(color = "black", size = 10, hjust = 0.5),
+        legend.position = "bottom"
+      ) +
+      labs(
+        title = "Total Occurrences and Ranking for Each Species",
+        x = "Species",
+        y = "Total Occurrences",
+        caption = paste0("Rare species: ≤ ", threshold, " occurrences. Total: ",
+                         num_highlighted, "/", nrow(plot_data),
+                         " species (", round(percentage_highlighted, 1), "%).")
+      )
+    
+    plots$bar <- bar_plot
+  }
+  
+  # --- (2) Histogram plot ---
+  if (plot_type %in% c("hist", "both")) {
+    hist_plot <- ggplot(plot_data, aes(x = tot)) +
+      geom_histogram(bins = 10, fill = "lightblue", color = "grey40") +
+      geom_vline(xintercept = threshold, color = "darkslategrey", linetype = "dashed") +
+      geom_vline(xintercept = mean_df, color = "firebrick4", linetype = "dashed") +
+      labs(
+        title = "Distribution of Total Occurrences per Species",
+        x = "Total Occurrences",
+        y = "Frequency",
+        caption = paste0("Mean: ", round(mean_df, 1), " | Threshold: ", threshold)
+      ) +
+      theme_minimal()
+    plots$hist <- hist_plot
+  }
+  
+  # ---- Return output ----
+  out <- list(
+    plot_data = plot_data,
+    stats = list(
+      mean_occurrence = mean_df,
+      pct_above_mean = percentage_above_mean,
+      pct_below_mean = percentage_below_mean,
+      num_highlighted = num_highlighted,
+      pct_highlighted = percentage_highlighted,
+      threshold = threshold,
+      n_species = nrow(plot_data)
+    ),
+    plots = plots
+  )
+  
+  return(out)
+}
+
+#---------------------------------- vv --------------------
+# Function: ggplot histogram with full summary (vector or data frame column)
+gg_hist_summary <- function(x, col_name = NULL, bins = 50, 
+                            fill_low = "#80ffdb", fill_high = "#03045e") {
+  library(ggplot2)
+  
+  # If input is a data frame + col_name
+  if (is.data.frame(x)) {
+    if (is.null(col_name)) stop("Please provide 'col_name' when passing a data frame")
+    if (!col_name %in% names(x)) stop("Column not found in data frame")
+    vec <- as.numeric(x[[col_name]])
+    plot_title <- paste("Distribution of", col_name)
+    x_label <- col_name
+  } else {
+    # If input is a numeric vector
+    vec <- as.numeric(x)
+    plot_title <- "Distribution"
+    x_label <- "Values"
+  }
+  
+  # Remove NAs
+  vec <- vec[!is.na(vec)]
+  
+  # Compute summary statistics
+  mean_val <- mean(vec)
+  sd_val <- sd(vec)
+  median_val <- median(vec)
+  min_val <- min(vec)
+  max_val <- max(vec)
+  n_val <- length(vec)
+  
+  # Prepare summary text
+  summary_text <- paste0(
+    "Mean: ", round(mean_val, 2), 
+    "\nSD: ", round(sd_val, 2),
+    "\nMedian: ", round(median_val, 2),
+    "\nMin: ", round(min_val, 2),
+    "\nMax: ", round(max_val, 2),
+    "\nN: ", n_val
+  )
+  
+  # Determine position for annotation (top-right with margin)
+  x_pos <- max(vec, na.rm = TRUE)
+  y_pos <- max(hist(vec, plot = FALSE)$density)  # use density scale
+  y_pos <- y_pos * 0.95  # slightly below top
+  
+  # Build histogram
+  hist_plot <- ggplot(data.frame(vec = vec), aes(x = vec)) +
+    geom_histogram(aes(y = ..density.., fill = ..density..), 
+                   bins = bins, color = "black", linewidth = 0.01) +
+    scale_fill_gradient(low = fill_low, high = fill_high) +
+    ggtitle(plot_title) +
+    xlab(x_label) + ylab("Density") +
+    theme_minimal() +
+    annotate("text", x = x_pos, y = y_pos, label = summary_text,
+             hjust = 1, vjust = 1, size = 4, color = "black")
+  
+  return(hist_plot)
+}
+gg_hist_summary <- function(x, col_name = NULL, bins = 50, 
+                            fill_low = "#80ffdb", fill_high = "#03045e") {
+  library(ggplot2)
+  
+  # Determine if input is vector or data frame column
+  if (is.data.frame(x)) {
+    if (is.null(col_name)) stop("Please provide 'col_name' when passing a data frame")
+    if (!col_name %in% names(x)) stop("Column not found in data frame")
+    vec <- as.numeric(x[[col_name]])
+    x_label <- col_name
+    plot_title <- paste("Distribution of", col_name)
+  } else {
+    vec <- as.numeric(x)
+    if (is.null(col_name)) {
+      x_label <- "Values"
+      plot_title <- "Distribution"
+    } else {
+      x_label <- col_name
+      plot_title <- paste("Distribution of", col_name)
+    }
+  }
+  
+  # Remove NAs
+  vec <- vec[!is.na(vec)]
+  
+  # Skip empty vectors
+  if (length(vec) == 0) {
+    warning(paste("Skipping", col_name, "- no valid values"))
+    return(NULL)
+  }
+  
+  # Compute summary statistics
+  mean_val <- mean(vec)
+  sd_val <- sd(vec)
+  median_val <- median(vec)
+  min_val <- min(vec)
+  max_val <- max(vec)
+  n_val <- length(vec)
+  
+  summary_text <- paste0(
+    "Mean: ", round(mean_val, 2), 
+    "\nSD: ", round(sd_val, 2),
+    "\nMedian: ", round(median_val, 2),
+    "\nMin: ", round(min_val, 2),
+    "\nMax: ", round(max_val, 2),
+    "\nN: ", n_val
+  )
+  
+  # Determine annotation position
+  x_pos <- max(vec, na.rm = TRUE)
+  y_pos <- max(hist(vec, plot = FALSE)$density) * 0.95
+  
+  # Build plot
+  hist_plot <- ggplot(data.frame(x = vec), aes(x = x)) +
+    geom_histogram(aes(y = ..density.., fill = ..density..), 
+                   bins = bins, color = "black", linewidth = 0.01) +
+    scale_fill_gradient(low = fill_low, high = fill_high) +
+    ggtitle(plot_title) +
+    xlab(x_label) + ylab("Density") +
+    theme_minimal() +
+    annotate("text", x = x_pos, y = y_pos, label = summary_text,
+             hjust = 1, vjust = 1, size = 4, color = "black")
+  
+  return(hist_plot)
 }

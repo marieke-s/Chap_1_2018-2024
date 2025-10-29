@@ -1,3 +1,7 @@
+#-------------- TODO ---------------------
+# Redo code with new spygen data to be sent with reassigned samples deleting previous version to ensure 12 PCR per samples max. (Laure email 28/10/25)
+
+#-------------- CODE CELIA --------------------------
 # ──────────────────────────────────────────────────────
 # Script: Clean and format eDNA detection dataset (SPYGEN)
 # Author: Célia Bertrand
@@ -184,7 +188,7 @@ if (length(marmo_col) > 0 & length(torto_col) > 0) {
   data_all[[torto_col]] <- rowSums(data_all[, c(marmo_col, torto_col)], na.rm = TRUE)
   
   # Remove the duplicate / outdated column
-  data_all <- data_all %>% select(-all_of(marmo_col))
+  data_all <- data_all %>% dplyr::select(-all_of(marmo_col))
   
 } else if (length(marmo_col) > 0 & length(torto_col) == 0) {
   message("Renaming 'Dasyatis marmorata' → 'Dasyatis tortonesei' (no existing D. tortonesei column).")
@@ -276,7 +280,7 @@ non_empty_species <- names(data_all_meta[, species_cols])[
 ]
 
 data_all_meta <- data_all_meta %>%
-  select(any_of(c("sample", "metric", non_empty_species)))
+  dplyr::select(any_of(c("sample", "metric", non_empty_species)))
 
 message(length(species_cols) - length(non_empty_species),
         " empty species columns removed.")
@@ -489,7 +493,7 @@ cols_to_remove <- intersect(names(data_all), species_confirmed_out)
 
 # Remove those columns
 data_all_final <- data_all %>%
-  select(-all_of(cols_to_remove))
+  dplyr::select(-all_of(cols_to_remove))
 
 if (length(cols_to_remove) > 0) {
   cat("Removed species:\n")
@@ -513,12 +517,12 @@ names(data_all_final)[names(data_all_final) %in% species_cols] <-
 # Number of PCR replicates
 data_rep <- data_all_final %>%
   filter(metric == "nb_rep") %>%
-  select(-metric)   # remove metric column
+  dplyr::select(-metric)   # remove metric column
 
 # Number of reads
 data_seq <- data_all_final %>%
   filter(metric == "nb_seq") %>%
-  select(-metric)   # remove metric column
+  dplyr::select(-metric)   # remove metric column
 
 # Presence/absence (based on nb_rep)
 data_pres <- data_rep %>%
@@ -535,7 +539,7 @@ write.table(data_seq,
             row.names = FALSE, dec = ".", sep = ";")
 
 write.table(data_pres,
-            "./data/processed_data/data_MED_teleo_pres_1824_V1.csv",
+            "./data/processed_data/eDNA/data_MED_teleo_pres_1824_V1.csv",
             row.names = FALSE, dec = ".", sep = ";")
 
 

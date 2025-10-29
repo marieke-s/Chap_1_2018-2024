@@ -1,7 +1,7 @@
-#------------ TODO ---------------------
-# Replace matrix with V2 version of the matrix (without species correction)
+#------------- TODO ---------------------
+# Redo code with new spygen data to be sent with reassigned samples deleting previous version to ensure 12 PCR per samples max. (Laure email 28/10/25)
 
-
+# Handle species complex 
 #------------- Description ---------------------
 # Purpose: 
 # This script aims to 
@@ -42,161 +42,53 @@ source("./utils/Fct_Data-Prep.R")
 
 #------------- Load and prep data ------------------
 # Occurences
-occ <- read.csv("./data/raw_data/eDNA/data_MED_teleo_pres_1824_V1.csv", sep = ";")
+occ <- read.csv("./data/processed_data/eDNA/data_MED_teleo_pres_1824_V1.csv", sep = ";")
 
-# Rename code_spygen 
-# Rename pomatomus.saltatrix to Pomatomus.saltatrix
+# Rename spygen_code 
 occ <- occ %>%
-  rename(spygen_code = code_spygen) %>%
-  rename(Pomatomus.saltatrix = pomatomus.saltatrix)
+  rename(spygen_code = sample)
 
 # Import PCR matrix 
-pcr <- read.csv("./data/raw_data/eDNA/data_MED_teleo_rep_1824_V1.csv", sep = ";")
+pcr <- read.csv("./data/processed_data/eDNA/data_MED_teleo_nb_rep_1824_V1.csv", sep = ";")
 
-# Rename code_spygen
-# Remove "variable" column
+# Rename spygen_code
 pcr <- pcr %>%
-  rename(spygen_code = code_spygen) %>%
-  dplyr::select(-variable)
-
-
+  rename(spygen_code = sample)
 
 # Metadata
-mtdt_3 <- sf::st_read("./data/processed_data/eDNA/mtdt_3.gpkg")
+mtdt_3 <- sf::st_read("./data/processed_data/Mtdt/mtdt_3.gpkg")
 
 # Replace replicates = "no" by "spygen_code"
 mtdt_3$replicates[mtdt_3$replicates == "no"] <- mtdt_3$spygen_code[mtdt_3$replicates == "no"]
 
+# Reoder pool values in increasing order 
+mtdt_3$pool <- sapply(mtdt_3$pool, function(x) {
+  # If not a pooled sample (e.g. "no"), return as-is
+  if (x == "no") return(x)
+  
+  # Split into two SPY codes
+  codes <- unlist(strsplit(x, "_"))
+  
+  # Extract numeric parts for ordering
+  nums <- as.numeric(sub("SPY", "", codes))
+  
+  # Reorder by number and rebuild
+  ordered_codes <- codes[order(nums)]
+  paste(ordered_codes, collapse = "_")
+})
+
+
 # When pool =/= "no" --> spygen_code = pool
 mtdt_3$spygen_code[mtdt_3$pool != "no"] <- mtdt_3$pool[mtdt_3$pool != "no"]
 
-#------------- Check and clean species assignations  ----------------
-# Load species lists from different sources ----
-
-sp_edna <- colnames(occ[-1])
-
-outcelia <- read.csv("./data/raw_data/eDNA/out_of_range_species1.2.csv")
-sp_celia <- outcelia$Species
-
-sp_jeanne <- c(
-  "Abramis brama",
-  "Alburnus alburnus",
-  "Barbatula quignardi",
-  "Barbus barbus",
-  "Gambusia holbrooki",
-  "Gobio gobio",
-  "Leucaspius delineatus",
-  "Lepomis gibbosus",
-  "Neogobius fluviatilis",
-  "Neogobius melanostomus",
-  "Notacanthus chemnitzii",
-  "Ophisurus macrorhynchos",
-  "Perca fluviatilis",
-  "Pholis gunnellus",
-  "Phoxinus phoxinus",
-  "Planiliza macrolepis",
-  "Rhodeus amarus",
-  "Rutilus rutilus",
-  "Scardinius erythrophthalmus",
-  "Schedophilus velaini",
-  "Silurus glanis",
-  "Squalius cephalus",
-  "Tinca tinca",
-  "Acanthurus coeruleus",
-  "Anguilla marmorata",
-  "Artediellus neyelovi",
-  "Aspidophoroides monopterygius",
-  "Carangoides plagiotaenia",
-  "Caranx ignobilis",
-  "Cololabis saira",
-  "Cyclopterus lumpus",
-  "Electrophorus electricus",
-  "Encrasicholina punctifer",
-  "Epinephelus maculatus",
-  "Gymnocanthus tricuspis",
-  "Gymnosarda unicolor",
-  "Hyperoplus lanceolatus",
-  "Istiophorus platypterus",
-  "Krobia guianensis",
-  "Leporinus affinis",
-  "Lutjanus bohar",
-  "Lutjanus rivulatus",
-  "Mallotus villosus",
-  "Nansenia boreacrassicauda",
-  "Oncorhynchus clarkii",
-  "Oncorhynchus keta",
-  "Pimelodella cristata",
-  "Reinhardtius hippoglossoides",
-  "Phoxinus septimaniae",
-  "Babka gymnotrachelus"
-)
-
-# Modif Alicia ----
-
-# # Manually check synonyms and find the species
-# species[species == "Chelon auratus"] <- "Liza aurata"
-# rownames(adne)[rownames(adne) == "Chelon_auratus"] <- "Liza_aurata"
-# 
-# species[species == "Chelon ramada"] <- "Liza ramada"
-# rownames(adne)[rownames(adne) == "Chelon_ramada"] <- "Liza_ramada"
-# 
-# species[species == "Mullus barbatus"] <- "Mullus barbatus barbatus"
-# rownames(adne)[rownames(adne) == "Mullus_barbatus"] <- "Mullus_barbatus_barbatus"
-# 
-# species[species == "Diplodus sargus"] <- "Diplodus sargus sargus"
-# rownames(adne)[rownames(adne) == "Diplodus_sargus"] <- "Diplodus_sargus_sargus"
-# 
-# species[species == "Diplodus cervinus"] <- "Diplodus cervinus cervinus"
-# rownames(adne)[rownames(adne) == "Diplodus_cervinus"] <- "Diplodus_cervinus_cervinus"
-
-
-
-# Check differences between species lists ----
-# Print species in sp_jeanne not in sp_celia
-setdiff(sp_jeanne, sp_celia)
-
-# Print species in sp_celia not in sp_jeanne
-setdiff(sp_celia, sp_jeanne)
-length(setdiff(sp_celia, sp_jeanne)) # 14 spp.
-
-# Species to remove ----
-# Count species to remove
-outcelia %>% filter(Decision=="OUT") %>% dim() # 56 species to remove
-
-# List species to remove
-sp_to_remove <- outcelia %>%
-  filter(Decision == "OUT") %>%
-  pull(Species)
-
-# Replace " " by "." to match occ column names
-sp_to_remove <- gsub(" ", ".", sp_to_remove)
-
-length(setdiff(sp_to_remove, colnames(occ[-1]))) # 55/56 species to remove are not in occ V1. --> only 1 species will need to be removed from occ V1.
-intersect(sp_to_remove, colnames(occ[-1])) # "Cyprinus.carpio" (freshwater species)
-
-# Remove species from occ and pcr 
-occ <- occ %>%
-  dplyr::select(-any_of(sp_to_remove))
-
-pcr <- pcr %>%
-  dplyr::select(-any_of(sp_to_remove))
 
 
 
 
 
-# Clean 
-rm(sp_edna, sp_celia, sp_jeanne, outcelia, sp_to_remove)
-
-
-
-
-
-
-
-#------------- Pool occ by replicates ------------------
+#------------- PREP DATA ----------------
 # CHECKS : Compare spygen_codes in occ and mtdt ---- ----
-length(occ) - length(mtdt_3) # 199 rows more in occ than in mtdt_3
+length(occ) - length(mtdt_3) # 222 rows more in occ than in mtdt_3
 
 # spygen_codes in occ not in mtdt_3
 setdiff(occ$spygen_code, mtdt_3$spygen_code)
@@ -220,7 +112,7 @@ mtdt_3 <- mtdt_3 %>%
 rm(missing_spygen)
 
 # CHECKS : Compare spygen_codes in pcr and mtdt ---- ----
-length(pcr) - length(mtdt_3) # 199 rows more in pcr than in mtdt_3
+length(pcr) - length(mtdt_3) # 222 rows more in pcr than in mtdt_3
 
 # spygen_codes in pcr not in mtdt_3
 setdiff(pcr$spygen_code, mtdt_3$spygen_code)
@@ -230,29 +122,31 @@ length(setdiff(pcr$spygen_code, mtdt_3$spygen_code)) # 447
 setdiff(mtdt_3$spygen_code, pcr$spygen_code)
 length(setdiff(mtdt_3$spygen_code, pcr$spygen_code)) # 0
 
-# Remove spygen_codes not in mtdt_3 from occ and pcr ----
+# Subset occ and pcr using mtdt_3 ----
 occ <- occ %>%
   dplyr::filter(spygen_code %in% mtdt_3$spygen_code)
 
 pcr <- pcr %>%
   dplyr::filter(spygen_code %in% mtdt_3$spygen_code)
 
-# Pool per replicates ----
-# Add replicates column to occ
+
+
+
+
+# Add replicates column to occ and pcr ----
 occ <- occ %>%
   left_join(mtdt_3 %>% dplyr::select(c(spygen_code, replicates)), by = "spygen_code")
 
 pcr <- pcr %>%
   left_join(mtdt_3 %>% dplyr::select(c(spygen_code, replicates)), by = "spygen_code")
 
-# Identify species columns (excluding 'spygen_code', 'replict', 'geometry')
-species_cols <- setdiff(colnames(occ), c("spygen_code", "replicates", "geom"))
 
-# Nb of expected rows after pooling
-length(unique(mtdt_3$replicates)) # 768 
 
+#------------- POOL OCC BY REPLICATES ------------------
 # Presence/Absence Pooled -----
 # Merge rows per replicates --> 0 or 1 
+species_cols <- setdiff(colnames(occ), c("spygen_code", "replicates", "geom"))
+
 occ_pooled <- occ %>%
   group_by(replicates) %>%
   summarise(
@@ -262,14 +156,15 @@ occ_pooled <- occ %>%
   ungroup()
 
 # Check nb of rows after pooling
-nrow(occ_pooled)  # 768 rows after pooling
+message("Number of rows after pooling: ", nrow(occ_pooled), " (Expected: ", length(unique(mtdt_3$replicates)), ")")
+
 length(setdiff(unique(mtdt_3$replicates), occ_pooled$replicates)) # 0
 length(setdiff(occ_pooled$replicates, unique(mtdt_3$replicates))) # 0 
 
 
 
 
-#-------------- Incertitude matrix ----------------------
+#-------------- INCERTITUDES MATRICES ----------------------
 # Field replicate incertitude (occ) ----
 
 # Count number of field replicates 
@@ -298,12 +193,12 @@ occ_f_incertitude <- occ %>%
 # PCR replicate incertitude  (pcr) ----
 
 # Identify species columns 
-species_cols <- setdiff(colnames(pcr), c("spygen_code", "replicates", "geom"))
+species_cols <- setdiff(colnames(pcr), c("spygen_code", "replicates", "geom", "pcr_replicates"))
 
 # Count number of pcr replicates 
 pcr$pcr_replicates <- sapply(pcr$replicates, compute_pcr_replicates)
 
-# Merge rows per replicates --> nb >0 / nb of pcr replicates
+# Merge rows per replicates --> nb > 0 / nb of pcr replicates
 
 occ_pcr_incertitude <- pcr %>%
   group_by(replicates) %>%
@@ -328,26 +223,36 @@ occ_pcr_incertitude <- pcr %>%
 
 
 
-# CHECKS pcr values -----
+# CHECKS pcr values [ ISSUE !! CF MAIL LAURE VELEZ ] -----
 
 # compute max per columns of df
 sort(sapply(pcr[ , species_cols], max, na.rm = TRUE))
 max(sapply(pcr[ , species_cols], max, na.rm = TRUE))
 
 # PCR values above 12 ? 
-t <- pcr %>% filter(Gobius.xanthocephalus == '48' ) %>% print() # 48 PCR replicates 
+t <- pcr %>% filter(Gobius_xanthocephalus == '48' ) %>% print() # 48 PCR replicates 
 t$spygen_code # "SPY210641" --> maximum should be 12
 
-# make an hist of pcr across all columns 
-hist(as.numeric(unlist(pcr[ , species_cols])), breaks = 50, main = "Histogram of PCR values", xlab = "PCR values", col = "lightblue")
-boxplot(as.numeric(unlist(pcr[ , species_cols])), main = "Boxplot of PCR values", ylab = "PCR values")
-min(as.numeric(unlist(pcr[ , species_cols])))
-max(as.numeric(unlist(pcr[ , species_cols])))
-median(as.numeric(unlist(pcr[ , species_cols])))
-mean(as.numeric(unlist(pcr[ , species_cols])))
+# make an hist of pcr across all columns for values > 0
+# Extract and filter values (>0, non-NA)
+pcr_values <- as.numeric(unlist(pcr[, species_cols]))
+pcr_values <- pcr_values[pcr_values > 0 & !is.na(pcr_values)]
 
+# Plots
+hist(pcr_values,
+     breaks = 50,
+     main = "Histogram of PCR values (>0)",
+     xlab = "PCR values",
+     col = "lightblue")
+
+boxplot(pcr_values,
+        main = "Boxplot of PCR values (>0)",
+        ylab = "PCR values",
+        col = "lightblue")
+
+summary(pcr_values)
 # count nb of as.numeric(unlist(pcr[ , species_cols])) > 12
-sum(as.numeric(unlist(pcr[ , species_cols])) > 12, na.rm = TRUE) # 579 values above 12 --> WHY ? 
+sum(as.numeric(unlist(pcr[ , species_cols])) > 12, na.rm = TRUE) # 626 values above 12 --> WHY ? 
 
 # Select rows containing species_cols values > 12
 pcr_above_12 <- pcr %>%
@@ -368,6 +273,7 @@ t <- pcr_above_12 %>% filter(spygen_code == "SPY2402598") %>% data.table::transp
 rm(species_cols)
 
 # Compute richness for filter with pcr > 12. Count nb of species with pcr > 0 per row
+species_cols <- setdiff(colnames(pcr_above_12), c("spygen_code", "replicates", "geom", "pcr_replicates"))
 pcr_above_12$R <- rowSums(pcr_above_12[ , species_cols] >0, na.rm = TRUE)
 
 # Compute richness for all filters with pcr > 12
@@ -384,112 +290,28 @@ t.test(pcr_above_12$R, pcr$R) # Significant difference (p-value < 0.05) --> filt
 pcr_above_12 <- pcr_above_12 %>% dplyr::select(-R)
 pcr <- pcr %>% dplyr::select(-R)
 
-rm(t, pcr_above_12, mtdt_3_pcr_above_12)
+rm(t, pcr_above_12, mtdt_3_pcr_above_12, pcr_values)
 
-# Clean pooled occurences ----
-occ_pooled <- occ_pooled %>% dplyr::select(-replicates)
-occ_incertitude <- occ_incertitude %>% dplyr::select(-replicates)
+# Clean pooled occurences -----
+occ_pooled <- occ_pooled %>%
+  dplyr::select(-pooled_name)
+occ_f_incertitude <- occ_f_incertitude %>%
+  dplyr::select(-pooled_name)
+occ_pcr_incertitude <- occ_pcr_incertitude %>%
+  dplyr::select(-pooled_name)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-rm(species_cols)
+#------------- CLEANUP ----------------------
+rm(occ, pcr)
 
 #------------- UNDETECTED AND RARE SPECIES --------------------------------------
+# Plot rare species frequencies ------
 
-# CHECKS : Plot occurences and rarity ----
-# Explanation : This part plots the number of occurence per species distribution. It highlights the species that have few occurences (under a chosen rarity threshold).
-
-### 1. Rare species plot (Occurence / species)
-
-# Parameters
-threshold <- 5  # Set the threshold for highlighting (e.g., < 10 occurrences)
-col_to_del <- c("spygen_code", "field_replicates", "replicates", "geom")
-df <- occ
-
-
-# Libraries
-library(ggplot2)
-
-# Data preparation
-plot_data <- df %>%
-  dplyr::select(-col_to_del) %>%  # Exclude the first column
-  summarise(across(everything(), sum, na.rm = TRUE)) %>%  # Sum dfurrences for each species
-  tidyr::pivot_longer(cols = everything(), names_to = "species", values_to = "tot") %>%  # Reshape data
-  mutate(
-    rank = rank(-tot),  # Rank in descending order
-    above_mean = ifelse(tot > mean(tot, na.rm = TRUE), 1, 0),  # Indicator for above mean
-    below_mean = ifelse(tot < mean(tot, na.rm = TRUE), 1, 0)   # Indicator for below mean
-  )
-
-# Store variables for plotting 
-mean_df <- mean(plot_data$tot, na.rm = TRUE) # mean dfurrence
-tot <- plot_data$tot  # Total dfurrences
-percentage_above_mean <- (sum(plot_data$above_mean) / nrow(plot_data)) * 100
-percentage_below_mean <- (sum(plot_data$below_mean) / nrow(plot_data)) * 100
-
-# Calculate species below threshold
-highlighted_species <- plot_data %>%
-  filter(tot < threshold)
-
-num_highlighted <- nrow(highlighted_species)  # Count species below threshold
-percentage_highlighted <- (num_highlighted / nrow(plot_data)) * 100  # Percentage
-
-# Plotting using ggplot2
-# Data
-ggplot(plot_data, aes(x = reorder(species, -tot), y = tot)) +
-  geom_bar(stat = "identity", aes(fill = ifelse(tot < threshold, "Rare", "Common"))) +  # Use 'Highlighted' and 'Regular' for fill
-  geom_hline(yintercept = threshold, linetype = "dashed", color = "darkslategrey", size = 0.5) +  # Add horizontal line for threshold
-  geom_hline(yintercept = mean_df, linetype = "dashed", color = "firebrick4", size = 0.5) +  # Add horizontal line for mean dfurence
-  
-  # Annotations
-  geom_text(x = max(seq_along(tot)) - 34, y = mean_df,
-            label = paste("Rarity threshold:", round(threshold, 0)),
-            vjust = 2, hjust = 0, color = "darkslategrey", size = 4) +
-  geom_text(x = max(seq_along(tot)) - 34, y = mean_df,
-            label = paste("Mean dfurrence:", round(mean_df, 0)),
-            vjust = -1, hjust = 0, color = "firebrick4", size = 4) +
-  # geom_text(aes(label = paste(round(percentage_above_mean, 1), "% above mean")),
-  #           x = max(seq_along(tot)) - 33, y = mean_df - 8,
-  #           vjust = -5, hjust = 0, color = "firebrick", size = 3.5) +
-  # geom_text(aes(label = paste(round(percentage_below_mean, 1), "% below mean")),
-  #           x = max(seq_along(tot)) - 33, y = mean_df - 10,
-  #           vjust = -7, hjust = 0, color = "firebrick", size = 3.5) +
-  scale_fill_manual(values = c("Rare" = "darkslategrey", "Common" = "darkslategray3"), name = "Species Type") +  
-  theme_test() +
-  
-  # Custom fill with legend
-  theme(axis.text.x = element_text(angle = 45, hjust = 1),
-        plot.caption = element_text(color = "black", size = 10, hjust = 0.5),  # Center the caption
-        legend.position = "bottom") +  # Position legend at the bottom
-  labs(title = "Total dfurrences and Ranking for Each Species",
-       x = "Species",
-       y = "Total dfurrences",
-       caption = paste("Rare species are species with no more than", threshold, "dfurences. Total:", num_highlighted, "/",nrow(plot_data), "species (", round(percentage_highlighted, 1), "%)."))
-
-
-# Cleanup
-rm(plot_data, mean_occ, tot, percentage_above_mean, percentage_below_mean, highlighted_species, num_highlighted, percentage_highlighted, threshold)
-#dev.off()
-
-
-### 2. Occurence frequency distribution
-hist(plot_data$tot, breaks = 10, col = "lightblue", xlab = "Total Occurrences", ylab = "Frequency", main = "Distribution of Total Occurrences per Species")
+res <- plot_species_rarity(df = occ_pooled,
+                           threshold = 10, 
+                           col_to_del = c("replicates"),
+                           plot_type = "both")
+res$plots$bar
+res$plots$hist
 
 
 
@@ -497,33 +319,29 @@ hist(plot_data$tot, breaks = 10, col = "lightblue", xlab = "Total Occurrences", 
 
 
 
-# RUN : Remove undetected species ----
+
+# Remove undetected species ----
 # List undetected species (i.e., species with no occurrence)
-undetected <- list_rare_sp(occ[,-1], sum = 0, exact = TRUE)  # Using occ[,-1] to exclude spygen_code column
-print(length(undetected))  
+undetected <- list_rare_sp(occ_pooled[,-1], sum = 0, exact = TRUE)  # Using occ[,-1] to exclude spygen_code column
+print(length(undetected))  # 20 undetected species
+print(undetected) #  6 chondrychtyens + 14 osteichthyens
 
 # Remove undetected species
-occ <- occ[, !colnames(occ) %in% undetected] # 96 undetected spp : 238 --> 142 spp # with Litto3D-removed points : 94 undetected spp : 238 --> 144 spp
+occ_pooled <- occ_pooled[, !colnames(occ_pooled) %in% undetected] # 242 species left
+occ_f_incertitude <- occ_f_incertitude[, !colnames(occ_f_incertitude) %in% undetected]
+occ_pcr_incertitude <- occ_pcr_incertitude[, !colnames(occ_pcr_incertitude) %in% undetected]
 
 # Cleanup
 rm(undetected)
 
 
 
-# [DO NOT RUN] Remove rare species ----
-# # List rare species (i.e., species under a certain occurrence threshold)
-# rare <- list_rare_sp(occ[,-1], sum = 5, exact = FALSE)  # sum = X sets the number of occurrences under which a species is considered rare
-# print(length(rare)) # 60 spp < 5 occurences 
-# # 81 spp < 10 occurences
-# # 102 spp < 20 occurences
-# 
-# 
-# # Remove rare species with less than 5 occurences
-# # Explanation : 06/01/2025 : We start by removing species with less than 5 occurences : Loïc et Lola = ont retire les espèces avec moins de 5 occurences, Lola = test sur 4 et 10 :  ne change rien. Célia = retire les espèces avec moins de 10 occurences.
-# 
-# occ <- occ[, !colnames(occ) %in% rare] # 60 spp with < 5 occurences : 142 spp --> 82 spp
-# rm(rare)
+# Clean
+rm(res)
+#------------- EXPORT POOLED DATA ----------------------
+write.csv(occ_pooled, "./data/processed_data/eDNA/occ_pooled.csv", row.names = FALSE)
+write.csv(occ_f_incertitude, "./data/processed_data/eDNA/occ_f_incertitude_pooled.csv", row.names = FALSE)
+write.csv(occ_pcr_incertitude, "./data/processed_data/eDNA/occ_pcr_incertitude_pooled.csv", row.names = FALSE)
 
 
 
-#------------- 
