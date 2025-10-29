@@ -46,7 +46,7 @@ source("./utils/Fct_Data-Prep.R")
 
 #------------- Load Metadata ---------------------
 # Load the metadata file
-mtdtfull <- readr::read_csv("./data/raw_data/eDNA/Med_metadonnees_ADNe_2018_2024_V4.csv")
+mtdtfull <- readr::read_csv("./data/raw_data/Mtdt/Med_metadonnees_ADNe_2018_2024_V4.csv")
 
 #------------- Clean Metadata ---------------------
 # Replicates errors ----
@@ -225,7 +225,7 @@ mtdtfull <- mtdtfull %>%
 
 
 #------------- Load IPOCOM ---------------------
-ipocom <- readr::read_csv("./data/raw_data/eDNA/AB_eREF_IPOCOM TRANSECT 2024_metadatas template.csv")
+ipocom <- readr::read_csv("./data/raw_data/Mtdt/AB_eREF_IPOCOM TRANSECT 2024_metadatas template.csv")
 
 
 
@@ -489,7 +489,7 @@ mtdt_2 <- buffer_transect(
 
 # Save as gpkg
 mtdt_2$time_start <- as.character(mtdt_2$time_start)
-sf::write_sf(mtdt_2, "./data/processed_data/eDNA/mtdt_2.gpkg", delete_dsn = TRUE)
+sf::write_sf(mtdt_2, "./data/processed_data/Mtdt/mtdt_2.gpkg", delete_dsn = TRUE)
 
 #------------- Buffer replicates ------------
 
@@ -555,7 +555,7 @@ rm(replicates_buffer)
 
 # Save as gpkg
 mtdt_3$time_start <- as.character(mtdt_3$time_start)
-sf::write_sf(mtdt_3, "./data/processed_data/eDNA/mtdt_3.gpkg", delete_dsn = TRUE)
+sf::write_sf(mtdt_3, "./data/processed_data/Mtdt/mtdt_3.gpkg", delete_dsn = TRUE)
 
 #------------- Group metadata by replicates -----------------
 # Explanation : make a simplified dataset grouped by replicates for NCDF extraction 
@@ -619,7 +619,7 @@ mtdt_4 <- mtdt_4 %>%
 # Sent on 24/07/2025
 mtdt_4 %>%
   dplyr::select(replicates, date, time_start) %>%
-  write_csv("./data/processed_data/eDNA/mtdt_4_date_time.csv")
+  write_csv("./data/processed_data/Mtdt/mtdt_4_date_time.csv")
 
 
 
@@ -631,7 +631,7 @@ mtdt_4 %>%
 
 
 # Geom date, time, depth_sampling for Pauline (MARS3D extraction) 
-st_write(mtdt_4, "./data/processed_data/eDNA/mtdt_4.gpkg", delete_dsn = TRUE)
+st_write(mtdt_4, "./data/processed_data/Mtdt/mtdt_4.gpkg", delete_dsn = TRUE)
 
 
 
@@ -794,7 +794,7 @@ rm(cols_mtdt_3, cols_mtdt_5, only_in_mtdt_3, only_in_mtdt_5)
 
 # Save as gpkg
 mtdt_5$time_start <- as.character(mtdt_5$time_start)
-sf::write_sf(mtdt_5, "./data/processed_data/eDNA/mtdt_5.gpkg", delete_dsn = TRUE)
+sf::write_sf(mtdt_5, "./data/processed_data/Mtdt/mtdt_5.gpkg", delete_dsn = TRUE)
 
 
 

@@ -8,7 +8,7 @@
 
 # The expected result is 
 
-# Data source: 
+# Data source : 
 
 # Author: Marieke Schultz
 
@@ -323,6 +323,11 @@ occ_pcr_incertitude <- pcr %>%
 
 
 
+
+
+
+
+
 # CHECKS pcr values -----
 
 # compute max per columns of df
@@ -358,14 +363,30 @@ mtdt_3_pcr_above_12 <- mtdt_3 %>%
 mtdt_3_pcr_above_12 <- st_drop_geometry(mtdt_3_pcr_above_12)
 write.csv(mtdt_3_pcr_above_12, "./data/processed_data/eDNA/mtdt_3_pcr_above_12.csv", row.names = FALSE)
 
-
-
-
+t <- pcr_above_12 %>% filter(spygen_code == "SPY2402598") %>% data.table::transpose() 
 
 rm(species_cols)
 
+# Compute richness for filter with pcr > 12. Count nb of species with pcr > 0 per row
+pcr_above_12$R <- rowSums(pcr_above_12[ , species_cols] >0, na.rm = TRUE)
 
-# ????? Remove replicates column ----
+# Compute richness for all filters with pcr > 12
+pcr$R <- rowSums(pcr[ , species_cols] >0, na.rm = TRUE)
+
+summary(pcr_above_12$R)
+summary(pcr$R)
+
+# Statistically compare the richness of filters with pcr > 12 and all filters
+t.test(pcr_above_12$R, pcr$R) # Significant difference (p-value < 0.05) --> filters with pcr > 12 have a significantly higher richness than all filters.
+
+
+# Remove R columns
+pcr_above_12 <- pcr_above_12 %>% dplyr::select(-R)
+pcr <- pcr %>% dplyr::select(-R)
+
+rm(t, pcr_above_12, mtdt_3_pcr_above_12)
+
+# Clean pooled occurences ----
 occ_pooled <- occ_pooled %>% dplyr::select(-replicates)
 occ_incertitude <- occ_incertitude %>% dplyr::select(-replicates)
 
@@ -386,6 +407,9 @@ occ_incertitude <- occ_incertitude %>% dplyr::select(-replicates)
 
 
 
+
+rm(species_cols)
+
 #------------- UNDETECTED AND RARE SPECIES --------------------------------------
 
 # CHECKS : Plot occurences and rarity ----
@@ -393,13 +417,19 @@ occ_incertitude <- occ_incertitude %>% dplyr::select(-replicates)
 
 ### 1. Rare species plot (Occurence / species)
 
-# Define your threshold for highlighting species
+# Parameters
 threshold <- 5  # Set the threshold for highlighting (e.g., < 10 occurrences)
+col_to_del <- c("spygen_code", "field_replicates", "replicates", "geom")
+df <- occ
+
+
+# Libraries
+library(ggplot2)
 
 # Data preparation
-plot_data <- occ %>%
-  dplyr::select(-1) %>%  # Exclude the first column
-  summarise(across(everything(), sum, na.rm = TRUE)) %>%  # Sum occurrences for each species
+plot_data <- df %>%
+  dplyr::select(-col_to_del) %>%  # Exclude the first column
+  summarise(across(everything(), sum, na.rm = TRUE)) %>%  # Sum dfurrences for each species
   tidyr::pivot_longer(cols = everything(), names_to = "species", values_to = "tot") %>%  # Reshape data
   mutate(
     rank = rank(-tot),  # Rank in descending order
@@ -408,8 +438,8 @@ plot_data <- occ %>%
   )
 
 # Store variables for plotting 
-mean_occ <- mean(plot_data$tot, na.rm = TRUE) # mean occurrence
-tot <- plot_data$tot  # Total occurrences
+mean_df <- mean(plot_data$tot, na.rm = TRUE) # mean dfurrence
+tot <- plot_data$tot  # Total dfurrences
 percentage_above_mean <- (sum(plot_data$above_mean) / nrow(plot_data)) * 100
 percentage_below_mean <- (sum(plot_data$below_mean) / nrow(plot_data)) * 100
 
@@ -425,20 +455,20 @@ percentage_highlighted <- (num_highlighted / nrow(plot_data)) * 100  # Percentag
 ggplot(plot_data, aes(x = reorder(species, -tot), y = tot)) +
   geom_bar(stat = "identity", aes(fill = ifelse(tot < threshold, "Rare", "Common"))) +  # Use 'Highlighted' and 'Regular' for fill
   geom_hline(yintercept = threshold, linetype = "dashed", color = "darkslategrey", size = 0.5) +  # Add horizontal line for threshold
-  geom_hline(yintercept = mean_occ, linetype = "dashed", color = "firebrick4", size = 0.5) +  # Add horizontal line for mean occurence
+  geom_hline(yintercept = mean_df, linetype = "dashed", color = "firebrick4", size = 0.5) +  # Add horizontal line for mean dfurence
   
   # Annotations
-  geom_text(x = max(seq_along(tot)) - 34, y = mean_occ,
+  geom_text(x = max(seq_along(tot)) - 34, y = mean_df,
             label = paste("Rarity threshold:", round(threshold, 0)),
             vjust = 2, hjust = 0, color = "darkslategrey", size = 4) +
-  geom_text(x = max(seq_along(tot)) - 34, y = mean_occ,
-            label = paste("Mean occurrence:", round(mean_occ, 0)),
+  geom_text(x = max(seq_along(tot)) - 34, y = mean_df,
+            label = paste("Mean dfurrence:", round(mean_df, 0)),
             vjust = -1, hjust = 0, color = "firebrick4", size = 4) +
   # geom_text(aes(label = paste(round(percentage_above_mean, 1), "% above mean")),
-  #           x = max(seq_along(tot)) - 33, y = mean_occ - 8,
+  #           x = max(seq_along(tot)) - 33, y = mean_df - 8,
   #           vjust = -5, hjust = 0, color = "firebrick", size = 3.5) +
   # geom_text(aes(label = paste(round(percentage_below_mean, 1), "% below mean")),
-  #           x = max(seq_along(tot)) - 33, y = mean_occ - 10,
+  #           x = max(seq_along(tot)) - 33, y = mean_df - 10,
   #           vjust = -7, hjust = 0, color = "firebrick", size = 3.5) +
   scale_fill_manual(values = c("Rare" = "darkslategrey", "Common" = "darkslategray3"), name = "Species Type") +  
   theme_test() +
@@ -447,10 +477,10 @@ ggplot(plot_data, aes(x = reorder(species, -tot), y = tot)) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1),
         plot.caption = element_text(color = "black", size = 10, hjust = 0.5),  # Center the caption
         legend.position = "bottom") +  # Position legend at the bottom
-  labs(title = "Total Occurrences and Ranking for Each Species",
+  labs(title = "Total dfurrences and Ranking for Each Species",
        x = "Species",
-       y = "Total Occurrences",
-       caption = paste("Rare species are species with no more than", threshold, "occurences. Total:", num_highlighted, "/",nrow(plot_data), "species (", round(percentage_highlighted, 1), "%)."))
+       y = "Total dfurrences",
+       caption = paste("Rare species are species with no more than", threshold, "dfurences. Total:", num_highlighted, "/",nrow(plot_data), "species (", round(percentage_highlighted, 1), "%)."))
 
 
 # Cleanup
@@ -495,3 +525,5 @@ rm(undetected)
 # rm(rare)
 
 
+
+#------------- 
