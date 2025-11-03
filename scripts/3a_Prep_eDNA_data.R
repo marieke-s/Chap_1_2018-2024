@@ -1,6 +1,5 @@
 #------------- TODO ---------------------
 # Redo code with new spygen data to be sent with reassigned samples deleting previous version to ensure 12 PCR per samples max. (Laure email 28/10/25)
-
 # Handle species complex 
 #------------- Description ---------------------
 # Purpose: 
@@ -223,75 +222,7 @@ occ_pcr_incertitude <- pcr %>%
 
 
 
-# CHECKS pcr values [ ISSUE !! CF MAIL LAURE VELEZ ] -----
-
-# compute max per columns of df
-sort(sapply(pcr[ , species_cols], max, na.rm = TRUE))
-max(sapply(pcr[ , species_cols], max, na.rm = TRUE))
-
-# PCR values above 12 ? 
-t <- pcr %>% filter(Gobius_xanthocephalus == '48' ) %>% print() # 48 PCR replicates 
-t$spygen_code # "SPY210641" --> maximum should be 12
-
-# make an hist of pcr across all columns for values > 0
-# Extract and filter values (>0, non-NA)
-pcr_values <- as.numeric(unlist(pcr[, species_cols]))
-pcr_values <- pcr_values[pcr_values > 0 & !is.na(pcr_values)]
-
-# Plots
-hist(pcr_values,
-     breaks = 50,
-     main = "Histogram of PCR values (>0)",
-     xlab = "PCR values",
-     col = "lightblue")
-
-boxplot(pcr_values,
-        main = "Boxplot of PCR values (>0)",
-        ylab = "PCR values",
-        col = "lightblue")
-
-summary(pcr_values)
-# count nb of as.numeric(unlist(pcr[ , species_cols])) > 12
-sum(as.numeric(unlist(pcr[ , species_cols])) > 12, na.rm = TRUE) # 626 values above 12 --> WHY ? 
-
-# Select rows containing species_cols values > 12
-pcr_above_12 <- pcr %>%
-  filter(if_any(all_of(species_cols), ~ . > 12))
-
-
-# in mtdt_3 select spygen_code in pcr_above_12
-mtdt_3_pcr_above_12 <- mtdt_3 %>%
-  filter(spygen_code %in% pcr_above_12$spygen_code)
-
-# Export mtdt_3_pcr_above_12 as csv
-# Drop geometry
-mtdt_3_pcr_above_12 <- st_drop_geometry(mtdt_3_pcr_above_12)
-write.csv(mtdt_3_pcr_above_12, "./data/processed_data/eDNA/mtdt_3_pcr_above_12.csv", row.names = FALSE)
-
-t <- pcr_above_12 %>% filter(spygen_code == "SPY2402598") %>% data.table::transpose() 
-
-rm(species_cols)
-
-# Compute richness for filter with pcr > 12. Count nb of species with pcr > 0 per row
-species_cols <- setdiff(colnames(pcr_above_12), c("spygen_code", "replicates", "geom", "pcr_replicates"))
-pcr_above_12$R <- rowSums(pcr_above_12[ , species_cols] >0, na.rm = TRUE)
-
-# Compute richness for all filters with pcr > 12
-pcr$R <- rowSums(pcr[ , species_cols] >0, na.rm = TRUE)
-
-summary(pcr_above_12$R)
-summary(pcr$R)
-
-# Statistically compare the richness of filters with pcr > 12 and all filters
-t.test(pcr_above_12$R, pcr$R) # Significant difference (p-value < 0.05) --> filters with pcr > 12 have a significantly higher richness than all filters.
-
-
-# Remove R columns
-pcr_above_12 <- pcr_above_12 %>% dplyr::select(-R)
-pcr <- pcr %>% dplyr::select(-R)
-
-rm(t, pcr_above_12, mtdt_3_pcr_above_12, pcr_values)
-
+# [ !!! PCR ISSUE !!!] -----
 # Clean pooled occurences -----
 occ_pooled <- occ_pooled %>%
   dplyr::select(-pooled_name)
