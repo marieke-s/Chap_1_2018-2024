@@ -141,6 +141,40 @@ pcr <- pcr %>%
 
 
 
+#-------------- SAMPLES WITH NO SPECIES DETECTED ----------------------
+# Print samples with no species detected ----
+species_cols <- setdiff(colnames(occ), c("spygen_code", "replicates", "geom"))
+occ[species_cols] <- lapply(occ[species_cols], as.numeric)  # Ensure species columns are numeric
+
+# Keep only samples with no species detected
+d <- occ %>% dplyr:: filter(rowSums(across(all_of(species_cols)), na.rm = TRUE) == 0)
+
+length(unique(d$spygen_code)) # 25 samples with 0 species detected 
+print(unique(d$spygen_code))
+
+no_sp <- unique(d$spygen_code)
+no_sp <- c(
+  "SPY182541", "SPY201282", "SPY201274", "SPY211141_SPY211142", 
+  "SPY211169_SPY211181", "SPY211168_SPY211173", "SPY211172_SPY211177", 
+  "SPY211178_SPY211184", "SPY211047", "SPY211285", "SPY231906", 
+  "SPY211061", "SPY222967", "SPY210700", "SPY231871", "SPY233819", 
+  "SPY233363", "SPY232133", "SPY232282", "SPY232289", "SPY233720", 
+  "SPY233722", "SPY2401455", "SPY2401628", "SPY2401629"
+)
+
+# Subset mtdt_3 to check these samples
+mtdt_empty_samples <- mtdt_3 %>%
+  dplyr::filter(spygen_code %in% d$spygen_code) 
+
+# SPY211285 : Comment : "No_filtration - Blanc terrain/test contamination" / component = "blank"
+# 4 DeepHeart 2021-10-19 : field error pump was not properly set 
+
+#---> Mail to Laure to check if this is normal for the other samples (03/11/2025)
+
+
+# Remove samples with 0 species detected /!\ IF DOING SO WE NEED TO MODIFY REPLICATES AND SAMPLING EFFORT COLS ??----
+
+rm(d, mtdt_empty_samples)
 #------------- POOL OCC BY REPLICATES ------------------
 # Presence/Absence Pooled -----
 # Merge rows per replicates --> 0 or 1 
@@ -222,8 +256,10 @@ occ_pcr_incertitude <- pcr %>%
 
 
 
-# [ !!! PCR ISSUE !!!] -----
-# Clean pooled occurences -----
+# [ !!! PCR ISSUE !!! ] -----
+
+#------------- CLEANUP ----------------------
+# Clean pooled occurences 
 occ_pooled <- occ_pooled %>%
   dplyr::select(-pooled_name)
 occ_f_incertitude <- occ_f_incertitude %>%
@@ -231,12 +267,10 @@ occ_f_incertitude <- occ_f_incertitude %>%
 occ_pcr_incertitude <- occ_pcr_incertitude %>%
   dplyr::select(-pooled_name)
 
-#------------- CLEANUP ----------------------
-rm(occ, pcr)
+
 
 #------------- UNDETECTED AND RARE SPECIES --------------------------------------
 # Plot rare species frequencies ------
-
 res <- plot_species_rarity(df = occ_pooled,
                            threshold = 10, 
                            col_to_del = c("replicates"),
@@ -269,10 +303,37 @@ rm(undetected)
 
 # Clean
 rm(res)
+#-------------- REPLICATES WITH NO SPECIES DETECTED ----------------------
+# Print replicates with no species detected ----
+t <- occ_pooled %>% dplyr::filter(rowSums(across(where(is.numeric))) == 0)
+
+print(t$replicates) # 6 replicates with 0 species detected :
+# "SPY210700"                               "SPY211141_SPY211142"                     "SPY211168_SPY211173/SPY211177_SPY211172"
+# "SPY211285"                               "SPY232282/SPY232289"                     "SPY2401628/SPY2401629"      
+
+# Subset mtdt_3 to check these samples
+mtdt_empty_samples <- mtdt_3 %>%
+  dplyr::filter(replicates %in% t$replicates) 
+
+# SPY211285 : Comment : "No_filtration - Blanc terrain/test contamination"
+# 4 DeepHeart 2021-10-19 : field error pump was not properly set 
+
+#---> Mail to Laure to check if this is normal for the other samples (03/11/2025)
+
+
+# Remove replicates with 0 species detected ----
+occ_pooled <- occ_pooled %>% dplyr::filter(rowSums(across(where(is.numeric))) != 0) 
+occ_pcr_incertitude <- occ_pcr_incertitude %>% dplyr::filter(rowSums(across(where(is.numeric))) != 0)
+occ_f_incertitude <- occ_f_incertitude %>% dplyr::filter(rowSums(across(where(is.numeric))) != 0)
+
+rm(t, mtdt_empty_samples)
+
 #------------- EXPORT POOLED DATA ----------------------
 write.csv(occ_pooled, "./data/processed_data/eDNA/occ_pooled.csv", row.names = FALSE)
 write.csv(occ_f_incertitude, "./data/processed_data/eDNA/occ_f_incertitude_pooled.csv", row.names = FALSE)
 write.csv(occ_pcr_incertitude, "./data/processed_data/eDNA/occ_pcr_incertitude_pooled.csv", row.names = FALSE)
 
 
+occ_pooled %>% dplyr::select("Labrus_merula.Labrus_viridis.Centrolabrus_melanocercus") %>% filter("Labrus_merula.Labrus_viridis.Centrolabrus_melanocercus" == 1) %>% dim()
 
+sort(colnames(occ_pooled))

@@ -75,7 +75,7 @@ indicators <- matrix(NA,nrow(presence), 16,
                                        "TopPred",    # Trophic
                                        "Vulner",     # Vulnerable
                                        "Clim_vuln",  # Vulnerable to climate change
-                                       "Commercial", # Commercial and Highly commercial species (Importance)
+                                       "Commercial", # Commercial and Highlcommercial species (Importance)
                                        "Phill",      # Phylogenetic metrics
                                        "Fhill",      # Functional metric
                                        "Thill",      # Taxonomic metric
