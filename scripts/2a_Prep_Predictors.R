@@ -57,23 +57,6 @@ buff <- st_read("./data/processed_data/eDNA/mtdt_5.gpkg")
 # 3. Area covered = area of replicate group buffer --> computed here
 
 
-# Nb of field replicates ----
-# Compute nb of field replicates using the function compute_field_replicates
-# Pooled_samples are counted as 1 field replicate
-buff$field_replicates <- sapply(buff$replicates, compute_field_replicates)
-
-
-# Nb of PCR replicates ----
-# Compute nb of PCR replicates using the function compute_pcr_replicates
-buff$PCR_replicates <- sapply(buff$replicates, compute_pcr_replicates)
-
-
-
-
-
-
-
-
 # Area covered ----
 # Project in CRS=2154
 buff <- st_transform(buff, crs = 2154)

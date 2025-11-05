@@ -47,12 +47,24 @@ occ <- read.csv("./data/processed_data/eDNA/data_MED_teleo_pres_1824_V1.csv", se
 occ <- occ %>%
   rename(spygen_code = sample)
 
-# Import PCR matrix 
+# Reorder spygen_codes
+occ$spygen_code <- sapply(occ$spygen_code, reorder_spygen_codes)
+
+
+
+
+# PCR matrix 
 pcr <- read.csv("./data/processed_data/eDNA/data_MED_teleo_nb_rep_1824_V1.csv", sep = ";")
 
 # Rename spygen_code
 pcr <- pcr %>%
   rename(spygen_code = sample)
+
+# Reorder spygen_codes
+pcr$spygen_code <- sapply(pcr$spygen_code, reorder_spygen_codes)
+
+
+
 
 # Metadata
 mtdt_3 <- sf::st_read("./data/processed_data/Mtdt/mtdt_3.gpkg")
@@ -60,25 +72,37 @@ mtdt_3 <- sf::st_read("./data/processed_data/Mtdt/mtdt_3.gpkg")
 # Replace replicates = "no" by "spygen_code"
 mtdt_3$replicates[mtdt_3$replicates == "no"] <- mtdt_3$spygen_code[mtdt_3$replicates == "no"]
 
-# Reoder pool values in increasing order 
-mtdt_3$pool <- sapply(mtdt_3$pool, function(x) {
-  # If not a pooled sample (e.g. "no"), return as-is
-  if (x == "no") return(x)
-  
-  # Split into two SPY codes
-  codes <- unlist(strsplit(x, "_"))
-  
-  # Extract numeric parts for ordering
-  nums <- as.numeric(sub("SPY", "", codes))
-  
-  # Reorder by number and rebuild
-  ordered_codes <- codes[order(nums)]
-  paste(ordered_codes, collapse = "_")
-})
-
+# Reorder pool
+mtdt_3$pool <- sapply(mtdt_3$pool, reorder_spygen_codes)
 
 # When pool =/= "no" --> spygen_code = pool
 mtdt_3$spygen_code[mtdt_3$pool != "no"] <- mtdt_3$pool[mtdt_3$pool != "no"]
+
+# Reorder pool within replicates
+# Function to reorder SPY codes within "_" groups, keeping "/" structure
+reorder_replicates <- function(x) {
+  # Split the string by "/" to handle each group separately
+  groups <- unlist(strsplit(x, "/"))
+  
+  # Process each group independently
+  reordered_groups <- sapply(groups, function(g) {
+    # Only reorder if multiple SPY codes separated by "_"
+    if (grepl("_", g)) {
+      codes <- unlist(strsplit(g, "_"))
+      nums <- as.numeric(sub("SPY", "", codes))
+      codes <- codes[order(nums)]
+      paste(codes, collapse = "_")
+    } else {
+      g
+    }
+  })
+  
+  # Recombine the groups using "/"
+  paste(reordered_groups, collapse = "/")
+}
+
+# Apply to your dataframe column
+mtdt_3$replicates <- sapply(mtdt_3$replicates, reorder_replicates)
 
 
 
@@ -132,6 +156,105 @@ pcr <- pcr %>%
 
 
 
+
+
+#------------- HANDLE SAMPLES WITH NO SPECIES DETECTED ----------------------
+# Print no detection samples  ----
+species_cols <- setdiff(colnames(occ), c("spygen_code", "replicates", "geom"))
+occ[species_cols] <- lapply(occ[species_cols], as.numeric)  # Ensure species columns are numeric
+
+# Keep only samples with no species detected
+nd <- occ %>% dplyr:: filter(rowSums(across(all_of(species_cols)), na.rm = TRUE) == 0)
+
+length(unique(nd$spygen_code)) # 25 samples with 0 species detected 
+print(unique(nd$spygen_code))
+
+
+# Check no detection samples ----
+# Check their mtdt
+mtdt_empty_samples <- mtdt_3 %>%
+  dplyr::filter(spygen_code %in% nd$spygen_code) 
+
+# SPY211285 : Comment : "No_filtration - Blanc terrain/test contamination" / component = "blank"
+# 4 DeepHeart 2021-10-19 : field error pump was not properly set 
+
+# Compare with Laure's list of samples with no detection 
+ndl <- read.csv("./data/raw_data/eDNA/NoDNA.csv", sep = ";") # includes 2018-2023 samples (no 2024)
+
+length(setdiff(unique(nd$spygen_code), ndl$Sample)) # 10 samples are not in Laure's list
+
+# Print 2018-2023 samples not in Laure's list
+mtdt_empty_samples %>%
+  dplyr::filter(spygen_code %in% setdiff(unique(nd$spygen_code), ndl$Sample)) %>%
+  dplyr::filter(year(date) != 2024) %>%
+  pull(spygen_code)
+
+# 7 2023 samples : "SPY232133" "SPY232282" "SPY232289" "SPY233363" "SPY233720" "SPY233722" "SPY233819"
+# Sent to Laure on 5/11/25 to check
+
+
+
+# Check their buffer on QGIS
+mtdt_2 <- sf::st_read("./data/processed_data/Mtdt/mtdt_2.gpkg")
+mtdt_empty_samples_2 <- mtdt_2 %>%
+  dplyr::filter(spygen_code %in% nd$spygen_code)
+mtdt_empty_samples_3 <- mtdt_3 %>%
+  dplyr::filter(spygen_code %in% nd$spygen_code)
+
+sf::write_sf(mtdt_empty_samples_2, "./data/processed_data/Mtdt/mtdt_empty_samples_2.gpkg")
+sf::write_sf(mtdt_empty_samples_3, "./data/processed_data/Mtdt/mtdt_empty_samples_3.gpkg")
+
+
+## QGIS : Removing samples from replicates group will not to very slightly impact the buffer shape --> we can keep predictor's extractions already done on these shapes.
+
+
+
+
+
+# Remove no detection samples----
+occ <- occ %>%
+  dplyr::filter(!spygen_code %in% nd$spygen_code)
+
+pcr <- pcr %>%
+  dplyr::filter(!spygen_code %in% nd$spygen_code)
+
+mtdt_3 <- mtdt_3 %>%
+  dplyr::filter(!spygen_code %in% nd$spygen_code)
+
+# In mtdt_3, remove no detection samples from replicates ----
+clean_replicates <- function(replicates, remove_codes) {
+  # Split by "/" to separate replicate groups
+  sapply(replicates, function(x) {
+    groups <- unlist(strsplit(x, "/"))
+    
+    # Keep only those groups not fully matching any remove_codes
+    kept_groups <- groups[!groups %in% remove_codes]
+    
+    # Within each group (like SPY211169_SPY211181), also remove
+    # any subcodes that match any remove_code directly or as part of combined codes
+    cleaned_groups <- sapply(kept_groups, function(g) {
+      subcodes <- unlist(strsplit(g, "_"))
+      # Remove any subcode present in remove_codes (unique codes)
+      subcodes <- subcodes[!subcodes %in% remove_codes]
+      paste(subcodes, collapse = "_")
+    })
+    
+    # Combine cleaned groups back with "/"
+    paste(cleaned_groups, collapse = "/")
+  })
+}
+
+# Apply the function
+mtdt_3 <- mtdt_3 %>% rename(replicates_old = replicates) 
+mtdt_3$replicates <- clean_replicates(mtdt_3$replicates, nd$spygen_code)
+
+
+# Cleanup
+rm(mtdt_2, mtdt_empty_samples, mtdt_empty_samples_2, mtdt_empty_samples_3, nd, ndl, clean_replicates)
+
+
+
+
 # Add replicates column to occ and pcr ----
 occ <- occ %>%
   left_join(mtdt_3 %>% dplyr::select(c(spygen_code, replicates)), by = "spygen_code")
@@ -141,40 +264,21 @@ pcr <- pcr %>%
 
 
 
-#-------------- SAMPLES WITH NO SPECIES DETECTED ----------------------
-# Print samples with no species detected ----
-species_cols <- setdiff(colnames(occ), c("spygen_code", "replicates", "geom"))
-occ[species_cols] <- lapply(occ[species_cols], as.numeric)  # Ensure species columns are numeric
-
-# Keep only samples with no species detected
-d <- occ %>% dplyr:: filter(rowSums(across(all_of(species_cols)), na.rm = TRUE) == 0)
-
-length(unique(d$spygen_code)) # 25 samples with 0 species detected 
-print(unique(d$spygen_code))
-
-no_sp <- unique(d$spygen_code)
-no_sp <- c(
-  "SPY182541", "SPY201282", "SPY201274", "SPY211141_SPY211142", 
-  "SPY211169_SPY211181", "SPY211168_SPY211173", "SPY211172_SPY211177", 
-  "SPY211178_SPY211184", "SPY211047", "SPY211285", "SPY231906", 
-  "SPY211061", "SPY222967", "SPY210700", "SPY231871", "SPY233819", 
-  "SPY233363", "SPY232133", "SPY232282", "SPY232289", "SPY233720", 
-  "SPY233722", "SPY2401455", "SPY2401628", "SPY2401629"
-)
-
-# Subset mtdt_3 to check these samples
-mtdt_empty_samples <- mtdt_3 %>%
-  dplyr::filter(spygen_code %in% d$spygen_code) 
-
-# SPY211285 : Comment : "No_filtration - Blanc terrain/test contamination" / component = "blank"
-# 4 DeepHeart 2021-10-19 : field error pump was not properly set 
-
-#---> Mail to Laure to check if this is normal for the other samples (03/11/2025)
 
 
-# Remove samples with 0 species detected /!\ IF DOING SO WE NEED TO MODIFY REPLICATES AND SAMPLING EFFORT COLS ??----
 
-rm(d, mtdt_empty_samples)
+
+
+
+
+
+
+
+
+
+
+
+
 #------------- POOL OCC BY REPLICATES ------------------
 # Presence/Absence Pooled -----
 # Merge rows per replicates --> 0 or 1 
@@ -193,6 +297,31 @@ message("Number of rows after pooling: ", nrow(occ_pooled), " (Expected: ", leng
 
 length(setdiff(unique(mtdt_3$replicates), occ_pooled$replicates)) # 0
 length(setdiff(occ_pooled$replicates, unique(mtdt_3$replicates))) # 0 
+
+
+colnames(occ)
+
+# Check no detection replicates -----
+occ_pooled %>%
+  dplyr::filter(rowSums(across(all_of(species_cols)), na.rm = TRUE) == 0) %>%
+  dim() # 0 replicates with no detection
+
+
+#------------- COMPUTE SAMPLING EFFORTS IN MTDT ----------------------
+# Nb of field replicates ----
+# Compute nb of field replicates using the function compute_field_replicates
+# Pooled_samples are counted as 1 field replicate
+mtdt_3$field_replicates <- sapply(mtdt_3$replicates, compute_field_replicates)
+
+
+# Nb of PCR replicates ----
+# Compute nb of PCR replicates using the function compute_pcr_replicates
+mtdt_3$PCR_replicates <- sapply(mtdt_3$replicates, compute_pcr_replicates)
+
+
+
+
+
 
 
 
@@ -266,8 +395,7 @@ occ_f_incertitude <- occ_f_incertitude %>%
   dplyr::select(-pooled_name)
 occ_pcr_incertitude <- occ_pcr_incertitude %>%
   dplyr::select(-pooled_name)
-
-
+occ <- occ %>% dplyr::select(-field_replicates)
 
 #------------- UNDETECTED AND RARE SPECIES --------------------------------------
 # Plot rare species frequencies ------
@@ -303,30 +431,69 @@ rm(undetected)
 
 # Clean
 rm(res)
-#-------------- REPLICATES WITH NO SPECIES DETECTED ----------------------
-# Print replicates with no species detected ----
-t <- occ_pooled %>% dplyr::filter(rowSums(across(where(is.numeric))) == 0)
-
-print(t$replicates) # 6 replicates with 0 species detected :
-# "SPY210700"                               "SPY211141_SPY211142"                     "SPY211168_SPY211173/SPY211177_SPY211172"
-# "SPY211285"                               "SPY232282/SPY232289"                     "SPY2401628/SPY2401629"      
-
-# Subset mtdt_3 to check these samples
-mtdt_empty_samples <- mtdt_3 %>%
-  dplyr::filter(replicates %in% t$replicates) 
-
-# SPY211285 : Comment : "No_filtration - Blanc terrain/test contamination"
-# 4 DeepHeart 2021-10-19 : field error pump was not properly set 
-
-#---> Mail to Laure to check if this is normal for the other samples (03/11/2025)
 
 
-# Remove replicates with 0 species detected ----
-occ_pooled <- occ_pooled %>% dplyr::filter(rowSums(across(where(is.numeric))) != 0) 
-occ_pcr_incertitude <- occ_pcr_incertitude %>% dplyr::filter(rowSums(across(where(is.numeric))) != 0)
-occ_f_incertitude <- occ_f_incertitude %>% dplyr::filter(rowSums(across(where(is.numeric))) != 0)
 
-rm(t, mtdt_empty_samples)
+
+
+#--------------- HANDLE SPECIES COMPLEXES -----
+# Check individual species of the complexes -----
+## 1. Extract complex ie. colnames containing a "."
+complex_species <- colnames(presence)[grepl("\\.", colnames(presence))]
+
+## 2. Separate the species in the complexes and store in a list
+separated_species <- unique(unlist(strsplit(complex_species, "\\.")))
+
+## 3. Check which of these species are in colnames(presence)
+separated_species[separated_species %in% colnames(presence)] # "Centrolabrus melanocercus" "Umbrina cirrosa" "Spicara smaris"   
+
+## 4. Check which of these species are in traits
+separated_species[separated_species %in% traits$species] 
+length(separated_species[separated_species %in% traits$species]) # 36 species in traits db
+
+# Species not in traits db :
+setdiff(separated_species, traits$species) # "Coptodon rendalli"
+
+# Resolve complexes -----
+presence <- presence %>%
+  
+  
+  
+  ##--- 1. Species complex to delete :
+  dplyr::select(-c("Coptodon rendalli.Oreochromis niloticus", # Both african fish that can be introduced in the Med. Common subfamily : Pseudocrenilabrinae. Oreochromis niloticus is in the traits db while Coptodon rendalli is not. --> DELETE 
+  ))
+
+rename(
+  
+  
+  ##--- 2. Species where geographical distributions help to choose :
+  
+  "Cheilopogon heterurus.Hirundichthys speculiger" = "Cheilopogon heterurus", # Hirundichthys speculiger mostly found in tropical open water while Cheilopogon heterurus is a mediterranean fish.  (https://fishbase.se/summary/1029 and https://fishbase.se/summary/Hirundichthys-speculiger) --> KEEP Cheilopogon heterurus
+  "Trachurus mediterraneus.Trachurus trachurus" = "Trachurus mediterraneus", # This complex is present in 56% of the 2018-2024 samples detected on average on 4 PCR replicates (when present). Thus most probably Trachurus mediterraneus which is a least concerned fish that can widely spread in the Mediterranean sea (https://www.fishbase.se/summary/trachurus-mediterraneus) while Trachurus trachurus is a mostly atlantic species + is vulnerable (https://www.fishbase.se/summary/Trachurus-trachurus.html) --> KEEP Trachurus mediterraneus
+  "Trisopterus capelanus.Trisopterus minutus" = "Trisopterus capelanus", # Trisopterus minutus is not present in the Mediterranean sea (https://www.fishbase.se/summary/trisopterus-minutus) while Trisopterus capelanu is a mediterranean species (https://fishbase.se/summary/Trisopterus-capelanus.html) --> KEEP Trisopterus capelanus
+  "Notoscopelus elongatus.Notoscopelus kroyeri", # Notoscopelus kroyeri is endemic to the Atlantic sea (https://www.fishbase.se/summary/Notoscopelus-kroyeri) and Notoscopelus elongatus is found in the Mediterranean sea (https://fishbase.se/summary/841) --> KEEP Notoscopelus elongatus
+  "Sphyraena chrysotaenia.Sphyraena sphyraena", # Sphyraena chrysotaenia can be found in the Med as a Lessepsian migrant while Sphyraena sphyraena is commonly found in the Med (https://fishbase.se/Summary/SpeciesSummary.php?id=16905&lang=french and https://www.fishbase.se/summary/sphyraena-sphyraena) --> KEEP Sphyraena sphyraena
+  
+  
+  ##--- 3. All species found in Med : Delete or keep common taxo ?
+  
+  "Parablennius tentacularis.Parablennius zvonimiri" = "Parablennius sp.", # Both can be found in our study area --> DELETE / Parablennius sp.
+  "Parablennius incognitus.Parablennius sanguinolentus" = "Parablennius sp.", # Both can be found in our study area --> DELETE / Parablennius sp.
+  "Gaidropsarus biscayensis.Gaidropsarus vulgaris" = "Gaidropsarus sp.", # Both can be found in our study area (https://www.fishbase.se/summary/1877 and https://doris.ffessm.fr/Especes/Gaidropsarus-vulgaris-Motelle-commune-2699) ---> DELETE / Gaidropsarus sp.
+  "Chelidonichthys lucerna.Lepidotrigla dieuzeidei" = "Triglinae sp.", # Both can be found in our study area (https://www.fishbase.se/summary/Chelidonichthys-lucerna.html and https://www.fishbase.se/summary/Lepidotrigla-dieuzeidei) --> DELETE / Triglinae sp.
+  "Chelidonichthys obscurus.Chelidonichthys lastoviza" = "Chelidonichthys sp.", # Both can be found in our study area (fishbase) --> DELETE / Chelidonichthys sp.
+  "Eutrigla gurnardus.Trigla lyra" = "Triglinae sp.", # Both can be found in our study area (fishbase) --> DELETE / Triglinae sp.
+  "Dentex dentex.Pagrus auriga.Pagrus pagrus" = "Sparidae sp.", # All 3 can be found in our study area (fishbase) --> DELETE / Sparidae sp.
+  "Raja asterias.Raja clavata.Raja polystigma" = "Raja sp." # All 3 can be found in our study area (fishbase) --> DELETE / Raja sp.
+)
+
+
+# Those where I don't know what to do :
+# "Labrus merula.Labrus viridis", # also present in the complex Labrus merula.Labrus viridis.Centrolabrus melanocercus --> ??
+# "Labrus merula.Labrus viridis.Centrolabrus melanocercus", # Centrolabrus melanocercu also present alone --> ?? 
+# "Spicara flexuosum.Spicara smaris", # Spicara smaris also present alone --> ??
+# "Argyrosomus regius.Umbrina cirrosa", # Umbrina cirrosa also present alone --> ?? 
+
 
 #------------- EXPORT POOLED DATA ----------------------
 write.csv(occ_pooled, "./data/processed_data/eDNA/occ_pooled.csv", row.names = FALSE)
@@ -337,3 +504,83 @@ write.csv(occ_pcr_incertitude, "./data/processed_data/eDNA/occ_pcr_incertitude_p
 occ_pooled %>% dplyr::select("Labrus_merula.Labrus_viridis.Centrolabrus_melanocercus") %>% filter("Labrus_merula.Labrus_viridis.Centrolabrus_melanocercus" == 1) %>% dim()
 
 sort(colnames(occ_pooled))
+
+#------------- EXPORT MODIFIED MTDT ----------------------
+# In this script we made somes changes to the mtdt_3 that needs to be saved : removing of no detection samples, removing of Ange2Mer project, adding sampling effort columns. --> MTDT_6 (rows = sample)
+
+# When pooled by replicates the mtdt should re-calculate the estimated_volume_total without the removed samples --> MTDT_7 (rows = replicates)
+
+
+
+# MTDT_6 ----
+mtdt_6 <- mtdt_3
+sf::st_write(mtdt_6, "./data/processed_data/Mtdt/mtdt_6.gpkg", delete_dsn = TRUE)
+
+# MTDT_7 ----
+# Group by replicates ----
+mtdt_7 <- mtdt_6 %>%
+  group_by(replicates) %>%
+  summarise(
+    replicates_old = first(replicates_old),
+    date = first(na.omit(date)),
+    time_start = min(time_start, na.rm = TRUE),
+    
+    # Use first value if all non-NA values are identical; otherwise compute mean
+    depth_sampling = if (n_distinct(na.omit(depth_sampling)) == 1) {
+      first(na.omit(depth_sampling))
+    } else {
+      #print(cur_data_all())  # This prints the full data for the current group
+      mean(depth_sampling, na.rm = TRUE)
+    },
+    
+    # Use first value if all non-NA values are identical; otherwise take the first non-NA value
+    depth_seafloor = if(n_distinct(na.omit(depth_seafloor)) == 1) {
+      first(na.omit(depth_seafloor))
+    } else {
+      #print(cur_data_all())  # This prints the full data for the current group
+      first(na.omit(depth_seafloor))
+    },
+    
+    lockdown = first(na.omit(lockdown)),
+    BiodivMed2023 = first(na.omit(BiodivMed2023)),
+    method = first(na.omit(method)),
+    country = first(na.omit(country)),
+    region = first(na.omit(region)),
+    site = first(na.omit(site)),
+    subsite = first(na.omit(subsite)),
+    component = first(na.omit(component)),
+    habitat = first(na.omit(habitat)),
+    protection = first(na.omit(protection)),
+    mpa_name = first(na.omit(mpa_name)),
+    replicates_geometry = first(na.omit(geom)),
+    project = first(na.omit(project)),
+    filter = first(na.omit(filter)),
+    Tele01 = first(na.omit(Tele01)),
+    Pleo = first(na.omit(Pleo)),  
+    Mamm01 = first(na.omit(Mamm01)),
+    Vert01 = first(na.omit(Vert01)),
+    X16s_Metazoa = first(na.omit(X16s_Metazoa)),
+    Bact02 = first(na.omit(Bact02)), 
+    Euka02 = first(na.omit(Euka02)),
+    estimated_volume_total = sum(na.omit(estimated_volume)),
+    duration_total = sum(na.omit(duration)),
+    field_replicates = first(na.omit(field_replicates)),
+    PCR_replicates = first(na.omit(PCR_replicates)),
+    
+    # if comments differ combine them by copy pasting them with their associated replicates id :
+    comments = paste(unique(na.omit(comments)), collapse = "; "),  # Combine unique comments with a semicolon
+    .groups = "drop"
+  )
+
+# Check if mtdt_6 and mtdt_7 have the same columns and print columns that are only in one of the two datasets
+cols_mtdt_6 <- colnames(mtdt_6)
+cols_mtdt_7 <- colnames(mtdt_7)
+only_in_mtdt_6 <- setdiff(cols_mtdt_6, cols_mtdt_7)
+only_in_mtdt_7 <- setdiff(cols_mtdt_7, cols_mtdt_6)
+print(paste("Columns only in mtdt_6:", paste(only_in_mtdt_6, collapse = ", ")))
+print(paste("Columns only in mtdt_7:", paste(only_in_mtdt_7, collapse = ", ")))
+
+# Export
+sf::st_write(mtdt_7, "./data/processed_data/Mtdt/mtdt_7.gpkg", delete_dsn = TRUE)
+
+

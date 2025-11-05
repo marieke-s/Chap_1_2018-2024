@@ -383,7 +383,7 @@ plot_species_rarity <- function(df,
   return(out)
 }
 
-#---------------------------------- vv --------------------
+#---------------------------------- Function to plot hist + summary --------------------
 # Function: ggplot histogram with full summary (vector or data frame column)
 gg_hist_summary <- function(x, col_name = NULL, bins = 50, 
                             fill_low = "#80ffdb", fill_high = "#03045e") {
@@ -507,3 +507,20 @@ gg_hist_summary <- function(x, col_name = NULL, bins = 50,
   
   return(hist_plot)
 }
+#---------------------------------- Function to order spygen_code increasingly --------------------
+
+reorder_spygen_codes <- function(x) {
+  # If there's no underscore, return as is
+  if (!grepl("_", x)) return(x)
+  
+  # Split into codes
+  codes <- unlist(strsplit(x, "_"))
+  
+  # Extract numeric part for sorting
+  nums <- as.numeric(sub("SPY", "", codes))
+  
+  # Reorder and rebuild
+  ordered_codes <- codes[order(nums)]
+  paste(ordered_codes, collapse = "_")
+}
+
