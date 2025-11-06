@@ -159,25 +159,38 @@ rename(
 
 
 
-# Those where I don't know what to do : (check with reference data base on how they were detected)
+# Those where I don't know what to do : (checked with reference data base on how they were detected)
 # "Labrus merula.Labrus viridis", # also present in the complex Labrus merula.Labrus viridis.Centrolabrus melanocercus --> ??
 # "Labrus merula.Labrus viridis.Centrolabrus melanocercus", # Centrolabrus melanocercus also present alone. Detected both alone and in the complex with MED_2025.  
 # "Spicara flexuosum.Spicara smaris", # Spicara smaris also present alone. Detected both alone and in the complex with MED_2025.
 # "Argyrosomus regius.Umbrina cirrosa", # Umbrina cirrosa also present alone. Detected alone with GenBank MIDORI_v264 and in the complex by MED_2025.
 
 
-# For these complexes check if the species are detected in the same samples when alone and inside a complex
-# Compare Labrus merula.Labrus viridis.Centrolabrus melanocercus and Centrolabrus melanocercus
-occ %>%
-  dplyr::filter(`Labrus merula.Labrus viridis.Centrolabrus melanocercus` == 1 & `Centrolabrus melanocercus` == 1) %>%
-  dplyr::select(spygen_code, `Labrus merula.Labrus viridis.Centrolabrus melanocercus`, `Centrolabrus melanocercus`)
+# Compare detections
+# "Spicara flexuosum.Spicara smaris" and "Spicara smaris"
+t <- occ
 
-# Compare "Spicara flexuosum.Spicara smaris" and "Spicara smaris"
-occ %>%
-  dplyr::filter(`Spicara flexuosum.Spicara smaris` == 1 & `Spicara smaris` == 1) %>%
-  dplyr::select(spygen_code, `Spicara flexuosum.Spicara smaris`, `Spicara smaris`)
+t <- t %>%
+  mutate(match = ifelse(
+    (`Spicara_flexuosum.Spicara_smaris` == 1 & Spicara_smaris == 1) |
+      (`Spicara_flexuosum.Spicara_smaris` == 0 & Spicara_smaris == 0),
+    TRUE,
+    FALSE
+  ))
 
+t$match %>% table() 
+t$Spicara_smaris %>% table()
+t$Spicara_flexuosum.Spicara_smaris %>% table()
 
+rm(t)
+
+# [Temporary decision : remove complexes where one of the species is also present alone] ----
+occ <- occ %>%
+  dplyr::select(-c("Labrus_merula.Labrus_viridis",
+                   "Labrus_merula.Labrus_viridis.Centrolabrus_melanocercus",
+                   "Spicara_flexuosum.Spicara_smaris",
+                   "Argyrosomus_regius.Umbrina_cirrosa"
+  ))
 
 #------------- PREP DATA ----------------
 # CHECKS : Compare spygen_codes in occ and mtdt ---- ----
@@ -513,9 +526,6 @@ write.csv(occ_f_incertitude, "./data/processed_data/eDNA/occ_f_incertitude_poole
 write.csv(occ_pcr_incertitude, "./data/processed_data/eDNA/occ_pcr_incertitude_pooled_v1.0.csv", row.names = FALSE)
 
 
-occ_pooled %>% dplyr::select("Labrus_merula.Labrus_viridis.Centrolabrus_melanocercus") %>% filter("Labrus_merula.Labrus_viridis.Centrolabrus_melanocercus" == 1) %>% dim()
-
-sort(colnames(occ_pooled))
 
 #------------- EXPORT MODIFIED MTDT ----------------------
 # In this script we made somes changes to the mtdt_3 that needs to be saved : removing of no detection samples, removing of Ange2Mer project, adding sampling effort columns. --> MTDT_6 (rows = sample)
@@ -529,7 +539,7 @@ mtdt_6 <- mtdt_3
 sf::st_write(mtdt_6, "./data/processed_data/Mtdt/mtdt_6.gpkg", delete_dsn = TRUE)
 
 # MTDT_7 ----
-# Group by replicates ----
+# Group by replicates
 mtdt_7 <- mtdt_6 %>%
   group_by(replicates) %>%
   summarise(

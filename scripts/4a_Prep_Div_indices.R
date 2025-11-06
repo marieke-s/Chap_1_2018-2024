@@ -370,47 +370,22 @@ traits <- traits %>%
   rename(log_depth_min = `log depth_min`, log_depth_max = `log depth_max`)
 
 # Presence
-presence <- read.csv("./data/processed_data/eDNA/occ_pooled.csv", sep = ",", header=T)
+presence <- read.csv("./data/processed_data/eDNA/occ_pooled_v1.0.csv", sep = ",", header=T)
 names(presence) <- gsub("\\_", " ", names(presence))
 
 # Metadata
-meta <- sf::st_read("./data/processed_data/Mtdt/mtdt_3.gpkg")
+meta <- sf::st_read("./data/processed_data/Mtdt/mtdt_6.gpkg")
 
 meta <- st_drop_geometry(meta)
 
-# Replace replicates = "no" by "spygen_code"
-meta$replicates[meta$replicates == "no"] <- meta$spygen_code[meta$replicates == "no"]
-
-# Reoder pool values in increasing order 
-meta$pool <- sapply(meta$pool, function(x) {
-  # If not a pooled sample (e.g. "no"), return as-is
-  if (x == "no") return(x)
-  
-  # Split into two SPY codes
-  codes <- unlist(strsplit(x, "_"))
-  
-  # Extract numeric parts for ordering
-  nums <- as.numeric(sub("SPY", "", codes))
-  
-  # Reorder by number and rebuild
-  ordered_codes <- codes[order(nums)]
-  paste(ordered_codes, collapse = "_")
-})
-
-# When pool =/= "no" --> spygen_code = pool
-meta$spygen_code[meta$pool != "no"] <- meta$pool[meta$pool != "no"]
-
-# Remove "Ange2mer" project
-meta <- meta %>% dplyr::filter(project != "Ange2mer")
 
 
 
-
-# CHECK : traits species vs presence species -----
+# CHECK : Missing species in traits -----
 # Check species in presence that are not in traits
-length(setdiff(colnames(presence[-1]), traits$species)) # 21 species not in traits matrix
+length(setdiff(colnames(presence[-1]), traits$species)) # 11 species not in traits matrix
 
-setdiff(colnames(presence[-1]), traits$species) # Species complex + 3 species
+setdiff(colnames(presence[-1]), traits$species) # Species from species complex (eg: "Parablennius sp 1" , "Parablennius sp 2") + 3 species
 
 # 3 species :
 # Zu cristatus : no synonym found in traits db (https://www.fishbase.se/Nomenclature/1776 ; https://www.marinespecies.org/aphia.php?p=taxdetails&id=126529)
@@ -420,11 +395,129 @@ setdiff(colnames(presence[-1]), traits$species) # Species complex + 3 species
 # Stomias boa : no synonym found in traits db (https://www.fishbase.se/Nomenclature/1806 ; https://www.marinespecies.org/aphia.php?p=taxdetails&id=234601)
 
 
+# Filter traits to keep only our species  ----
+traits <- traits %>%
+  dplyr::filter(species %in% colnames(presence[-1]))
 
-# Check traits db -----
+
+
+# CHECK and RESOLVE : NA in traits -----
 # count Na per column
-na_counts <- sapply(traits, function(x) sum(is.na(x)))
+sapply(traits, function(x) sum(is.na(x)))
 
+
+# NA in ICUN indicators and IUCN_Inferred_Loiseau23
+# NA in Importance
+# NA in Length
+# NA worms_id
+# NA body_width_ratio
+
+
+# IUCN NA ----
+# Checks
+unique(traits$IUCN_category)
+unique(traits$IUCN_inferred_Loiseau23)
+
+# NA in both IUCN_category and IUCN_inferred_Loiseau23
+sum(is.na(traits$IUCN_category) & is.na(traits$IUCN_inferred_Loiseau23)) # 3 NA
+
+# Print these species 
+traits$species[is.na(traits$IUCN_category) & is.na(traits$IUCN_inferred_Loiseau23)] # "Argentina sphyraena" "Isurus oxyrinchus"   "Oedalechilus labeo" 
+
+# Combine both
+traits <- traits %>%
+  mutate(IUCN_combined = ifelse(is.na(IUCN_inferred_Loiseau23), IUCN_category, IUCN_inferred_Loiseau23)) 
+
+# Manually complete these 3 species
+traits <- traits %>%
+  mutate(IUCN_combined = ifelse(species == "Argentina sphyraena", "NE", IUCN_combined)) %>% # Not evaluated
+  mutate(IUCN_combined = ifelse(species == "Isurus oxyrinchus", "EN", IUCN_combined)) %>% # Endangered
+  mutate(IUCN_combined = ifelse(species == "Oedalechilus labeo", "NE", IUCN_combined)) # Not evaluated
+
+
+
+sum(is.na(traits$IUCN_combined)) # 0 NA 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Length NA ----
+sum(is.na(traits$Length)) # 1
+
+# print NA species
+traits$species[is.na(traits$Length)] # "Aetomylaeus bovinus"
+
+# Fishbase : 
+# Length at first maturity / Size / Weight / Age
+# Maturity: Lm 90.0, range 35 - 148 cm
+# Max length : 222.0 cm WD (female); common length : 150 cm WD male/unsexed; (Ref. 57025); max. published weight: 116.0 kg (Ref. 85836) 
+
+# Complete with max length
+traits <- traits %>%
+  mutate(Length = ifelse(species == "Aetomylaeus bovinus", 222.0, Length))
+
+
+
+
+# Importance NA [TO RESOLVE]----
+# check NAs
+sum(is.na(traits$Importance)) # 54 NA
+
+# print NA species
+NA_imp_sp <- traits$species[is.na(traits$Importance)]
+
+# Check if present in Alycia db 
+traits_ad <- read.csv("./data/raw_data/traits/functional_data.csv")
+
+
+traits_ad_NA_imp <- traits_ad %>%
+  filter(Species %in% NA_imp_sp) 
+
+
+unique(traits$Importance)
+
+
+# Resolve 
+# 1. join traits_ad$all_commercial_level and $highly_commercial_only to traits
+# 2. mutate combined_importance = ifelse(is.na(Importance),ifelse(highly_commercial_only == 1, "highly commercial", ifelse(all_commercial_level == 1, "commercial", "of no interest")), Importance)
+
+traits <- traits %>%
+  left_join(traits_ad %>% dplyr::select(Species, all_commercial_level, highly_commercial_only), 
+            by = c("species" = "Species")) %>%
+  mutate(Importance_combined = ifelse(is.na(Importance),
+                                      ifelse(highly_commercial_only == 1, "highly commercial",
+                                             ifelse(all_commercial_level == 1, "commercial", "of no interest")),
+                                      Importance))
+
+sum(is.na(traits$Importance_combined)) # 3 NA
+
+# print NA species
+traits$species[is.na(traits$Importance_combined)] # "Facciolella oxyrhynchus" "Knipowitschia caucasica" "Tripterygion melanurus"
+
+# Manually complete these 3 species //TO DO 
+traits <- traits %>%
+  mutate(Importance_combined = ifelse(species == "Facciolella oxyrhynchus", "of no interest", Importance_combined)) %>%
+  mutate(Importance_combined = ifelse(species == "Knipowitschia caucasica", "of no interest", Importance_combined)) %>%
+  mutate(Importance_combined = ifelse(species == "Tripterygion melanurus", "of no interest", Importance_combined))
+
+
+
+
+# Schooling NA [TO RESOLVE]----
+# body_depth_ratio NA [TO RESOLVE]----
+# body_width_ratio NA [TO RESOLVE]----
+# log_depth_min NA [TO RESOLVE]----
+# log_depth_max NA [TO RESOLVE]----
 #### Biodiversity indicators ####
 
 # Create indicator matrix
@@ -449,7 +542,7 @@ indicators <- matrix(NA,nrow(presence), 16,
                                      )))             
 
 
-indicators[,1] <- replicates
+indicators[,1] <- presence %>% pull(replicates)
 
 
 #### 1  - Species richness - R ####
@@ -472,6 +565,12 @@ traits <- traits %>%
 ## crée une nouvelle colonne dans TRAITS et y ajoute la valeur 0 ou 1 selon présence/absence de la famille dans traits
 
 
+# Check NAs
+sum(is.na(traits$crypto)) # 0 NA 
+
+
+
+
 
 
 
@@ -479,6 +578,12 @@ traits <- traits %>%
 
 traits <- traits %>%
   mutate(elasmo = if_else(Class == "Elasmobranchii", 1, 0))
+
+
+# Check NAs
+sum(is.na(traits$elasmo)) # 0 NA 
+
+
 
 
 
@@ -490,8 +595,13 @@ traits <- traits %>%
   mutate(Benthic = ifelse(DemersPelag %in% c("reef-associated", "demersal", "bathydemersal"), 1, 0)) %>% 
   mutate(DP = ifelse(DemersPelag %in% c("pelagic-oceanic", "pelagic-neritic", "bathypelagic", "pelagic"), 1, 0)) # Create a new Dermerso-Pelagic column which will take the value 1 if in the DemersPelag column it is represented by pelagic-oceanic, pelagic-neritic, bathypelagic. Otherwise it will take the value 0.
 
-# check NAs
-summary(is.na(traits$DemersPelag)) # 0 NA pour la colonne.
+
+# Check NAs
+sum(is.na(traits$DemersPelag)) # 0 NA
+sum(is.na(traits$Benthic)) # 0 NA 
+sum(is.na(traits$DP)) # 0 NA
+
+
 
 
 
@@ -500,11 +610,17 @@ summary(is.na(traits$DemersPelag)) # 0 NA pour la colonne.
 #### 5  - Number of species listed VU, EN or CR on the IUCN Red List - RedList ####
 
 traits <- traits %>%
-  mutate(RedList = if_else(IUCN_category %in% c("CR", "EN", "VU", "NT"), 1, 0))
+  mutate(RedList = if_else(IUCN_combined %in% c("CR", "EN", "VU", "NT", "Threatened"), 1, 0))
 
-# chelck NAs
-summary(is.na(traits$IUCN_category)) # 280 TRUE NA
-summary(is.na(traits$RedList)) # 0 NA
+# Check NA
+sum(is.na(traits$IUCN_combined)) # 0 NA 
+
+
+
+
+
+# Check NAs
+sum(is.na(traits$RedList)) # 0 NA 
 
 # print NA species for IUCN_category
 traits$species[is.na(traits$IUCN_category)]
@@ -523,16 +639,13 @@ traits <- traits %>%
   mutate(LRFI = if_else(Length >= 20, 1,0)) 
 
 # check NAs
-summary(is.na(traits$Length)) # 48
-summary(is.na(traits$LRFI)) # 48
+sum(is.na(traits$Length)) # 0
+sum(is.na(traits$LRFI)) # 0
 
-# print NA species
-traits$species[is.na(traits$Length)]
-traits$species[is.na(traits$LRFI)]
 
-# Check if these species as inside presence
-length(setdiff(colnames(presence[-1]), traits$species[is.na(traits$Length)])) # /!\ 240 species with no Length are inside our presence matrice
-length(setdiff(colnames(presence[-1]), traits$species[is.na(traits$LRFI)])) # /!\ 240 species with no LRFI are inside our presence matrice
+
+
+
 
 
 
@@ -545,14 +658,10 @@ traits <- traits %>%
   mutate(TopPred = if_else(Length >= 50 & Troph >= 4, 1,0))
 
 # check NAs
-summary(is.na(traits$Troph)) # 0
-summary(is.na(traits$TopPred)) # 7
+sum(is.na(traits$Troph)) # 0
+sum(is.na(traits$TopPred)) # 0
 
-# print NA species
-traits$species[is.na(traits$TopPred)]
 
-# Check if these species as inside presence
-length(setdiff(traits$species[is.na(traits$TopPred)], traits$species[is.na(traits$TopPred)])) # 0 species with no TopPred are inside our presence matrice
 
 
 
@@ -564,8 +673,6 @@ length(setdiff(traits$species[is.na(traits$TopPred)], traits$species[is.na(trait
 
 # A modifier avec la richesse des espèces commerciales
 
-print(unique(traits$Importance))
-
 traits <- traits %>%
   mutate(Commercial = if_else(Importance == "subsistence fisheries" | 
                                 Importance == "minor commercial" | 
@@ -576,15 +683,12 @@ traits <- traits %>%
                               )))
 
 # check NAs
-summary(is.na(traits$Commercial)) # 819 NA
+sum(is.na(traits$Importance)) # 54 NA
+sum(is.na(traits$Commercial)) # 0 NA
 
-# print NA species
-traits$species[is.na(traits$Commercial)]
 
-# Check if these species as inside presence
-length(setdiff(colnames(presence[-1]), traits$species[is.na(traits$Commercial)])) # /!\ 189/241 (78% !) species with no Commercial status are inside our presence matrice
 
-length(colnames(presence[-1]))
+
 
 
 
