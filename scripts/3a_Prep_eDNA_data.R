@@ -508,9 +508,9 @@ rm(res)
 
 
 #------------- EXPORT POOLED DATA ----------------------
-write.csv(occ_pooled, "./data/processed_data/eDNA/occ_pooled.csv", row.names = FALSE)
-write.csv(occ_f_incertitude, "./data/processed_data/eDNA/occ_f_incertitude_pooled.csv", row.names = FALSE)
-write.csv(occ_pcr_incertitude, "./data/processed_data/eDNA/occ_pcr_incertitude_pooled.csv", row.names = FALSE)
+write.csv(occ_pooled, "./data/processed_data/eDNA/occ_pooled_v1.0.csv", row.names = FALSE)
+write.csv(occ_f_incertitude, "./data/processed_data/eDNA/occ_f_incertitude_pooled_v1.0.csv", row.names = FALSE)
+write.csv(occ_pcr_incertitude, "./data/processed_data/eDNA/occ_pcr_incertitude_pooled_v1.0.csv", row.names = FALSE)
 
 
 occ_pooled %>% dplyr::select("Labrus_merula.Labrus_viridis.Centrolabrus_melanocercus") %>% filter("Labrus_merula.Labrus_viridis.Centrolabrus_melanocercus" == 1) %>% dim()

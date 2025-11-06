@@ -32,17 +32,22 @@ library(ncdf4)
 library(lubridate)
 library(terra)
 library(stringr)
+library(pMEM)
 
 
 
 # Load functions
 source("./utils/Fct_Data-Prep.R")
 
-# Load buff  
-buff <- st_read("./data/processed_data/eDNA/mtdt_5.gpkg")
+#------------- Load and prep data ------------------
+# Load mtdt_5 
+buff <- st_read("./data/processed_data/Mtdt/mtdt_5.gpkg")
 
+colnames(buff)
 
-
+# Keep only replicates and geom 
+buff <- buff %>%
+  dplyr::select(replicates, geom)
 
 
 
@@ -50,14 +55,13 @@ buff <- st_read("./data/processed_data/eDNA/mtdt_5.gpkg")
 
 
 #------------- VECTOR DATA ----------------
-###### Sampling effort ############
+###### Sampling effort : Buffer area ############
 # Explanation : the aim is to compute variables that represent the sampling effort in each replicate group : 
 # 1. Total volume filtered in the replicate group = estimated_volume_total -->  Already exists
 # 2. Nb of PCR replicates = 12 * nb of pooled samples + 12 nb of unpooled samples --> computed here 
 # 3. Area covered = area of replicate group buffer --> computed here
 
 
-# Area covered ----
 # Project in CRS=2154
 buff <- st_transform(buff, crs = 2154)
 
@@ -141,13 +145,34 @@ buff %>% filter(is.na(mpa_fully)) %>% dplyr::select(replicates, mpa_fully) %>%
 
 ###### Distances : to port, canyon and reserve (Martin) ############
 # Explanation : distances to several entities (port, canyons, MPA reserve) were computed by Martin Paquet in 07/2025 with the distance pipeline explained in Methods.txt.
-
+# Documentation port : https://services.sandre.eaufrance.fr/telechargement/geo/PTS/sandre_dictionnaire_PTS_2.pdf
+# Documentation canyon : https://opdgig.dos.ny.gov/datasets/250f2b9496854bd098be8154bab04a3a_4/about
 # Load data ----
 dist <- st_read("./data/raw_data/predictors/Distances/buffer_with_closest_feats_search_outlier_treshold_shore_50m.gpkg")
 dist <- as.data.frame(dist)
 
 # Clean ----
 
+dist <- dist %>%
+  
+  dplyr::select(-c ("ID","date","time_start","depth_sampling","depth_seafloor","lockdown","BiodivMed2023","method","country","region","site","subsite","component","habitat","protection","project", "Tele01","Pleo","Mamm01","Vert01",  "Tele01" ,"Pleo","Mamm01","Vert01","X16s_Metazoa","Bact02" ,"Euka02" ,"duration_total","comments","estimated_volume_total", "mpa_name...17"  )) %>%  # Remove mtdt cols
+  
+  dplyr::select(-"canyon_Geomorphic") %>% # because gives no info : unique(dist$canyon_Geomorphic) # "Canyon"
+  dplyr::select(-"canyon_Ocean") %>% # because all "Mediterranean Sea"
+  dplyr::select(-c("port_NumTexteRe", "port_DatePubliT", "port_CdTypeText", "port_MnTypeText", "port_URLTexteRe")) %>% # full NA columns
+  dplyr::select(-c("port_CdZonePort", "port_MnTypeZone", "port_DtCreatZon", "port_DtMajZoneP", "port_ComZonePor", "port_CdPort", "port_StatutZone", "port_CdTypeZone", "port_gid", "port_aire_m2")) %>% # We delete metadata associated to ports because incomplete
+  rename("mpa_name" = "mpa_name...81") %>%
+  dplyr::select(-c("canyon_dist_min_from_buff_m", "port_dist_min_from_buff_m", "mpa_dist_min_from_buff_m")) %>% # These cols were used for methodological checks only ([MARTIN CHECK])calcul de la distance du accCost depuis le buffer à la géométrie de variable la plus proche) 
+  dplyr::select(-c("canyon_OBJECTID", "canyon_Canyon_ID", "port_NomZonePor", "port_NomPort", "mpa_name")) # we don't need these metadata cols
+
+
+
+  
+  
+  
+  
+  
+  
 # Merge -----
 # Detect columns in dist that are not in buff
 extra_cols <- setdiff(names(dist), names(buff))
@@ -159,6 +184,8 @@ buff <- buff %>%
 rm(dist, extra_cols)
 
 
+# Count NA per column
+sapply(buff, function(x) sum(is.na(x)))
 
 
 
@@ -172,284 +199,12 @@ rm(dist, extra_cols)
 
 
 
-###### METHODOLIGAL CHECKS : Comparison distance to shore Martin VS Euclidian centroid distance -----
-# Load data ############
-# Explanation : distance to shore is computed from the coastline shapefile using '2.1_Distance_shore.py' from orignal code of Pauline Viguier. 
-# Important methodological considerations : 
-# Distance to shore is computed from replicates group's buffer centroids with euclidian distance. 
-# When a centroid is on land (which happened for ~ 67/792 centroids) we set the distance to shore to 1 meter because it was actually not sampled on land (obviously) and it ended up there only because we simplified transects into straight lines between transect start and end points.
 
-# Run 2.1_Distance_shore.py to compute distance to shore with euclidian buffer centroid distance.
-system("python3 ./scripts/2_Euclidian_Distance_shore.py")
+####### [[ TODO Vessel presence (Luka|Pauline) ]] ############
 
-# Load buff with dist_shore  
-dist_shore <- st_read("./data/processed_data/predictors/mtdt_5_dist-shore.gpkg")
 
 
-# Add dist_shore$dist_shore_m to buff
-df <- dist_shore %>%
-  as.data.frame() %>%
-  dplyr::select(replicates, dist_shore_m) %>%
-  left_join(
-    buff %>% as.data.frame(),
-    by = "replicates"
-  )
 
-# Comparison ----
-
-
-
-# Correlation df$shore_dist_m_weight (accCost) vs df$dist_shore_m (euclidian)
-cor_pearson <- cor(df$shore_dist_m_weight, df$dist_shore_m, use = "complete.obs", method = "pearson")
-
-# Plot 
-r2 <- cor_pearson^2
-ggplot(data = NULL, aes(x = df$shore_dist_m_weight, y = df$dist_shore_m)) +
-  geom_point(color = "steelblue", alpha = 0.7) +
-  geom_smooth(method = "lm", se = FALSE, color = "darkred", linetype = "dashed") +
-  labs(
-    x = "Weighted mean distance to Shore accCost ",
-    y = "Distance to Shore euclidian from buffer centroid",
-    title = "Relationship between Port Distance Metrics",
-    subtitle = sprintf("Pearson r = %.3f | R² = %.3f", cor_pearson, r2)
-  ) +
-  theme_minimal(base_size = 14)
-
-
-
-
-# Correlation df$shore_dist_m_min (accCost) vs df$dist_shore_m (euclidian)
-cor_pearson <- cor(df$shore_dist_m_min, df$dist_shore_m, use = "complete.obs", method = "pearson")
-
-# Plot 
-r2 <- cor_pearson^2
-ggplot(data = NULL, aes(x = df$shore_dist_m_min, y = df$dist_shore_m)) +
-  geom_point(color = "steelblue", alpha = 0.7) +
-  geom_smooth(method = "lm", se = FALSE, color = "darkred", linetype = "dashed") +
-  labs(
-    x = "min distance to Shore accCost ",
-    y = "Distance to Shore euclidian from buffer centroid",
-    title = "Relationship between Port Distance Metrics",
-    subtitle = sprintf("Pearson r = %.3f | R² = %.3f", cor_pearson, r2)
-  ) +
-  theme_minimal(base_size = 14)
-
-
-
-
-# Clean
-rm(df, dist_shore, cor_pearson, r2)
-# dev.off() # close plots
-
-
-
-
-
-
-
-
-
-###### METHODOLIGAL CHECKS : Comparison distance to reserve Martin VS in_out Laure ############
-
-# Min dist ----
-
-# Make column reserve_martin : if $mpa_dist_m_min = 0 then reserve_martin = 1 else reserve_martin = 0
-buff$reserve_martin <- ifelse(buff$mpa_dist_m_min == 0, 1, 0)
-
-# Compare buff$mpa_fully with buff$reserve_martin
-comparison <- buff %>%
-  dplyr::select(replicates, mpa_fully, reserve_martin) %>%
-  mutate(match = ifelse(mpa_fully == reserve_martin, TRUE, FALSE))
-
-# Count matches and mismatches
-comparison %>%
-  as.data.frame() %>%
-  group_by(match) %>%
-  summarise(count = n()) %>%
-  print()
-
-61/788 *100 # 7.7% mismatch avant jointure ? 
-63/788 # 7.9% mismatch après jointure ?
-61/788 *100 # 7.7% mismatch à 50m
-
-# Add a column "Who_is_1", when match = TRUE = NA, when match = FALSE and mpa_fully = 1 then "Laure", when match = FALSE and reserve_martin = 1 then "Martin"
-comparison <- comparison %>%
-  mutate(
-    Who_is_1 = case_when(
-      match == TRUE ~ NA_character_,
-      match == FALSE & mpa_fully == 1 ~ "Laure",
-      match == FALSE & reserve_martin == 1 ~ "Martin"
-    )
-  )
-
-# [OPTIONAL] Export to check in QGIS
-st_write(comparison, "./data/processed_data/predictors/MPA/check_reserve_match_50m.gpkg", delete_dsn = TRUE)
-
-#---
-# All mismatch are due to Laure = 0 and Martin = 1. This is because Martins's distances to reserve are computed on buffer while Laure is checking each sample point. Thus, close but not inside transects, whn buffer touch the reserve and are thus considered by Martin as "in reserve".
-
-
-# Max dist ----
-
-# We check if this remains true when using the "max distance to reserve" from Martin instead of the "min distance to reserve".
-buff$reserve_martin_max <- ifelse(buff$mpa_dist_m_max == 0, 1, 0)
-
-comparison <- buff %>%
-  dplyr::select(replicates, mpa_fully, reserve_martin_max) %>%
-  mutate(match = ifelse(mpa_fully == reserve_martin_max, TRUE, FALSE))
-
-comparison %>%
-  as.data.frame() %>%
-  group_by(match) %>%
-  summarise(count = n()) %>%
-  print()
-
-105/788 *100 # 13.32% mismatch  
-
-comparison <- comparison %>%
-  mutate(
-    Who_is_1 = case_when(
-      match == TRUE ~ NA_character_,
-      match == FALSE & mpa_fully == 1 ~ "Laure",
-      match == FALSE & reserve_martin_max == 1 ~ "Martin"
-    )
-  )
-
-#---
-# In thas case mismatches are all due to Laure = 1 and Martin = 0. 
-
-
-# Mean dist ----
-
-# We check with "weighted mean distance to reserve"
-buff$reserve_martin_mean <- ifelse(buff$mpa_dist_m_weight == 0, 1, 0)
-comparison <- buff %>%
-  dplyr::select(replicates, mpa_fully, reserve_martin_mean, mpa_dist_m_weight) %>%
-  mutate(match = ifelse(mpa_fully == reserve_martin_mean, TRUE, FALSE))
-
-comparison %>%
-  as.data.frame() %>%
-  group_by(match) %>%
-  summarise(count = n()) %>%
-  print()
-
-105/788 *100 # 13.32% mismatch
-
-comparison <- comparison %>%
-  mutate(
-    Who_is_1 = case_when(
-      match == TRUE ~ NA_character_,
-      match == FALSE & mpa_fully == 1 ~ "Laure",
-      match == FALSE & reserve_martin_mean == 1 ~ "Martin"
-    )
-  )
-
-
-comparison %>%
-  as.data.frame() %>%
-  dplyr::filter(match == FALSE) %>%
-  print()
-
-# [OPTIONAL] Export to check in QGIS
-st_write(comparison, "./data/processed_data/predictors/MPA/check_reserve_match_mean_50m.gpkg", delete_dsn = TRUE)
-
-#---
-# In thas case mismatches are all due to Laure = 1 and Martin = 0. 
-
-
-
-
-# Clean
-
-rm(comparison)
-
-# remove buff$reserve_martin
-buff <- buff %>% dplyr::select(-reserve_martin)
-
-
-###### METHODOLIGAL CHECKS: Comparison distance to port Martin VS distance to port GFW ############
-
-
-
-# Extraction GFW ----
-
-# Data :
-# From GFW
-
-# Parameters
-var <- "dist_port"
-rast <- terra::rast("/media/marieke/Shared/Chap-1/Model/Scripts/Chap_1/data/raw_data/predictors/Dist_port/distance-from-port-v1.tiff")
-rast <- terra::project(rast, "EPSG:4326")
-poly <- buff
-
-# Extraction
-df <- spatial_extraction(var = var, rast = rast, poly = buff)  
-
-
-
-
-# Comparison ----
-
-# Compare dff$port_dist_m_weight with df$dist_port_mean with pearson correlation
-# Compute Pearson correlation
-cor(df$port_dist_m_mean, df$dist_port_mean, use = "complete.obs", method = "pearson") # 50m: 0.6154648
-cor(df$port_dist_m_weight, df$dist_port_mean, use = "complete.obs", method = "pearson") # 50m : 0.6153183
-cor(df$port_dist_m_min, df$dist_port_min, use = "complete.obs", method = "pearson") # 50m : 0.6142686
-cor(df$port_dist_m_max, df$dist_port_max, use = "complete.obs", method = "pearson") # 50m : 0.6254746
-
-
-# euclid martin MIN vs GFW MIN
-cor_pearson <- cor(df$dist_port_min, df$port_dist_euclid_m_min, use = "complete.obs", method = "pearson")
-r2 <- cor_pearson^2
-ggplot(data = NULL, aes(x = df$dist_port_min, y = df$port_dist_euclid_m_min)) +
-  geom_point(color = "steelblue", alpha = 0.7) +
-  geom_smooth(method = "lm", se = FALSE, color = "darkred", linetype = "dashed") +
-  labs(
-    x = "Distance to Port GFW ",
-    y = "Distance to Port Martin",
-    title = "Relationship between Port Distance Metrics",
-    subtitle = sprintf("Pearson r = %.3f | R² = %.3f", cor_pearson, r2)
-  ) +
-  theme_minimal(base_size = 14)
-
-
-
-
-
-# euclid martin MIN vs martin MIN
-cor_pearson <- cor(df$port_dist_m_min, df$port_dist_euclid_m_min, use = "complete.obs", method = "pearson")
-r2 <- cor_pearson^2
-ggplot(data = NULL, aes(x = df$port_dist_m_min, y = df$port_dist_euclid_m_min)) +
-  geom_point(color = "steelblue", alpha = 0.7) +
-  geom_smooth(method = "lm", se = FALSE, color = "darkred", linetype = "dashed") +
-  labs(
-    x = "Distance to Port Martin ",
-    y = "Distance to Port Martin euclid ",
-    title = "Relationship between Port Distance Metrics",
-    subtitle = sprintf("Pearson r = %.3f | R² = %.3f", cor_pearson, r2)
-  ) +
-  theme_minimal(base_size = 14)
-
-
-# Clean
-rm(df, cor_pearson, r2, var, rast, poly)
-
-# Potential reasons for differences between GFW and Martin's distances to port :
-
-# raw data port 
-# algo distance (euclid or accCost)
-# spatial resolution
-
-
-
-
-
-
-
-
-
-
-######################## Vessel presence (Luka) ############
 
 
 
@@ -457,212 +212,10 @@ rm(df, cor_pearson, r2, var, rast, poly)
 
 
 #------------- RASTER DATA ----------------
-###### METHODOLIGAL CHECKS ####
-
-# Parameters
-var <- "gravity"
-rast <- terra::rast("./data/raw_data/predictors/Gravity/rastGravity.tif")
-poly <- buff 
-
-
-# terra::extract weights=TRUE vs exact=TRUE ----
-spatial_extraction <- function(var, rast, poly, stats = c("mean", "min", "max", "range")) {
-  
-  # Load necessary libraries
-  require(terra)
-  require(sf)
-  require(dplyr)
-  
-  # Ensure stats contains only allowed values
-  stats <- intersect(stats, c("mean", "min", "max", "range"))
-  
-  # Reproject polygons if CRS differs
-  raster_crs <- sf::st_crs(terra::crs(rast))
-  poly_crs <- sf::st_crs(poly)
-  
-  if (!identical(poly_crs, raster_crs)) {
-    poly <- sf::st_transform(poly, crs = raster_crs)
-  }
-  
-  # Initialize vectors to store the statistics
-  rast_means <- numeric(length = nrow(poly))
-  rast_mins <- numeric(length = nrow(poly))
-  rast_maxs <- numeric(length = nrow(poly))
-  rast_ranges <- numeric(length = nrow(poly))
-  
-  for (i in 1:nrow(poly)) {
-    
-    # Extract raster values within the current polygon with weights
-    extracted_values <- terra::extract(x = rast, y = poly[i, ], weights = TRUE) # The documentation says that with "weights", "the approximate fraction of each cell" is used whereas with "exact", "the exact fraction" is used. The reason for having both is in part because the argument "weights" predates the argument "exact". "weights" was kept because it could be faster and close enough in most cases.
-    
-    # Filter out NA values
-    extracted_values <- extracted_values[!is.na(extracted_values[, 2]), ]
-    
-    values <- extracted_values[, 2]
-    weights <- extracted_values[, 3]
-    
-    if (length(values) > 0) {
-      if ("mean" %in% stats) {
-        rast_means[i] <- sum(values * weights, na.rm = TRUE) / sum(weights, na.rm = TRUE)
-      }
-      if ("min" %in% stats) {
-        rast_mins[i] <- min(values, na.rm = TRUE)
-      }
-      if ("max" %in% stats) {
-        rast_maxs[i] <- max(values, na.rm = TRUE)
-      }
-      if ("range" %in% stats) {
-        rast_ranges[i] <- max(values, na.rm = TRUE) - min(values, na.rm = TRUE)
-      }
-    } else {
-      if ("mean" %in% stats) rast_means[i] <- NA
-      if ("min" %in% stats)  rast_mins[i]  <- NA
-      if ("max" %in% stats)  rast_maxs[i]  <- NA
-      if ("range" %in% stats) rast_ranges[i] <- NA
-    }
-  }
-  
-  # Append results to poly
-  if ("mean" %in% stats) poly[[paste0(var, "_mean")]] <- rast_means
-  if ("min" %in% stats)  poly[[paste0(var, "_min")]]  <- rast_mins
-  if ("max" %in% stats)  poly[[paste0(var, "_max")]]  <- rast_maxs
-  if ("range" %in% stats) poly[[paste0(var, "_range")]] <- rast_ranges
-  
-  return(poly)
-}
-spatial_extraction_2 <- function(var, rast, poly, stats = c("mean", "min", "max", "range")) {
-  
-  # Load necessary libraries
-  require(terra)
-  require(sf)
-  require(dplyr)
-  
-  # Ensure stats contains only allowed values
-  stats <- intersect(stats, c("mean", "min", "max", "range"))
-  
-  # Reproject polygons if CRS differs
-  raster_crs <- sf::st_crs(terra::crs(rast))
-  poly_crs <- sf::st_crs(poly)
-  
-  if (!identical(poly_crs, raster_crs)) {
-    poly <- sf::st_transform(poly, crs = raster_crs)
-  }
-  
-  # Initialize vectors to store the statistics
-  rast_means <- numeric(length = nrow(poly))
-  rast_mins <- numeric(length = nrow(poly))
-  rast_maxs <- numeric(length = nrow(poly))
-  rast_ranges <- numeric(length = nrow(poly))
-  
-  for (i in 1:nrow(poly)) {
-    
-    # Extract raster values within the current polygon with exact weights
-    extracted_values <- terra::extract(x = rast, y = poly[i, ], exact = TRUE) 
-    
-    # Filter out NA values
-    extracted_values <- extracted_values[!is.na(extracted_values[, 2]), ]
-    
-    values <- extracted_values[, 2]
-    weights <- extracted_values[, 3]
-    
-    if (length(values) > 0) {
-      if ("mean" %in% stats) {
-        rast_means[i] <- sum(values * weights, na.rm = TRUE) / sum(weights, na.rm = TRUE)
-      }
-      if ("min" %in% stats) {
-        rast_mins[i] <- min(values, na.rm = TRUE)
-      }
-      if ("max" %in% stats) {
-        rast_maxs[i] <- max(values, na.rm = TRUE)
-      }
-      if ("range" %in% stats) {
-        rast_ranges[i] <- max(values, na.rm = TRUE) - min(values, na.rm = TRUE)
-      }
-    } else {
-      if ("mean" %in% stats) rast_means[i] <- NA
-      if ("min" %in% stats)  rast_mins[i]  <- NA
-      if ("max" %in% stats)  rast_maxs[i]  <- NA
-      if ("range" %in% stats) rast_ranges[i] <- NA
-    }
-  }
-  
-  # Append results to poly
-  if ("mean" %in% stats) poly[[paste0(var, "_mean")]] <- rast_means
-  if ("min" %in% stats)  poly[[paste0(var, "_min")]]  <- rast_mins
-  if ("max" %in% stats)  poly[[paste0(var, "_max")]]  <- rast_maxs
-  if ("range" %in% stats) poly[[paste0(var, "_range")]] <- rast_ranges
-  
-  return(poly)
-}
-
-
-
-
-
-
-# Extraction
-buff <- spatial_extraction(var = var, rast = rast, poly = poly, stat = c("min", "max", "mean", "range"))
-buff2 <- spatial_extraction_2(var = var, rast = rast, poly = poly, stat = c("min", "max", "mean", "range"))
-
-
-
-
-
-
-
-# make correlations of c("gravity_mean", "gravity_min","gravity_max","gravity_range") in buff vs in buff2 
-cor(buff$gravity_mean, buff2$gravity_mean, use = "complete.obs", method = "pearson")
-cor(buff$gravity_min, buff2$gravity_min, use = "complete.obs", method = "pearson")
-cor(buff$gravity_max, buff2$gravity_max, use = "complete.obs", method = "pearson")
-cor(buff$gravity_range, buff2$gravity_range, use = "complete.obs", method = "pearson")
-
-# Conclusion : 1, 1, 0.9999994, 0.9999989. We change to "exact" because also very quick. 
-
-
-
-
-
-# terra::extract exact=TRUE vs exactextractr::exactextract ####
-
-# Reproject polygons if CRS differs
-raster_crs <- sf::st_crs(terra::crs(rast))
-poly_crs <- sf::st_crs(poly)
-
-ee <- exactextractr::exact_extract(x = rast, y = poly) 
-te <- terra::extract(x = rast, y = poly, exact = TRUE)
-
-# ee légèrement plus rapide 
-
-# bind ee and ted 
-df <- merge(
-  do.call(rbind, lapply(seq_along(ee), \(i) transform(ee[[i]], ID = i, row = seq_len(nrow(ee[[i]]))))),
-  transform(te, row = ave(ID, ID, FUN = seq_along)),
-  by = c("ID", "row"),
-  all = TRUE
-)[, c("ID", "value", "coverage_fraction", "layer", "fraction")]
-
-names(df) <- c("ID", "value_ee", "fraction_ee", "value_te", "fraction_te")
-
-
-
-# correlation df$value_te vs df$value_ee 
-cor(df$value_te, df$value_ee, use = "complete.obs", method = "pearson")
-
-# correlation df$fraction_te vs df$fraction_ee
-cor(df$fraction_te, df$fraction_ee, use = "complete.obs", method = "pearson")
-
-
-# Conclusion : 1, 1. We keep exact=TRUE because also very quick.
-
-
-
-
-
-
-
 
 ###### Gravity (1 km) : weighted mean, min, max, range ####
 # Data : From Laure Velez (MARBEC)
+
 
 # Parameters
 var <- "gravity"
@@ -678,8 +231,20 @@ gr <- spatial_extraction(var = var, rast = rast, poly = poly, stat = c("min", "m
 extra_cols <- setdiff(names(gr), names(buff))
 
 # left_join keeps all rows in buff and brings matching columns from dist by 'replicates'
+
 buff <- buff %>%
-  left_join(gr %>% dplyr::select(replicates, all_of(extra_cols)), by = "replicates")
+  left_join(
+    gr %>% 
+      st_drop_geometry() %>% 
+      dplyr::select(replicates, dplyr::all_of(extra_cols)),
+    by = "replicates"
+  )
+
+
+
+
+
+
 
 rm(gr, extra_cols)
 
@@ -715,35 +280,44 @@ rast[rast >= 0] <- NA
 # Extraction
 bat <- spatial_extraction(var = var, rast = rast, poly = poly)
 
+# Clean -----
+bat <- bat %>%
+  dplyr::select(c("replicates", "bathy_min", "bathy_max", "bathy_mean", "bathy_range", ))
+
+bat <- bat %>%
+  mutate(bathy_mean = abs(bathy_mean),
+         bathy_min2  = abs(bathy_max),
+         bathy_max2  = abs(bathy_min)) 
+
+bat <- bat %>%
+  dplyr::select(-c("bathy_min", "bathy_max")) %>%
+  dplyr::rename(
+    bathy_min = bathy_min2,
+    bathy_max = bathy_max2
+  )
+
+
+
+
 
 # Merge -----
 # Detect columns in bat that are not in buff
 extra_cols <- setdiff(names(bat), names(buff))
 
 # left_join keeps all rows in buff and brings matching columns from dist by 'replicates'
+
 buff <- buff %>%
-  left_join(bat %>% dplyr::select(replicates, all_of(extra_cols)), by = "replicates")
-
-rm(bat, extra_cols)
-
-
-
-
-
+  left_join(
+    bat %>% 
+      st_drop_geometry() %>% 
+      dplyr::select(replicates, dplyr::all_of(extra_cols)),
+    by = "replicates"
+  )
 
 
 
 
-
-
-
-
-
-
-
-
-
-
+rm(bat, extra_cols, rats, poly)
 
 ###### Terrain index ####
 # Explanation : we compute terrain indices from the SHOM MNT at 100m resolution.
@@ -832,7 +406,13 @@ extra_cols <- setdiff(names(buff_all), names(buff))
 
 # left_join keeps all rows in buff and brings matching columns from dist by 'replicates'
 buff <- buff %>%
-  left_join(buff_all %>% dplyr::select(replicates, all_of(extra_cols)), by = "replicates")
+  left_join(
+    buff_all %>% 
+      st_drop_geometry() %>% 
+      dplyr::select(replicates, dplyr::all_of(extra_cols)),
+    by = "replicates"
+  )
+
 
 rm(buff_all, extra_cols)
 
@@ -903,7 +483,7 @@ names(rast) <-  c("Association rhodolithes", "matte_morte_P.oceanica",
 # Remove "zone bathyale" and "Cymodocees" from raster
 rast <- rast[[!(names(rast) %in% c("Zone bathyale", "Herbiers Cymodocess"))]]
 
-plot(rast)
+
 
 
 
@@ -1044,7 +624,12 @@ extra_cols <- setdiff(names(buff1), names(buff))
 
 # left_join keeps all rows in buff and brings matching columns from dist by 'replicates'
 buff <- buff %>%
-  left_join(buff1 %>% dplyr::select(replicates, all_of(extra_cols)), by = "replicates")
+  left_join(
+    buff1 %>% 
+      st_drop_geometry() %>% 
+      dplyr::select(replicates, dplyr::all_of(extra_cols)),
+    by = "replicates"
+  )
 
 rm(buff1, extra_cols)
 
@@ -1086,7 +671,7 @@ for (layer in names(rast_grouped)) {
   temp <- spatial_extraction(
     var   = layer,
     rast  = rast_grouped[[layer]],
-    poly  = df,               # pass the sf object
+    poly  = df,               
     stats = c("mean")
   )
   
@@ -1097,7 +682,7 @@ for (layer in names(rast_grouped)) {
     # Drop geometry from temp and bind only the new attribute columns
     df <- bind_cols(df, sf::st_drop_geometry(temp)[, new_cols, drop = FALSE])
   } else {
-    message(sprintf("No new columns returned for layer '%s'", layer))
+    message(sprintf("No new columns returned for layer '%'", layer))
   }
 }
 
@@ -1108,7 +693,12 @@ extra_cols <- setdiff(names(df), names(buff))
 
 # left_join keeps all rows in buff and brings matching columns from dist by 'replicates'
 buff <- buff %>%
-  left_join(df %>% dplyr::select(replicates, all_of(extra_cols)), by = "replicates")
+  left_join(
+    df %>% 
+      st_drop_geometry() %>% 
+      dplyr::select(replicates, dplyr::all_of(extra_cols)),
+    by = "replicates"
+  )
 
 rm(df, extra_cols)
 
@@ -1116,67 +706,93 @@ rm(df, extra_cols)
   
   
   
-######################## GFW : Vessel Presence (0.01°) : weighted mean, min, max, range ####
-# Parameters
-var <- "Vessel_Presence"
-rast <- terra::rast("./data/raw_data/predictors/Vessels/public-global-presence-v20231026_202301-202401_Vessel_Presence_0.01_degres.tif.tif")
-rast <- terra::project(rast, "EPSG:4326")
-df <- df
-poly <- buff
-
-# Extraction
-df <- spatial_extraction(var = var, rast = rast, df = df, poly = poly)
-
-# [For Updates---]
-write.csv(df, "./data/processed_data/data_prep/predictors/Extracted_Predictors/mtdt_101220242_COV_spatial_cov_no_hab_no_fishing_eff.csv")
 
 
-######################## GFW : Apparent Fishing Effort (0.01°) : weighted mean ####
-df_1 <- df
-#  /!\ WARNING : RUN INDEPENDENTLY 
-# This means that you need to save your previous df results and start from a new df with no other covariables saved in it. 
-# This is because, when binding the df_NA and df, column index number is used. Thus, if you have a different number of column it won't work.
+# Handle NA [TO DO | ASK CELIA ]----
+# For habitat with NA --> take the 3 closest pixel values
 
-### 1. Extraction of weighted mean
-# Parameters 
-rast <- terra::rast("./data/raw_data/predictors/Vessels/public-global-fishing-effort-v20231026_Apparent_fishing_effort_202301-202401_0.01_degres.tif")
-rast <- terra::project(rast, "EPSG:4326")
-poly <- buff
-df <- df
-var <- "Fishing_Eff"
+# Select buff with NA in habitat columns
+habitat_cols <- c("main_habitat", "grouped_main_habitat", "grouped_nb_habitat_per_km2")
+buff_na <- buff %>%
+  filter(if_any(all_of(habitat_cols), is.na)) # 5 NA 
+buff_na <- buff_na[, c(1, 64:ncol(buff_na))]
 
-# Extraction
-df <- spatial_extraction(var = var, rast = rast, df = df, poly = poly)
+# Export 
+st_write(buff_na, "./data/processed_data/predictors/Habitat/habitat_NA.gpkg")
+
+## QGIS check : far away from raster but considered coastal because near a small island.
+
+
+# Clean up
+rm(layer, new_cols, temp, rast, rast_grouped, buff_na, habitat_cols)
 
 
 
-### 2. Extraction of nearest value for NA 
-# Parameters
-rast <- raster::raster("./data/raw_data/predictors/Vessels/public-global-fishing-effort-v20231026_Apparent_fishing_effort_202301-202401_0.01_degres.tif")
-rast <- raster::projectRaster(rast, crs = "EPSG:4326")
-df <- df
-df_NA <- df[is.na(df$Fishing_Eff_mean), ] # Keep df rows in which Fishing_Eff is NA
-poly_NA <- poly |> dplyr::filter(spygen_code %in% df_NA$spygen_code) # Keep only poly that have their spygen_code in df_NA
-
-# Extraction
-df_NA <- nearest_value(var = var, rast = rast, df = df_NA, poly = poly_NA)
 
 
 
-### 3. Binding both results
-df_NA <- df_NA |> dplyr::select(spygen_code, Fishing_Eff_value)
-df_binded <- merge(df, df_NA, by = "spygen_code", all = TRUE)
-
-df_binded$Fishing_Eff <- ifelse(is.na(df_binded$Fishing_Eff_mean), 
-                                as.numeric(df_binded$Fishing_Eff_value), 
-                                as.numeric(df_binded$Fishing_Eff_mean))
-
-df <- df_binded |> dplyr::select(spygen_code, date, Fishing_Eff)
-
-df_2 <- df
-write.csv(df, "./data/processed_data/data_prep/predictors/Extracted_Predictors/mtdt_101220242_COV_fishing_eff.csv")
 
 
+
+#------------- VECTOR DATA ----------------
+###### Distance between seabed and depth sampling ############
+# Explanation : bathy_max - depth_sampling
+
+dsamp <- st_read("./data/processed_data/Mtdt/mtdt_5.gpkg") %>% # Load depth_sampling
+  st_drop_geometry() %>% 
+  dplyr::left_join(buff %>% st_drop_geometry(), by = "replicates") %>% # merge to buff 
+  mutate(dist_seabed_depthsampling = bathy_max - depth_sampling)  # compute distance
+  #dplyr::select(replicates, dist_seabed_depthsampling, depth_sampling, bathy_min, bathy_max, bathy_mean) # keep only necessary columns
+
+
+# Merge -----
+# Detect columns in dist that are not in buff
+extra_cols <- setdiff(names(dsamp), names(buff))
+
+# left_join keeps all rows in buff and brings matching columns from dist by 'replicates'
+buff <- buff %>%
+  left_join(
+    dsamp %>% 
+      st_drop_geometry() %>% 
+      dplyr::select(replicates, dplyr::all_of(extra_cols)),
+    by = "replicates"
+  )
+
+rm(dsamp, extra_cols)
+
+
+
+
+
+
+
+
+
+##### Centroid coordinates ####
+# Prep coords from buff centroids
+# Project in CRS=2154
+buff <- st_transform(buff, crs = 2154)
+
+cent <- st_centroid(buff)  
+xy <- st_coordinates(cent)
+coords <- buff %>%
+  mutate(x = xy[, 1],
+         y = xy[, 2])
+
+
+# Merge ----
+extra_cols <- setdiff(names(coords), names(buff))
+
+# left_join keeps all rows in buff and brings matching columns from dist by 'replicates'
+buff <- buff %>%
+  left_join(
+    coords %>% 
+      st_drop_geometry() %>% 
+      dplyr::select(replicates, dplyr::all_of(extra_cols)),
+    by = "replicates"
+  )
+
+rm(coords, extra_cols, cent, xy)
 
 
 
@@ -1192,11 +808,12 @@ write.csv(df, "./data/processed_data/data_prep/predictors/Extracted_Predictors/m
 # Current and Wind ----
 
 # List all .geojson files 
-geojson_files <- list.files("./data/raw_data/predictors/MARS3D/adne_extract_curent_wind/", pattern = "\\.geojson$", 
-                            full.names = TRUE)
+geojson_files <- list.files("./data/raw_data/predictors/MARS3D/adne_extract_current_wind/",
+                            pattern = "\\.geojson$", full.names = TRUE)
+
 
 # Open all GeoJSONs and store in a list 
-sf_list <- lapply(geojson_files[1:3], function(f) {
+sf_list <- lapply(geojson_files, function(f) {
   sf::st_read(f, quiet = TRUE)
 })
 
@@ -1216,7 +833,7 @@ cur_wind <- dplyr::bind_rows(sf_list)
 
 # Temperature and Salinity ----
 # List all .geojson files 
-geojson_files <- list.files("./data/raw_data/predictors/MARS3D/adne_extract_sal_temp/", pattern = "\\.geojson$", 
+geojson_files <- list.files("./data/raw_data/predictors/MARS3D/adne_extract_sal_temp", pattern = "\\.geojson$", 
                             full.names = TRUE)
 
 # Open all GeoJSONs and store in a list 
@@ -1249,7 +866,7 @@ mars3d <- cur_wind %>%
 
 # Keep only necessary columns
 mars3d <- mars3d %>%
-  dplyr::select(-c("date", "depth_sampling", "depth_seafloor", "datetime", "day_24h", "date_7j", "date_1mois", "date_1an", "layer", "path", "geometry"))
+  dplyr::select(-c("date", "depth_sampling", "depth_seafloor", "datetime", "day_24h", "date_7j", "date_1mois", "date_1an", "path", "geometry"))
 
 
 
@@ -1261,22 +878,9 @@ colnames(buff)
 
 # Clean
 rm(cur_wind, sal_temp, mars3d, geojson_files, sf_list, extra_cols, i)
-
-# Check extraction : 5 years, type of clip/ extraction, weighted mean
-# --> Réu avec Paulin et Celia le 20/10
-# 5 years : not possible because we have MARS3D data from 2017 to 2024.
-# Extraction : now no weighted mean compute nor exacte extraction (=/= rio.clip) --> Pauline will try to do it and re-run extractions this week. 
+buff <- buff %>% dplyr::select(-geometry)
 
 
-
-# Weighted mean : for raster extraction in R + exact extraction
-# For Copernicus : all_touched = FALSE rio.clip --> not weighted mean but exact extraction
-
-
-########## CHECKS #########"
-# open ncdf 
-nc <- ncdf4::nc_open("./20220610000000-GOS-L4_GHRSST-SSTfnd-OISST_UHR_NRT-MED-v02.0-fv03.0.nc")
-nc
 
 
 ###### Chlorophyll (1km) ----
@@ -1288,7 +892,7 @@ nc
 # The extraction is made on the ncdf "./data/raw_data/predictors/Chl/cmems_obs-oc_med_bgc-plankton_my_l4-gapfree-multi-1km_P1D_20130101-20250101.nc" with the script 2.2_Extract_NCDF.ipynb in python.
 
 # Load CHL extracted data (.geojson)
-chl <- read.csv("./data/processed_data/predictors/mtdt_5_CHL.csv")
+chl <- read.csv("./data/processed_data/predictors/CHL/mtdt_5_CHL-FULL.csv")
 
 # Check chl values ----
 colnames(chl)
@@ -1309,73 +913,208 @@ for (c in colnames(chl)[-1]) {
 # Detect columns in dist that are not in buff
 extra_cols <- setdiff(names(chl), names(buff))
 
-# left_join keeps all rows in buff and brings matching columns from dist by 'replicates'
+# left_join 
 buff <- buff %>%
-  left_join(chl %>% dplyr::select(replicates, all_of(extra_cols)), by = "replicates")
+  left_join(
+    chl %>% 
+      st_drop_geometry() %>% 
+      dplyr::select(replicates, dplyr::all_of(extra_cols)),
+    by = "replicates"
+  )
 
-rm(chl, extra_cols)
-
-
-
-# Export as gpkg
-st_write(buff2, "./data/processed_data/predictors/mtdt_5_CHL-geom-only.gpkg", delete_dsn = TRUE)
-
-
+rm(chl, extra_cols, c, na_count)
 
 
-# Compare exactextract vs rio.clip data ----
-chl_rio <- read.csv("./data/processed_data/predictors/mtdt_5_CHL.csv")
-chl_ee <- read.csv("./data/processed_data/predictors/mtdt_5_CHL_exactextract.csv")
-colnames(chl_rio)
-colnames(chl_ee)
-
-common_cols <- intersect(colnames(chl_rio), colnames(chl_ee))[-1]  # exclude "replicates"
-
-for (col in common_cols) {
-  correlation <- cor(chl_rio[[col]], chl_ee[[col]], use = "complete.obs", method = "pearson")
-  cat("Correlation between rio.clip and exactextractr for", col, ":", correlation, "\n")
-}
-
-# Results :
-# corr : 0.99077330.98144640.98714470.99423190.98154780.98984130.99572940.97133930.98447660.99740910.91652120.98090670.99691270.92759980.9785911
-# Conclusion : very high correlation. We can keep exactextract extraction. 
 
 
-rm(chl_ee, chl_rio, common_cols, col, correlation)
+
+
+
+
+
+
 
 ###### SST (1km) ----
+# SST data is extracted from Copernicus data :see script 2.2_Extract_NCDF.ipynb for more details.
+
+# Load SST extracted data (.geojson)
+sst <- read.csv("./data/processed_data/predictors/SST/mtdt_5_SST-FULL.csv")
+
+# Check sst values ----
+colnames(sst)
+
+# Hist
+for (c in colnames(sst)[-1]) {
+  hist(sst[[c]], main = paste("Histogram of", c), xlab = c, breaks = 50)
+}
+
+# NA
+for (c in colnames(sst)[-1]) {
+  na_count <- sum(is.na(sst[[c]]))
+  cat("Number of NA in", c, ":", na_count, "\n")
+}
+
+
+# Merge buff and sst by replicates -----
+# Detect columns that are not in buff
+extra_cols <- setdiff(names(sst), names(buff))
+
+# left_join 
+buff <- buff %>%
+  left_join(
+    sst %>% 
+      st_drop_geometry() %>% 
+      dplyr::select(replicates, dplyr::all_of(extra_cols)),
+    by = "replicates"
+  )
+
+rm(sst, extra_cols, c, na_count)
 
 
 
 
-#------------- Check data for homogenous sampling effort ##############
-
-buff <- as.data.frame(buff)
-buff %>%
-  group_by(PCR_replicates) %>%
-  summarise(count = n()) %>%
-  print()
 
 
-buff %>%
-  group_by(estimated_volume_total) %>%
-  summarise(count = n()) %>%
-  print()
-
-buff %>%
-  filter(estimated_volume_total > 55 & estimated_volume_total < 67 & PCR_replicates == 24) %>%
-  dim()
 
 
-summary(buff$area_km2)
-hist(buff$area_km2, breaks = 10)
-sd(buff$area_km2, na.rm = TRUE)
 
 
-buff$area_km2 <- as.numeric(buff$area_km2)
-buff %>%
-  filter(estimated_volume_total > 55 & estimated_volume_total < 67 & PCR_replicates == 24 & area_km2 < 2) %>%
-  dim()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#------------- pMEM [not in v1_0] ------------- 
+----------------
+# Explanation : check Spatially explicit predictions using spatial eigenvector maps ( https://doi.org/10.1111/2041-210X.14413)
+
+# Generate pMEM variables ------
+## 1. Génération des descripteurs spatiaux (pMEM)
+# Générer une métrique de distance (euclidienne ici)
+dist_metric <- pMEM::genDistMetric()  # ou ajouter delta/angle pour asymétrie
+
+# Choisir une fonction de pondération spatiale, ex : "Gaussian"
+dwf <- pMEM::genDWF(fun = "Gaussian", range = 3)  # adapter le range selon l’échelle spatiale
+
+# Prep coords from buff centroids
+coords <- st_centroid(buff) %>%
+  st_coordinates()
+
+coords <- as.matrix(coords[, c("x", "y")])
+
+
+## 2. Générer les eigenvecteurs spatiaux prédictifs (SEMap object)
+sef <- genSEF(x = coords, m = dist_metric, f = dwf)
+
+
+## 3. Extraire les vecteurs propres spatiaux (pMEMs) 
+
+# Convertir en data.frame 
+pMEM_vars <- as.data.frame(sef) # 681 variables added /!\
+
+# Merge ----
+# Detect columns in pMEM_vars that are not in buff
+extra_cols <- setdiff(names(pMEM_vars), names(buff))
+
+# left_join keeps all rows in buff and brings matching columns from dist by 'replicates'
+buff1 <- buff %>%
+  cbind(
+    pMEM_vars %>% 
+      dplyr::select(dplyr::all_of(extra_cols)) 
+  )
+
+
+
+
+rm(pMEM_vars, sef, coords)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#------------- EXPORT PREDICTORS DATA ----------------
+
+# CLEAN UP BUFF -----
+
+x <- buff  
+
+# Clean and uniquify column names in a way that matches GDAL/SQLite expectations
+nm <- names(x)
+nm <- enc2utf8(nm)
+nm <- gsub("[^A-Za-z0-9_]", "_", nm)  # replace punctuation (e.g., dots) with underscore
+nm <- tolower(nm)                     # SQLite is case-insensitive; normalize to lower
+nm <- make.unique(nm, sep = "_")      # ensure uniqueness after normalization
+names(x) <- nm
+
+x <- x %>% mutate(across(c(mpa_fully), as.character))
+
+# Make sure there are no list-cols
+is_listcol <- vapply(x, inherits, logical(1), "list")
+if (any(is_listcol)) {
+  stop("Some columns are list-columns: ", paste(names(x)[is_listcol], collapse=", "),
+       ". Unnest or convert before writing.")
+}
+
+
+
+
+
+
+
+
+
+# Export predictors_raw_v1_0 ----
+
+# predictors_raw_v1_0
+# 06/11/2025. 
+# Based on mtdt_5.gpkg (788 replicates buffers).
+# Predictors (185) :   area_km2, mpa_fully, canyon_dist_m_min, canyon_dist_m_max, canyon_dist_m_mean, canyon_dist_m_range, canyon_dist_m_weight, port_dist_m_min, port_dist_m_max, port_dist_m_mean, port_dist_m_range, port_dist_m_weight, mpa_dist_m_min, mpa_dist_m_max, mpa_dist_m_mean, mpa_dist_m_range, mpa_dist_m_weight, shore_dist_m_min, shore_dist_m_max, shore_dist_m_mean, shore_dist_m_range, shore_dist_m_weight, canyon_objectid, canyon_area_km2, canyon_delta_d, canyon_type, canyon_mean_depth, canyon_length, canyon_width, canyon_canyon_id, canyon_shape_length, canyon_shape_area, port_nomzonepor, port_nomport, mpa_protection, mpa_name, mpa_fully_1, gravity_mean, gravity_min, gravity_max, gravity_range, aspect_min, aspect_max, aspect_mean, roughness_min, roughness_max, roughness_mean, slope_min, slope_max, slope_mean, tpi_min, tpi_max, tpi_mean, tri_min, tri_max, tri_mean, main_habitat, nb_habitat_per_km2, grouped_main_habitat, grouped_nb_habitat_per_km2, matte_morte_p_oceanica_mean, algues_infralittorales_mean, habitats_artificiels_mean, soft_bottom_mean, meadow_mean, rock_mean, coralligenous_mean, bathy_mean, bathy_range, bathy_min, bathy_max, date_x, time_start, depth_sampling_x, depth_seafloor_x, lockdown, biodivmed2023, method, country, region, site, subsite, component, habitat, protection, mpa_name_x, project, tele01, pleo, mamm01, vert01, x16s_metazoa, bact02, euka02, estimated_volume_total, duration_total, comments, mpa_name_y, dist_seabed_depthsampling, date_y, depth_sampling_y, depth_seafloor_y, datetime, day_24h, date_7j, date_1mois, date_1an, wind_min_24h, wind_max_24h, wind_mean_24h, vel_min_24h, vel_max_24h, vel_mean_24h, wind_max_7j, wind_min_7j, wind_mean_7j, vel_max_7j, vel_min_7j, vel_mean_7j, wind_max_1m, wind_min_1m, wind_mean_1m, vel_max_1m, vel_min_1m, vel_mean_1m, ws_max_1y, ws_min_1y, ws_mean_1y, vel_max_1y, vel_min_1y, vel_mean_1y, temp_min_24h, temp_max_24h, temp_mean_24h, sal_min_24h, sal_max_24h, sal_mean_24h, temp_max_7j, temp_min_7j, temp_mean_7j, sal_max_7j, sal_min_7j, sal_mean_7j, temp_max_1m, temp_min_1m, temp_mean_1m, sal_max_1m, sal_min_1m, sal_mean_1m, temp_max_1y, temp_min_1y, temp_mean_1y, sal_max_1y, sal_min_1y, sal_mean_1y, cop_chl_day_mean, cop_chl_day_min, cop_chl_day_max, cop_chl_week_mean, cop_chl_week_min, cop_chl_week_max, cop_chl_month_mean, cop_chl_month_min, cop_chl_month_max, cop_chl_year_mean, cop_chl_year_min, cop_chl_year_max, cop_chl_5years_mean, cop_chl_5years_min, cop_chl_5years_max, cop_analysed_sst_day_mean, cop_analysed_sst_day_min, cop_analysed_sst_day_max, cop_analysed_sst_week_mean, cop_analysed_sst_week_min, cop_analysed_sst_week_max, cop_analysed_sst_month_mean, cop_analysed_sst_month_min, cop_analysed_sst_month_max, cop_analysed_sst_year_mean, cop_analysed_sst_year_min, cop_analysed_sst_year_max, cop_analysed_sst_5years_mean, cop_analysed_sst_5years_min, cop_analysed_sst_5years_max, x, y
+cat(colnames(x), sep = ", ")
+
+
+# Ensure file is not locked; remove it before writing
+gpkg_path <- "./data/processed_data/predictors/predictors_raw_v1_0.gpkg"
+layer_name <- "predictors_raw_v1_0"
+if (file.exists(gpkg_path)) unlink(gpkg_path)
+
+st_write(x, dsn = gpkg_path, layer = layer_name, driver = "GPKG", append = FALSE)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
