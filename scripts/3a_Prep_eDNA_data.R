@@ -125,72 +125,184 @@ separated_species[separated_species %in% colnames(occ)] # "Centrolabrus melanoce
 
 
 # Resolve complexes -----
+
+# v1.0 -----
+# 
+# occ <- occ %>%
+#   
+#   
+#   ##--- 1. Species complex to delete (1 complex):
+#   dplyr::select(-c("Coptodon_rendalli.Oreochromis_niloticus", # Both african fish that can be introduced in the Med. Common subfamily : Pseudocrenilabrinae. Oreochromis niloticus is in the traits db while Coptodon rendalli is not. --> DELETE 
+#   )) %>%
+# 
+# rename(
+#   
+#   
+#   ##--- 2. Species where geographical distributions help to choose (5 complexes):
+#   
+#   "Cheilopogon_heterurus" = "Cheilopogon_heterurus.Hirundichthys_speculiger", # Hirundichthys speculiger mostly found in tropical open water while Cheilopogon heterurus is a mediterranean fish.  (https://fishbase.se/summary/1029 and https://fishbase.se/summary/Hirundichthys-speculiger) --> KEEP Cheilopogon heterurus
+#   "Trachurus_mediterraneus" = "Trachurus_mediterraneus.Trachurus_trachurus", # This complex is present in 56% of the 2018-2024 samples detected on average on 4 PCR replicates (when present). Thus most probably Trachurus mediterraneus which is a least concerned fish that can widely spread in the Mediterranean sea (https://www.fishbase.se/summary/trachurus-mediterraneus) while Trachurus trachurus is a mostly atlantic species + is vulnerable (https://www.fishbase.se/summary/Trachurus-trachurus.html) --> KEEP Trachurus mediterraneus
+#   "Trisopterus_capelanus" = "Trisopterus_capelanus.Trisopterus_minutus", # Trisopterus minutus is not present in the Mediterranean sea (https://www.fishbase.se/summary/trisopterus-minutus) while Trisopterus capelanu is a mediterranean species (https://fishbase.se/summary/Trisopterus-capelanus.html) --> KEEP Trisopterus capelanus
+#   "Notoscopelus_elongatus" = "Notoscopelus_elongatus.Notoscopelus_kroyeri", # Notoscopelus kroyeri is endemic to the Atlantic sea (https://www.fishbase.se/summary/Notoscopelus-kroyeri) and Notoscopelus elongatus is found in the Mediterranean sea (https://fishbase.se/summary/841) --> KEEP Notoscopelus elongatus
+#   "Sphyraena_sphyraena" = "Sphyraena_chrysotaenia.Sphyraena_sphyraena", # Sphyraena chrysotaenia can be found in the Med as a Lessepsian migrant while Sphyraena sphyraena is commonly found in the Med (https://fishbase.se/Summary/SpeciesSummary.php?id=16905&lang=french and https://www.fishbase.se/summary/sphyraena-sphyraena) --> KEEP Sphyraena sphyraena
+#   
+#   
+#   ##--- 3. All species found in Med : keep closest common taxo level (8 complexes):
+# 
+# 
+#   
+#   "Parablennius_sp_1" = "Parablennius_tentacularis.Parablennius_zvonimiri", # Both can be found in our study area -->  Parablennius sp.
+#   "Parablennius_sp_2" = "Parablennius_incognitus.Parablennius_sanguinolentus", # Both can be found in our study area -->  Parablennius sp.
+#   "Gaidropsarus_sp" = "Gaidropsarus_biscayensis.Gaidropsarus_vulgaris", # Both can be found in our study area (https://www.fishbase.se/summary/1877 and https://doris.ffessm.fr/Especes/Gaidropsarus-vulgaris-Motelle-commune-2699) --->  Gaidropsarus sp.
+#   "Triglinae_sp" = "Chelidonichthys_lucerna.Lepidotrigla_dieuzeidei", # Both can be found in our study area (https://www.fishbase.se/summary/Chelidonichthys-lucerna.html and https://www.fishbase.se/summary/Lepidotrigla-dieuzeidei) -->  Triglinae sp.
+#   "Chelidonichthys_sp" = "Chelidonichthys_obscurus.Chelidonichthys_lastoviza", # Both can be found in our study area (fishbase) -->  Chelidonichthys sp.
+#   "Triglinae_sp_1" = "Eutrigla_gurnardus.Trigla_lyra", # Both can be found in our study area (fishbase) -->  Triglinae sp.
+#   "Sparidae_sp_2" = "Dentex_dentex.Pagrus_auriga.Pagrus_pagrus", # All 3 can be found in our study area (fishbase) -->  Sparidae sp.
+#   "Raja_sp" = "Raja_asterias.Raja_clavata.Raja_polystigma" # All 3 can be found in our study area (fishbase) -->  Raja sp.
+# ) 
+# 
+# 
+# 
+# 
+# # Those where I don't know what to do : (checked with reference data base on how they were detected)
+# # "Labrus merula.Labrus viridis", # also present in the complex Labrus merula.Labrus viridis.Centrolabrus melanocercus --> ??
+# # "Labrus merula.Labrus viridis.Centrolabrus melanocercus", # Centrolabrus melanocercus also present alone. Detected both alone and in the complex with MED_2025.  
+# # "Spicara flexuosum.Spicara smaris", # Spicara smaris also present alone. Detected both alone and in the complex with MED_2025.
+# # "Argyrosomus regius.Umbrina cirrosa", # Umbrina cirrosa also present alone. Detected alone with GenBank MIDORI_v264 and in the complex by MED_2025.
+# 
+# 
+# # Compare detections
+# # "Spicara flexuosum.Spicara smaris" and "Spicara smaris"
+# t <- occ
+# 
+# t <- t %>%
+#   mutate(match = ifelse(
+#     (`Spicara_flexuosum.Spicara_smaris` == 1 & Spicara_smaris == 1) |
+#       (`Spicara_flexuosum.Spicara_smaris` == 0 & Spicara_smaris == 0),
+#     TRUE,
+#     FALSE
+#   ))
+# 
+# t$match %>% table() 
+# t$Spicara_smaris %>% table()
+# t$Spicara_flexuosum.Spicara_smaris %>% table()
+# 
+# rm(t)
+# 
+# # [Temporary decision : remove complexes where one of the species is also present alone] 
+# occ <- occ %>%
+#   dplyr::select(-c("Labrus_merula.Labrus_viridis",
+#                    "Labrus_merula.Labrus_viridis.Centrolabrus_melanocercus",
+#                    "Spicara_flexuosum.Spicara_smaris",
+#                    "Argyrosomus_regius.Umbrina_cirrosa"
+#   ))
+# 
+# 
+# 
+# 
+# 
+# 
+
+# v1.1 ----
+
 occ <- occ %>%
   
   
-  ##--- 1. Species complex to delete :
+  ##--- 1. Species complex to delete (1 complex) :
   dplyr::select(-c("Coptodon_rendalli.Oreochromis_niloticus", # Both african fish that can be introduced in the Med. Common subfamily : Pseudocrenilabrinae. Oreochromis niloticus is in the traits db while Coptodon rendalli is not. --> DELETE 
   )) %>%
+  
+  rename(
+    
+    
+    ##--- 2. Species where geographical distributions help to choose (5 complexes) :
+    
+    "Cheilopogon_heterurus" = "Cheilopogon_heterurus.Hirundichthys_speculiger", # Hirundichthys speculiger mostly found in tropical open water while Cheilopogon heterurus is a mediterranean fish.  (https://fishbase.se/summary/1029 and https://fishbase.se/summary/Hirundichthys-speculiger) --> KEEP Cheilopogon heterurus
+    "Trachurus_mediterraneus" = "Trachurus_mediterraneus.Trachurus_trachurus", # This complex is present in 56% of the 2018-2024 samples detected on average on 4 PCR replicates (when present). Thus most probably Trachurus mediterraneus which is a least concerned fish that can widely spread in the Mediterranean sea (https://www.fishbase.se/summary/trachurus-mediterraneus) while Trachurus trachurus is a mostly atlantic species + is vulnerable (https://www.fishbase.se/summary/Trachurus-trachurus.html) --> KEEP Trachurus mediterraneus
+    "Trisopterus_capelanus" = "Trisopterus_capelanus.Trisopterus_minutus", # Trisopterus minutus is not present in the Mediterranean sea (https://www.fishbase.se/summary/trisopterus-minutus) while Trisopterus capelanu is a mediterranean species (https://fishbase.se/summary/Trisopterus-capelanus.html) --> KEEP Trisopterus capelanus
+    "Notoscopelus_elongatus" = "Notoscopelus_elongatus.Notoscopelus_kroyeri", # Notoscopelus kroyeri is endemic to the Atlantic sea (https://www.fishbase.se/summary/Notoscopelus-kroyeri) and Notoscopelus elongatus is found in the Mediterranean sea (https://fishbase.se/summary/841) --> KEEP Notoscopelus elongatus
+    "Sphyraena_sphyraena" = "Sphyraena_chrysotaenia.Sphyraena_sphyraena", # Sphyraena chrysotaenia can be found in the Med as a Lessepsian migrant while Sphyraena sphyraena is commonly found in the Med (https://fishbase.se/Summary/SpeciesSummary.php?id=16905&lang=french and https://www.fishbase.se/summary/sphyraena-sphyraena) --> KEEP Sphyraena sphyraena
+    
+    
+    ##--- 3. All species found in Med : keep as compex (8 complexes) :
+    
+    
+    
+    "Parablennius_tentacularis.Parablennius_zvonimiri" = "Parablennius_tentacularis.Parablennius_zvonimiri", # Both can be found in our study area -->  Parablennius sp.
+    "Parablennius_incognitus.Parablennius_sanguinolentus" = "Parablennius_incognitus.Parablennius_sanguinolentus", # Both can be found in our study area -->  Parablennius sp.
+    "Gaidropsarus_biscayensis.Gaidropsarus_vulgaris" = "Gaidropsarus_biscayensis.Gaidropsarus_vulgaris", # Both can be found in our study area (https://www.fishbase.se/summary/1877 and https://doris.ffessm.fr/Especes/Gaidropsarus-vulgaris-Motelle-commune-2699) --->  Gaidropsarus sp.
+    "Chelidonichthys_lucerna.Lepidotrigla_dieuzeidei" = "Chelidonichthys_lucerna.Lepidotrigla_dieuzeidei", # Both can be found in our study area (https://www.fishbase.se/summary/Chelidonichthys-lucerna.html and https://www.fishbase.se/summary/Lepidotrigla-dieuzeidei) -->  Triglinae sp.
+    "Chelidonichthys_obscurus.Chelidonichthys_lastoviza" = "Chelidonichthys_obscurus.Chelidonichthys_lastoviza", # Both can be found in our study area (fishbase) -->  Chelidonichthys sp.
+    "Eutrigla_gurnardus.Trigla_lyra" = "Eutrigla_gurnardus.Trigla_lyra", # Both can be found in our study area (fishbase) -->  Triglinae sp.
+    "Dentex_dentex.Pagrus_auriga.Pagrus_pagrus" = "Dentex_dentex.Pagrus_auriga.Pagrus_pagrus", # All 3 can be found in our study area (fishbase) -->  Sparidae sp.
+    "Raja_asterias.Raja_clavata.Raja_polystigma" = "Raja_asterias.Raja_clavata.Raja_polystigma" # All 3 can be found in our study area (fishbase) -->  Raja sp.
+  ) %>% 
 
-rename(
+
+    ##--- 4. Complexes where one of the species is also present alones : merge detections and keep as complex (2 complexes) :
+  mutate(
+    "Spicara_flexuosum.Spicara_smaris" = ifelse(Spicara_flexuosum.Spicara_smaris == 1 | Spicara_smaris == 1, 1, 0),
+    "Argyrosomus_regius.Umbrina_cirrosa" = ifelse(Argyrosomus_regius.Umbrina_cirrosa == 1 | Umbrina_cirrosa == 1, 1, 0)
+    
+    )%>%
+  dplyr::select(-c(Umbrina_cirrosa,
+                   Spicara_smaris)) %>%
+  
+  ##--- 5. Labrus merula.Labrus viridis | Labrus merula.Labrus_viridis.Centrolabrus_melanocercus | Centrolabrus_melanocercus : delete Labrus merula.Labrus viridis.Centrolabrus melanocercus  :
+  dplyr::select(-c("Labrus_merula.Labrus_viridis.Centrolabrus_melanocercus"))
+    
+    
+    
+# Make the same in pcr grid ----  
+  
+pcr <- pcr %>%
   
   
-  ##--- 2. Species where geographical distributions help to choose :
+  ##--- 1. Species complex to delete (1 complex) :
+  dplyr::select(-c("Coptodon_rendalli.Oreochromis_niloticus",  
+  )) %>%
   
-  "Cheilopogon_heterurus" = "Cheilopogon_heterurus.Hirundichthys_speculiger", # Hirundichthys speculiger mostly found in tropical open water while Cheilopogon heterurus is a mediterranean fish.  (https://fishbase.se/summary/1029 and https://fishbase.se/summary/Hirundichthys-speculiger) --> KEEP Cheilopogon heterurus
-  "Trachurus_mediterraneus" = "Trachurus_mediterraneus.Trachurus_trachurus", # This complex is present in 56% of the 2018-2024 samples detected on average on 4 PCR replicates (when present). Thus most probably Trachurus mediterraneus which is a least concerned fish that can widely spread in the Mediterranean sea (https://www.fishbase.se/summary/trachurus-mediterraneus) while Trachurus trachurus is a mostly atlantic species + is vulnerable (https://www.fishbase.se/summary/Trachurus-trachurus.html) --> KEEP Trachurus mediterraneus
-  "Trisopterus_capelanus" = "Trisopterus_capelanus.Trisopterus_minutus", # Trisopterus minutus is not present in the Mediterranean sea (https://www.fishbase.se/summary/trisopterus-minutus) while Trisopterus capelanu is a mediterranean species (https://fishbase.se/summary/Trisopterus-capelanus.html) --> KEEP Trisopterus capelanus
-  "Notoscopelus_elongatus" = "Notoscopelus_elongatus.Notoscopelus_kroyeri", # Notoscopelus kroyeri is endemic to the Atlantic sea (https://www.fishbase.se/summary/Notoscopelus-kroyeri) and Notoscopelus elongatus is found in the Mediterranean sea (https://fishbase.se/summary/841) --> KEEP Notoscopelus elongatus
-  "Sphyraena_sphyraena" = "Sphyraena_chrysotaenia.Sphyraena_sphyraena", # Sphyraena chrysotaenia can be found in the Med as a Lessepsian migrant while Sphyraena sphyraena is commonly found in the Med (https://fishbase.se/Summary/SpeciesSummary.php?id=16905&lang=french and https://www.fishbase.se/summary/sphyraena-sphyraena) --> KEEP Sphyraena sphyraena
+  rename(
+    
+    
+    ##--- 2. Species where geographical distributions help to choose (5 complexes) :
+    
+    "Cheilopogon_heterurus" = "Cheilopogon_heterurus.Hirundichthys_speculiger",
+    "Trachurus_mediterraneus" = "Trachurus_mediterraneus.Trachurus_trachurus", 
+    "Trisopterus_capelanus" = "Trisopterus_capelanus.Trisopterus_minutus", 
+    "Notoscopelus_elongatus" = "Notoscopelus_elongatus.Notoscopelus_kroyeri", 
+    "Sphyraena_sphyraena" = "Sphyraena_chrysotaenia.Sphyraena_sphyraena", 
+    
+    ##--- 3. All species found in Med : keep as compex (8 complexes) :
+    
+    
+    
+    "Parablennius_tentacularis.Parablennius_zvonimiri" = "Parablennius_tentacularis.Parablennius_zvonimiri", 
+    "Parablennius_incognitus.Parablennius_sanguinolentus" = "Parablennius_incognitus.Parablennius_sanguinolentus", 
+    "Gaidropsarus_biscayensis.Gaidropsarus_vulgaris" = "Gaidropsarus_biscayensis.Gaidropsarus_vulgaris", 
+    "Chelidonichthys_lucerna.Lepidotrigla_dieuzeidei" = "Chelidonichthys_lucerna.Lepidotrigla_dieuzeidei", 
+    "Chelidonichthys_obscurus.Chelidonichthys_lastoviza" = "Chelidonichthys_obscurus.Chelidonichthys_lastoviza", 
+    "Eutrigla_gurnardus.Trigla_lyra" = "Eutrigla_gurnardus.Trigla_lyra", 
+    "Dentex_dentex.Pagrus_auriga.Pagrus_pagrus" = "Dentex_dentex.Pagrus_auriga.Pagrus_pagrus", 
+    "Raja_asterias.Raja_clavata.Raja_polystigma" = "Raja_asterias.Raja_clavata.Raja_polystigma" 
+  ) %>% 
   
   
-  ##--- 3. All species found in Med : keep closest common taxo
+  ##--- 4. Complexes where one of the species is also present alones : merge detections and keep as complex (2 complexes) :
+  mutate(
+    "Spicara_flexuosum.Spicara_smaris" = ifelse(Spicara_flexuosum.Spicara_smaris == 1 | Spicara_smaris == 1, 1, 0),
+    "Argyrosomus_regius.Umbrina_cirrosa" = ifelse(Argyrosomus_regius.Umbrina_cirrosa == 1 | Umbrina_cirrosa == 1, 1, 0)
+    
+  )%>%
+  dplyr::select(-c(Umbrina_cirrosa,
+                   Spicara_smaris)) %>%
   
-  "Parablennius_sp_1" = "Parablennius_tentacularis.Parablennius_zvonimiri", # Both can be found in our study area -->  Parablennius sp.
-  "Parablennius_sp_2" = "Parablennius_incognitus.Parablennius_sanguinolentus", # Both can be found in our study area -->  Parablennius sp.
-  "Gaidropsarus_sp" = "Gaidropsarus_biscayensis.Gaidropsarus_vulgaris", # Both can be found in our study area (https://www.fishbase.se/summary/1877 and https://doris.ffessm.fr/Especes/Gaidropsarus-vulgaris-Motelle-commune-2699) --->  Gaidropsarus sp.
-  "Triglinae_sp" = "Chelidonichthys_lucerna.Lepidotrigla_dieuzeidei", # Both can be found in our study area (https://www.fishbase.se/summary/Chelidonichthys-lucerna.html and https://www.fishbase.se/summary/Lepidotrigla-dieuzeidei) -->  Triglinae sp.
-  "Chelidonichthys_sp" = "Chelidonichthys_obscurus.Chelidonichthys_lastoviza", # Both can be found in our study area (fishbase) -->  Chelidonichthys sp.
-  "Triglinae_sp_1" = "Eutrigla_gurnardus.Trigla_lyra", # Both can be found in our study area (fishbase) -->  Triglinae sp.
-  "Sparidae_sp_2" = "Dentex_dentex.Pagrus_auriga.Pagrus_pagrus", # All 3 can be found in our study area (fishbase) -->  Sparidae sp.
-  "Raja_sp" = "Raja_asterias.Raja_clavata.Raja_polystigma" # All 3 can be found in our study area (fishbase) -->  Raja sp.
-) 
+  ##--- 5. Labrus merula.Labrus viridis | Labrus merula.Labrus_viridis.Centrolabrus_melanocercus | Centrolabrus_melanocercus : delete Labrus merula.Labrus viridis.Centrolabrus melanocercus  :
+  dplyr::select(-c("Labrus_merula.Labrus_viridis.Centrolabrus_melanocercus"))
 
 
 
 
-# Those where I don't know what to do : (checked with reference data base on how they were detected)
-# "Labrus merula.Labrus viridis", # also present in the complex Labrus merula.Labrus viridis.Centrolabrus melanocercus --> ??
-# "Labrus merula.Labrus viridis.Centrolabrus melanocercus", # Centrolabrus melanocercus also present alone. Detected both alone and in the complex with MED_2025.  
-# "Spicara flexuosum.Spicara smaris", # Spicara smaris also present alone. Detected both alone and in the complex with MED_2025.
-# "Argyrosomus regius.Umbrina cirrosa", # Umbrina cirrosa also present alone. Detected alone with GenBank MIDORI_v264 and in the complex by MED_2025.
-
-
-# Compare detections
-# "Spicara flexuosum.Spicara smaris" and "Spicara smaris"
-t <- occ
-
-t <- t %>%
-  mutate(match = ifelse(
-    (`Spicara_flexuosum.Spicara_smaris` == 1 & Spicara_smaris == 1) |
-      (`Spicara_flexuosum.Spicara_smaris` == 0 & Spicara_smaris == 0),
-    TRUE,
-    FALSE
-  ))
-
-t$match %>% table() 
-t$Spicara_smaris %>% table()
-t$Spicara_flexuosum.Spicara_smaris %>% table()
-
-rm(t)
-
-# [Temporary decision : remove complexes where one of the species is also present alone] ----
-occ <- occ %>%
-  dplyr::select(-c("Labrus_merula.Labrus_viridis",
-                   "Labrus_merula.Labrus_viridis.Centrolabrus_melanocercus",
-                   "Spicara_flexuosum.Spicara_smaris",
-                   "Argyrosomus_regius.Umbrina_cirrosa"
-  ))
 
 #------------- PREP DATA ----------------
 # CHECKS : Compare spygen_codes in occ and mtdt ---- ----
@@ -503,7 +615,7 @@ print(length(undetected))  # 20 undetected species
 print(undetected) #  6 chondrychtyens + 14 osteichthyens
 
 # Remove undetected species
-occ_pooled <- occ_pooled[, !colnames(occ_pooled) %in% undetected] # 242 species left
+occ_pooled <- occ_pooled[, !colnames(occ_pooled) %in% undetected] # 237 species left
 occ_f_incertitude <- occ_f_incertitude[, !colnames(occ_f_incertitude) %in% undetected]
 occ_pcr_incertitude <- occ_pcr_incertitude[, !colnames(occ_pcr_incertitude) %in% undetected]
 
@@ -521,10 +633,17 @@ rm(res)
 
 
 #------------- EXPORT POOLED DATA ----------------------
+# v1.0 ----
 write.csv(occ_pooled, "./data/processed_data/eDNA/occ_pooled_v1.0.csv", row.names = FALSE)
 write.csv(occ_f_incertitude, "./data/processed_data/eDNA/occ_f_incertitude_pooled_v1.0.csv", row.names = FALSE)
 write.csv(occ_pcr_incertitude, "./data/processed_data/eDNA/occ_pcr_incertitude_pooled_v1.0.csv", row.names = FALSE)
 
+# v1.1 :  ----
+# handling complex differently
+
+write.csv(occ_pooled, "./data/processed_data/eDNA/occ_pooled_v1.1.csv", row.names = FALSE)
+write.csv(occ_f_incertitude, "./data/processed_data/eDNA/occ_f_incertitude_pooled_v1.1.csv", row.names = FALSE)
+write.csv(occ_pcr_incertitude, "./data/processed_data/eDNA/occ_pcr_incertitude_pooled_v1.1.csv", row.names = FALSE)
 
 
 #------------- EXPORT MODIFIED MTDT ----------------------

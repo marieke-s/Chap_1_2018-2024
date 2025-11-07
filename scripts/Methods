@@ -91,7 +91,7 @@ Full replicate-level dataset: geometry, harmonized metadata, plus totals (estima
 
 
 
-2_Extraction_Predictors.R ------------------------------------------------------------------------------ 
+2_Prep_Predictors.R ------------------------------------------------------------------------------ 
 
 
 
@@ -173,11 +173,21 @@ Temporal resolutions: monthly and daily (for "gap-free" and climatology data)
 
 
 
+3_Prep_eDNA.R ------------------------------------------------------------------------------ 
+Important methodo consideration : 
+
+Complex handling : 
+
+We have 18 complexes. 
+
+1 was deleted because both species were freshwater species.
+In 5 complexes only 1 species was kept because its geographical distribution was mediterranean while the other's were not. 
+In 8 complexes were all species could be mediterranean we keep them as a complex. 
+In 2 complexes one of the species was also found alone (different halotype). The detections of the species alone and the complexe are merged and we keep them as a complex.
+In 2 complexes : Labrus merula.Labrus viridis | Labrus merula.Labrus_viridis.Centrolabrus_melanocercus | Centrolabrus_melanocercus : delete Labrus merula.Labrus viridis.Centrolabrus melanocercus
 
 
-
-
-
+In the end we have 11 complexe left 
 
 
 

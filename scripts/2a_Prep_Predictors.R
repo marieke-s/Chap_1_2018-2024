@@ -994,6 +994,8 @@ rm(sst, extra_cols, c, na_count)
 
 
 
+
+
 #------------- pMEM [not in v1_0] ------------- 
 ----------------
 # Explanation : check Spatially explicit predictions using spatial eigenvector maps ( https://doi.org/10.1111/2041-210X.14413)
@@ -1037,6 +1039,8 @@ buff1 <- buff %>%
 
 
 rm(pMEM_vars, sef, coords)
+
+
 
 
 
@@ -1099,6 +1103,15 @@ if (file.exists(gpkg_path)) unlink(gpkg_path)
 
 st_write(x, dsn = gpkg_path, layer = layer_name, driver = "GPKG", append = FALSE)
 
+
+
+dt <- st_read("./data/processed_data/predictors/predictors_raw_v1_0.gpkg")
+
+
+colnames(dt)
+
+hist(dt$area_km2, breaks = 50)
+summary(dt$area_km2)
 
 
 

@@ -384,64 +384,6 @@ plot_species_rarity <- function(df,
 }
 
 #---------------------------------- Function to plot hist + summary --------------------
-# Function: ggplot histogram with full summary (vector or data frame column)
-gg_hist_summary <- function(x, col_name = NULL, bins = 50, 
-                            fill_low = "#80ffdb", fill_high = "#03045e") {
-  library(ggplot2)
-  
-  # If input is a data frame + col_name
-  if (is.data.frame(x)) {
-    if (is.null(col_name)) stop("Please provide 'col_name' when passing a data frame")
-    if (!col_name %in% names(x)) stop("Column not found in data frame")
-    vec <- as.numeric(x[[col_name]])
-    plot_title <- paste("Distribution of", col_name)
-    x_label <- col_name
-  } else {
-    # If input is a numeric vector
-    vec <- as.numeric(x)
-    plot_title <- "Distribution"
-    x_label <- "Values"
-  }
-  
-  # Remove NAs
-  vec <- vec[!is.na(vec)]
-  
-  # Compute summary statistics
-  mean_val <- mean(vec)
-  sd_val <- sd(vec)
-  median_val <- median(vec)
-  min_val <- min(vec)
-  max_val <- max(vec)
-  n_val <- length(vec)
-  
-  # Prepare summary text
-  summary_text <- paste0(
-    "Mean: ", round(mean_val, 2), 
-    "\nSD: ", round(sd_val, 2),
-    "\nMedian: ", round(median_val, 2),
-    "\nMin: ", round(min_val, 2),
-    "\nMax: ", round(max_val, 2),
-    "\nN: ", n_val
-  )
-  
-  # Determine position for annotation (top-right with margin)
-  x_pos <- max(vec, na.rm = TRUE)
-  y_pos <- max(hist(vec, plot = FALSE)$density)  # use density scale
-  y_pos <- y_pos * 0.95  # slightly below top
-  
-  # Build histogram
-  hist_plot <- ggplot(data.frame(vec = vec), aes(x = vec)) +
-    geom_histogram(aes(y = ..density.., fill = ..density..), 
-                   bins = bins, color = "black", linewidth = 0.01) +
-    scale_fill_gradient(low = fill_low, high = fill_high) +
-    ggtitle(plot_title) +
-    xlab(x_label) + ylab("Density") +
-    theme_minimal() +
-    annotate("text", x = x_pos, y = y_pos, label = summary_text,
-             hjust = 1, vjust = 1, size = 4, color = "black")
-  
-  return(hist_plot)
-}
 gg_hist_summary <- function(x, col_name = NULL, bins = 50, 
                             fill_low = "#80ffdb", fill_high = "#03045e") {
   library(ggplot2)
@@ -492,21 +434,25 @@ gg_hist_summary <- function(x, col_name = NULL, bins = 50,
   
   # Determine annotation position
   x_pos <- max(vec, na.rm = TRUE)
-  y_pos <- max(hist(vec, plot = FALSE)$density) * 0.95
+  y_pos <- max(hist(vec, plot = FALSE)$counts) * 0.95
   
-  # Build plot
+  # Build plot (using counts/frequency)
   hist_plot <- ggplot(data.frame(x = vec), aes(x = x)) +
-    geom_histogram(aes(y = ..density.., fill = ..density..), 
+    geom_histogram(aes(y = ..count.., fill = ..count..), 
                    bins = bins, color = "black", linewidth = 0.01) +
     scale_fill_gradient(low = fill_low, high = fill_high) +
     ggtitle(plot_title) +
-    xlab(x_label) + ylab("Density") +
+    xlab(x_label) + ylab("Frequency") +
     theme_minimal() +
     annotate("text", x = x_pos, y = y_pos, label = summary_text,
              hjust = 1, vjust = 1, size = 4, color = "black")
   
   return(hist_plot)
 }
+
+
+
+
 #---------------------------------- Function to order spygen_code increasingly --------------------
 
 reorder_spygen_codes <- function(x) {
