@@ -452,13 +452,15 @@ traits <- read.csv("./data/processed_data/Traits/species_traits_NA-resolved_v1.0
 
 #------------- Biodiversity indicators ---------
 
-# Number of indicators
-n_indicators <- 11
+#### Setup ####
+
+# Number of cols
+n_cols <- 11
 
 # Create indicator matrix
-indicators <- matrix(NA, nrow(presence), n_indicators,
+indicators <- matrix(NA, nrow(presence), n_cols,
                      dimnames = list(rownames(presence),
-                                     c("code_spygen",
+                                     c("replicates",
                                        "R", 
                                        "Crypto",     # Number of Cryptobenthic species
                                        "Elasmo",     # Number of Elasmobranch species
@@ -466,15 +468,15 @@ indicators <- matrix(NA, nrow(presence), n_indicators,
                                        "RedList",    # IUCN
                                        "LRFI",       # Large Fish Species
                                        "TopPred",    # Trophic
-                                       "Vulner",     # Vulnerable
                                        "Commercial", # Commercial and Highly commercial species (Importance)
-                                       "Grouper"    # Epinephelus marginatus (0/1)
+                                       "Grouper",    # Epinephelus marginatus (0/1)
+                                       "AngelShark" # Squatina squatina (0/1)
                                      )))             
 
 
 indicators[,1] <- presence %>% pull(replicates)
 
-rm(n_indicators)
+rm(n_cols)
 
 #### 1  - Species richness - R ####
 
@@ -644,8 +646,10 @@ summary(factor(indicators[,"Grouper"]))
 
 
 
+#### 13 - AngelShark ####
 
-
+indicators[, "AngelShark"] <- ifelse(presence$`Squatina squatina` != 0, 1, 0)
+summary(factor(indicators[,"AngelShark"]))
 
 #### Export results ####
 
@@ -653,27 +657,27 @@ summary(factor(indicators[,"Grouper"]))
 indicators <- indicators %>% 
   data.frame(.) %>% 
   tibble::rownames_to_column(var = "ID") %>% 
-  dplyr::select(-ID) %>%
-  rename(replicates = code_spygen)
+  dplyr::select(-ID) 
 
 
 # v1.0 ----
 # Based on occ_pooled_v1.1 and species_traits_NA-resolved_v1.0.csv (MO traits 2023 extracted by Ulysse)
-# 10 Div indices : "R"          "Crypto"     "Elasmo"     "DeBRa"      "RedList"    "LRFI"       "TopPred" "Vulner"     "Commercial" "Grouper"   
+# 9 Div indices : "R"          "Crypto"     "Elasmo"     "DeBRa"      "RedList"    "LRFI"       "TopPred"    "Commercial" "Grouper"   "AngelShark"
 write.table(indicators, "./data/processed_data/Traits/div_indices_v1.0.csv", row.names = F, dec = ".", sep = ";")
 
 
 
 
 #---------- CHECKS OF DIV INDICES --------------
-# Load data
+# Load data ----
 indicators <- read.csv("./data/processed_data/Traits/div_indices_v1.0.csv", sep = ";", header=T)
+
 # Check NAs for each column ----
 sapply(indicators, function(x) sum(is.na(x))) 
 
 # Plots ----
 
-# Hist + summary
+# Hist + summary ----
 
 ## Make a numeric copy of indicators (except 'replicates')
 indicators_num <- indicators %>%
@@ -744,13 +748,19 @@ for (col_name in names(plots_list)) {
   message("Saved: ", file_path)
 }
 
-# Map indices [ TO DO : issue with coords formart !! ]----
+
+
+
+rm(plots_list, indicators_num, cols_to_plot, col_name, file_name, file_path, output_dir, version)
+
+# Map indices ----
 
 # Add coordinates to indicators
-coords <- sf::st_read("./data/processed_data/predictors/predictors_raw_v1_0.gpkg") %>%
+coords <- sf::st_read("./data/processed_data/predictors/predictors_raw_v1.1.gpkg") %>%
   dplyr::select(c(x,y,replicates)) %>%
   st_drop_geometry() %>%
-  left_join(indicators, by = "replicates")
+  left_join(indicators, by = "replicates") %>%
+  filter(replicates %in% indicators$replicates)
 
 indicators <- coords
 rm(coords)
@@ -759,8 +769,10 @@ rm(coords)
 world <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
 
 # List of indices columns 
-colnames(indicators)
-index_columns <- names(indicators)[2:10]  # Select the column names for the indices
+index_columns <- indicators %>%
+  dplyr::select(-c(replicates, x, y)) %>%
+  colnames()
+
 
 # Specify the output directory to save the maps
 output_directory <- "./figures/Div_indices/Maps/"
@@ -768,42 +780,70 @@ output_directory <- "./figures/Div_indices/Maps/"
 # Loop over each index column to create the map + frequency distribution 
 for (col_name in index_columns) {
   
-  # Calculate the mean and standard deviation for the current index
+  # Calculate stats for the current indicator column
   mean_val <- mean(indicators[[col_name]], na.rm = TRUE)
-  sd_val <- sd(indicators[[col_name]], na.rm = TRUE)
+  sd_val   <- sd(indicators[[col_name]], na.rm = TRUE)
+  n_samp   <- sum(!is.na(indicators[[col_name]]))
   
-  # Create a ggplot map for each indicatorsex column
+  # Map for each indicator column
   map_plot <- ggplot() +
-    geom_sf(data = world, fill = "white", color = "lightblue") +  # Add the background world map
-    geom_point(data = indicators, aes(x = x, y = y, color = !!sym(col_name)), size = 2) + 
-    scale_color_gradient(low = "yellow", high = "red") +  # Color gradient 
-    ggtitle(paste("Map of", col_name)) +  # Title of the map 
-    xlab("Longitude") + ylab("Latitude") +  # Axis labels
-    coord_sf(xlim = c(min(indicators$x) - 0.1, max(indicators$x) + 0.0),
-             ylim = c(min(indicators$y) -0, max(indicators$y) + 0.0)) +  # Set map limits based on your data
-    theme_test() +  # Theme for the plot
-    theme(panel.background = element_rect(fill = "#e0edff"))  # Set the background of the map
+    geom_sf(data = world, fill = "white", color = "lightblue") +  # Background world map
+    geom_point(
+      data = indicators,
+      aes(x = x, y = y, color = !!sym(col_name)),
+      size = 1, alpha = 0.8
+    ) +
+    scale_color_gradient(low = "yellow", high = "red") +          # Color gradient
+    ggtitle(paste("Map of", col_name)) +                          # Title
+    xlab("Longitude") + ylab("Latitude") +                        # Axis labels
+    coord_sf(
+      xlim = c(min(indicators$x, na.rm = TRUE) - 0.1,
+               max(indicators$x, na.rm = TRUE) + 0.0),
+      ylim = c(min(indicators$y, na.rm = TRUE) - 0.0,
+               max(indicators$y, na.rm = TRUE) + 0.0)
+    ) +                                                           # Map limits
+    theme_test() +                                                # Theme
+    theme(panel.background = element_rect(fill = "#e0edff"))      # Panel background
   
-  # Create a histogram of the current indicatorsex column with mean and SD annotated
+  # Histogram (using Frequency instead of Density)
   hist_plot <- ggplot(indicators, aes(x = !!sym(col_name))) +
-    geom_histogram(aes(y = ..density.., fill = ..density..), 
-                   bins = 50, color = "black", linewidth = 0.01) +  # Histogram 
-    scale_fill_gradient(low = "#80ffdb", high = "#03045e") + 
-    ggtitle(paste("Distribution of", col_name)) +  # Title of the histogram
-    xlab(col_name) + ylab("Frequency") +  # Axis labels
-    theme_minimal() +  # Clean theme for the histogram
-    annotate("text", x = Inf, y = Inf, label = paste("Mean:", round(mean_val, 2), "\nSD:", round(sd_val, 2), "\nNumber of samples:", nrow(indicators)),
-             hjust = 1.1, vjust = 1.5, size = 5, color = "black")  # Annotate mean and SD on the histogram
+    geom_histogram(
+      aes(y = after_stat(count), fill = after_stat(count)),       # <-- frequency
+      bins = 50, color = "black", linewidth = 0.01
+    ) +
+    scale_fill_gradient(low = "#80ffdb", high = "#03045e") +
+    ggtitle(paste("Distribution of", col_name)) +
+    xlab(col_name) + ylab("Frequency") +                          # <-- label updated
+    theme_minimal() +
+    annotate(
+      "text", x = Inf, y = Inf,
+      label = paste(
+        "Mean:", round(mean_val, 2),
+        "\nSD:", round(sd_val, 2),
+        "\nN:", n_samp
+      ),
+      hjust = 1.1, vjust = 1.5, size = 5, color = "black"
+    )
   
-  # Combine the map and histogram into a single plot with different sizes
-  combined_plot <- grid.arrange(map_plot, hist_plot, 
-                                layout_matrix = rbindicators(c(1), c(2)),  # Arrange map on top and histogram below
-                                heights = c(2, 1))  # Map takes 2/3 of the height, histogram 1/3
+  # Combine map and histogram (map on top, histogram below)
+  combined_plot <- grid.arrange(
+    map_plot, hist_plot,
+    layout_matrix = rbind(c(1), c(2)),
+    heights = c(2, 1)  # Map 2/3 height, histogram 1/3
+  )
   
-  # Print the combined plot
+  # Print combined plot
   print(combined_plot)
   
-  # Save the combined plot in the specified directory
-  ggsave(filename = paste0(output_directory, "map_", col_name, ".png"), plot = combined_plot, width = 8, height = 10)  # Save as a taller plot
+  # Save combined plot (taller aspect)
+  ggsave(
+    filename = paste0(output_directory, "map_", col_name, ".png"),
+    plot = combined_plot, width = 8, height = 10, dpi = 300
+  )
 }
+
+
+
+
+
 
