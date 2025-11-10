@@ -953,3 +953,18 @@ plots_list
 
 
 
+
+
+
+#---------------------------- TO DO AFTER DECEMBER ---------------------------------
+# Explore more diversity index
+# Redo clean trait database extracted from Ulysse's code (https://github.com/FlandrinU/Species_traits/tree/main). 
+
+
+# Publications to check : 
+# Fish body shape related indicators : https://royalsocietypublishing.org/doi/full/10.1098/rspb.2020.1053
+# Anne Chao Q index/ Hill number : https://esj-journals.onlinelibrary.wiley.com/doi/full/10.1111/1440-1703.12102
+# Anne Chao Attribute diversity based on trait-based species-pairwise functional distances : https://esajournals.onlinelibrary.wiley.com/doi/full/10.1002/ecm.1343
+# Diversity indices used by Ulysse : https://www.cell.com/one-earth/fulltext/S2590-3322(24)00476-7 and code : https://zenodo.org/records/13753006
+# Trophic index : moz-extension://c9b38dc9-64ce-4efd-9ce8-a3c3e5b503c2/enhanced-reader.html?pdf=https%3A%2F%2Fbrxt.mendeley.com%2Fdocument%2Fcontent%2Ff9f68a89-5063-383f-aa51-5b80332ec2c3
+

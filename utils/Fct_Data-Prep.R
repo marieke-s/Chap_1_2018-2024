@@ -333,7 +333,7 @@ plot_species_rarity <- function(df,
       scale_fill_manual(values = c("Rare" = "darkslategrey", "Common" = "darkslategray3"), name = "Species Type") +
       theme_test() +
       theme(
-        axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 3.8),
         plot.caption = element_text(color = "black", size = 10, hjust = 0.5),
         legend.position = "bottom"
       ) +
@@ -470,3 +470,603 @@ reorder_spygen_codes <- function(x) {
   paste(ordered_codes, collapse = "_")
 }
 
+
+#---------------------------------- Function to map + hist + summary numerical var --------------------
+
+
+map_index_plots <- function(df,
+                            cols_to_plot = NULL,
+                            output_directory = "./figures/Div_indices/Maps/",
+                            version = "v1",
+                            bins = 50,
+                            x_col = "x",
+                            y_col = "y") {
+  # ---- libs
+  library(ggplot2)
+  library(dplyr)
+  library(sf)
+  library(gridExtra)
+  library(rlang)
+  library(rnaturalearth)
+  
+  # ---- helper: histogram with summary and capped y
+  gg_hist_summary <- function(x, col_name = NULL, bins = 50, 
+                              fill_low = "#80ffdb", fill_high = "#03045e") {
+    # support vector or data.frame
+    if (is.data.frame(x)) {
+      if (is.null(col_name)) stop("Please provide 'col_name' when passing a data frame")
+      if (!col_name %in% names(x)) stop(paste0("Column '", col_name, "' not found"))
+      vec <- suppressWarnings(as.numeric(x[[col_name]]))
+      x_label <- col_name
+      plot_title <- paste("Distribution of", col_name)
+    } else {
+      vec <- suppressWarnings(as.numeric(x))
+      x_label <- if (is.null(col_name)) "Values" else col_name
+      plot_title <- if (is.null(col_name)) "Distribution" else paste("Distribution of", col_name)
+    }
+    vec <- vec[!is.na(vec)]
+    if (!length(vec)) {
+      warning(paste("Skipping", col_name, "- no valid values"))
+      return(NULL)
+    }
+    
+    # summary text
+    mean_val <- mean(vec)
+    sd_val   <- sd(vec)
+    median_val <- median(vec)
+    min_val <- min(vec)
+    max_val <- max(vec)
+    n_val   <- length(vec)
+    summary_text <- paste0(
+      "Mean: ", round(mean_val, 2),
+      "\nSD: ", round(sd_val, 2),
+      "\nMedian: ", round(median_val, 2),
+      "\nMin: ", round(min_val, 2),
+      "\nMax: ", round(max_val, 2),
+      "\nN: ", n_val
+    )
+    
+    # y-axis cap near max count
+    h <- hist(vec, plot = FALSE, breaks = bins)
+    y_max <- max(h$counts, 1)
+    y_lim <- c(0, y_max * 1.05)
+    
+    # annotation position
+    x_pos <- max(vec, na.rm = TRUE)
+    y_pos <- y_max * 0.95
+    
+    ggplot(data.frame(x = vec), aes(x = x)) +
+      geom_histogram(aes(y = after_stat(count), fill = after_stat(count)),
+                     bins = bins, color = "black", linewidth = 0.01) +
+      scale_fill_gradient(low = fill_low, high = fill_high) +
+      ggtitle(plot_title) +
+      xlab(x_label) + ylab("Frequency") +
+      coord_cartesian(ylim = y_lim) +
+      theme_minimal() +
+      annotate("text", x = x_pos, y = y_pos, label = summary_text,
+               hjust = 1, vjust = 1, size = 4, color = "black")
+  }
+  
+  # ---- output dir
+  if (!dir.exists(output_directory)) dir.create(output_directory, recursive = TRUE)
+  
+  # ---- world basemap
+  world <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
+  
+  # ---- ensure coordinates are available
+  is_sf <- inherits(df, "sf")
+  df_local <- df
+  
+  if (is_sf) {
+    # if x/y not present, derive from geometry
+    has_xy <- all(c(x_col, y_col) %in% names(df_local))
+    if (!has_xy) {
+      coords <- sf::st_coordinates(df_local)
+      df_local <- df_local %>%
+        mutate(!!x_col := coords[, 1],
+               !!y_col := coords[, 2])
+    }
+  } else {
+    # if not sf, check x/y exist
+    if (!all(c(x_col, y_col) %in% names(df_local))) {
+      stop(paste0("x_col='", x_col, "' and y_col='", y_col,
+                  "' must exist in 'df' when df is not an sf object."))
+    }
+  }
+  
+  # ---- columns to plot
+  if (is.null(cols_to_plot)) {
+    # default: all numeric (excluding geometry and coord cols)
+    num_cols <- df_local %>%
+      { if (is_sf) st_drop_geometry(.) else . } %>%
+      dplyr::select(where(is.numeric)) %>%
+      colnames()
+    # keep, but drop the coordinate columns if they’re numeric
+    cols_to_plot <- setdiff(num_cols, c(x_col, y_col))
+  } else {
+    # validate provided columns
+    missing_cols <- setdiff(cols_to_plot, names(df_local))
+    if (length(missing_cols)) {
+      stop("These cols_to_plot are missing in df: ", paste(missing_cols, collapse = ", "))
+    }
+  }
+  
+  # ---- iterate
+  for (col in cols_to_plot) {
+    # Histogram
+    hist_plot <- gg_hist_summary(
+      x = df_local,
+      col_name = col,
+      bins = bins,
+      fill_low = "#80ffdb",
+      fill_high = "#03045e"
+    )
+    if (is.null(hist_plot)) next
+    
+    # Map: use robust pronoun to dodge tidy-eval/function name collisions
+    if (is_sf) {
+      # point layer using numeric coordinates for speed/consistency with color mapping
+      map_plot <- ggplot() +
+        geom_sf(data = world, fill = "white", color = "lightblue") +
+        geom_point(
+          data = df_local,
+          aes(x = .data[[x_col]], y = .data[[y_col]], color = .data[[col]]),
+          size = 1, alpha = 0.8
+        ) +
+        scale_color_gradient(low = "yellow", high = "red") +
+        ggtitle(paste("Map of", col)) +
+        xlab("Longitude") + ylab("Latitude") +
+        coord_sf(
+          xlim = c(min(df_local[[x_col]], na.rm = TRUE) - 0.1,
+                   max(df_local[[x_col]], na.rm = TRUE) + 0.0),
+          ylim = c(min(df_local[[y_col]], na.rm = TRUE) - 0.0,
+                   max(df_local[[y_col]], na.rm = TRUE) + 0.0)
+        ) +
+        theme_test() +
+        theme(panel.background = element_rect(fill = "#e0edff"))
+    } else {
+      map_plot <- ggplot() +
+        geom_sf(data = world, fill = "white", color = "lightblue") +
+        geom_point(
+          data = df_local,
+          aes(x = .data[[x_col]], y = .data[[y_col]], color = .data[[col]]),
+          size = 1, alpha = 0.8
+        ) +
+        scale_color_gradient(low = "yellow", high = "red") +
+        ggtitle(paste("Map of", col)) +
+        xlab("Longitude") + ylab("Latitude") +
+        coord_sf(
+          xlim = c(min(df_local[[x_col]], na.rm = TRUE) - 0.1,
+                   max(df_local[[x_col]], na.rm = TRUE) + 0.0),
+          ylim = c(min(df_local[[y_col]], na.rm = TRUE) - 0.0,
+                   max(df_local[[y_col]], na.rm = TRUE) + 0.0)
+        ) +
+        theme_test() +
+        theme(panel.background = element_rect(fill = "#e0edff"))
+    }
+    
+    # Combine
+    combined_plot <- grid.arrange(
+      map_plot, hist_plot,
+      layout_matrix = rbind(c(1), c(2)),
+      heights = c(2, 1)
+    )
+    print(combined_plot)
+    
+    # Save
+    out_path <- file.path(output_directory, paste0("map_", col, "_", version, ".png"))
+    ggsave(filename = out_path, plot = combined_plot, width = 8, height = 10, dpi = 300)
+  }
+  
+  message("Saved to: ", normalizePath(output_directory))
+}
+
+
+
+
+#---------------------------------- Function to map + hist + summary categorical var --------------------
+# map_categorical_plots(): map + bar (mode summary) for categorical columns
+
+
+# map_categorical_plots <- function(df,
+#                                   cols_to_plot = NULL,
+#                                   output_directory = "./figures/Div_indices/Maps/",
+#                                   version = "v1",
+#                                   x_col = "x",
+#                                   y_col = "y",
+#                                   top_n_bars = 20,         # show top-N categories in bar chart
+#                                   legend_limit = 20        # hide legend on map if too many levels
+# ) {
+#   # ---- libs
+#   library(ggplot2)
+#   library(dplyr)
+#   library(sf)
+#   library(gridExtra)
+#   library(rlang)
+#   library(rnaturalearth)
+#   library(forcats)
+#   
+#   # ---- helpers ------------------------------------------------
+#   get_modes <- function(x) {
+#     x <- x[!is.na(x)]
+#     if (!length(x)) return(character(0))
+#     tab <- sort(table(x), decreasing = TRUE)
+#     max_ct <- tab[1]
+#     names(tab)[tab == max_ct]
+#   }
+#   
+#   gg_bar_mode <- function(x, col_name, top_n_bars = 20,
+#                           fill_low = "#80ffdb", fill_high = "#03045e") {
+#     stopifnot(col_name %in% names(x))
+#     vec <- x[[col_name]]
+#     # coerce to factor for consistent plotting
+#     if (!is.factor(vec)) vec <- as.factor(vec)
+#     vec <- fct_explicit_na(vec, na_level = "(NA)")
+#     
+#     # drop empty entirely? keep NA as explicit level
+#     counts <- as.data.frame(table(vec), stringsAsFactors = FALSE)
+#     colnames(counts) <- c("level", "n")
+#     if (!nrow(counts) || all(counts$n == 0)) {
+#       warning(paste("Skipping", col_name, "- no valid categories"))
+#       return(NULL)
+#     }
+#     
+#     # top-N handling for readability
+#     counts <- counts |>
+#       arrange(desc(n))
+#     if (nrow(counts) > top_n_bars) {
+#       # collapse tail into "Other"
+#       top <- counts[1:top_n_bars, ]
+#       other_sum <- sum(counts$n[(top_n_bars + 1):nrow(counts)])
+#       counts <- rbind(top, data.frame(level = "Other", n = other_sum))
+#     }
+#     counts$level <- factor(counts$level, levels = counts$level)
+#     
+#     # modes (could be multiple)
+#     modes <- get_modes(x[[col_name]])
+#     mode_txt <- if (length(modes) == 0) {
+#       "Mode: (none)"
+#     } else if (length(modes) == 1) {
+#       paste0("Mode: ", modes[1])
+#     } else {
+#       paste0("Modes: ", paste(modes, collapse = ", "))
+#     }
+#     n_non_na <- sum(!is.na(x[[col_name]]))
+#     summary_text <- paste0(mode_txt, "\nN (non-NA): ", n_non_na)
+#     
+#     # y cap near max
+#     y_max <- max(counts$n, 1)
+#     y_lim <- c(0, y_max * 1.05)
+#     y_pos <- y_max * 0.98
+#     
+#     ggplot(counts, aes(x = level, y = n, fill = n)) +
+#       geom_col(color = "black", linewidth = 0.1) +
+#       scale_fill_gradient(low = fill_low, high = fill_high) +
+#       ggtitle(paste("Distribution of", col_name)) +
+#       xlab(col_name) + ylab("Frequency") +
+#       coord_cartesian(ylim = y_lim) +
+#       theme_minimal() +
+#       theme(
+#         axis.text.x = element_text(angle = 45, hjust = 1)
+#       ) +
+#       annotate("text", x = Inf, y = y_pos, label = summary_text,
+#                hjust = 1.02, vjust = 1, size = 4, color = "black")
+#   }
+#   # -------------------------------------------------------------
+#   
+#   # ---- output dir
+#   if (!dir.exists(output_directory)) dir.create(output_directory, recursive = TRUE)
+#   
+#   # ---- world basemap
+#   world <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
+#   
+#   # ---- ensure coordinates
+#   is_sf <- inherits(df, "sf")
+#   df_local <- df
+#   
+#   if (is_sf) {
+#     has_xy <- all(c(x_col, y_col) %in% names(df_local))
+#     if (!has_xy) {
+#       coords <- sf::st_coordinates(df_local)
+#       df_local <- df_local %>%
+#         mutate(!!x_col := coords[, 1],
+#                !!y_col := coords[, 2])
+#     }
+#   } else {
+#     if (!all(c(x_col, y_col) %in% names(df_local))) {
+#       stop(paste0("x_col='", x_col, "' and y_col='", y_col,
+#                   "' must exist in 'df' when df is not an sf object."))
+#     }
+#   }
+#   
+#   # ---- columns to plot (categorical)
+#   if (is.null(cols_to_plot)) {
+#     base <- if (is_sf) sf::st_drop_geometry(df_local) else df_local
+#     cat_cols <- names(base)[vapply(base, function(col)
+#       is.factor(col) || is.character(col) || is.logical(col), logical(1))]
+#     cols_to_plot <- setdiff(cat_cols, c(x_col, y_col))
+#   } else {
+#     missing_cols <- setdiff(cols_to_plot, names(df_local))
+#     if (length(missing_cols)) {
+#       stop("These cols_to_plot are missing in df: ", paste(missing_cols, collapse = ", "))
+#     }
+#   }
+#   
+#   # ---- iterate
+#   for (col in cols_to_plot) {
+#     # Bar chart with mode
+#     bar_plot <- gg_bar_mode(df_local, col_name = col, top_n_bars = top_n_bars)
+#     if (is.null(bar_plot)) next
+#     
+#     # Map: color by category
+#     # convert to factor for mapping; suppress too-large legends
+#     lev_ct <- nlevels(as.factor(df_local[[col]]))
+#     hide_legend <- lev_ct > legend_limit
+#     
+#     map_plot <- ggplot() +
+#       geom_sf(data = world, fill = "white", color = "lightblue") +
+#       geom_point(
+#         data = df_local,
+#         aes(x = .data[[x_col]], y = .data[[y_col]], color = as.factor(.data[[col]])),
+#         size = 1, alpha = 0.8, na.rm = TRUE
+#       ) +
+#       scale_color_discrete(name = col) +
+#       ggtitle(paste("Map of", col)) +
+#       xlab("Longitude") + ylab("Latitude") +
+#       coord_sf(
+#         xlim = c(min(df_local[[x_col]], na.rm = TRUE) - 0.1,
+#                  max(df_local[[x_col]], na.rm = TRUE) + 0.0),
+#         ylim = c(min(df_local[[y_col]], na.rm = TRUE) - 0.0,
+#                  max(df_local[[y_col]], na.rm = TRUE) + 0.0)
+#       ) +
+#       theme_test() +
+#       theme(
+#         panel.background = element_rect(fill = "#e0edff"),
+#         legend.position = if (hide_legend) "none" else "right"
+#       )
+#     
+#     # Combine and save
+#     combined_plot <- grid.arrange(
+#       map_plot, bar_plot,
+#       layout_matrix = rbind(c(1), c(2)),
+#       heights = c(2, 1)
+#     )
+#     print(combined_plot)
+#     
+#     out_path <- file.path(output_directory, paste0("mapcat_", col, "_", version, ".png"))
+#     ggsave(filename = out_path, plot = combined_plot, width = 8, height = 10, dpi = 300)
+#   }
+#   
+#   message("Saved to: ", normalizePath(output_directory))
+# }
+# 
+
+# =========================== TEST ===================================
+# map_categorical_plots(): map + bar (mode summary) for categorical columns
+# Adds: separate_maps = TRUE to facet one map per category level
+# ==============================================================
+
+map_categorical_plots <- function(df,
+                                  cols_to_plot = NULL,
+                                  output_directory = "./figures/Div_indices/Maps/",
+                                  version = "v1",
+                                  x_col = "x",
+                                  y_col = "y",
+                                  top_n_bars = 20,         # show top-N categories in bar chart
+                                  legend_limit = 20,       # hide legend on single-map if too many levels
+                                  separate_maps = FALSE    # facet one map per category
+) {
+  # ---- libs
+  library(ggplot2)
+  library(dplyr)
+  library(sf)
+  library(gridExtra)
+  library(rlang)
+  library(rnaturalearth)
+  library(forcats)
+  
+  # ---- helpers ------------------------------------------------
+  get_modes <- function(x) {
+    x <- x[!is.na(x)]
+    if (!length(x)) return(character(0))
+    tab <- sort(table(x), decreasing = TRUE)
+    max_ct <- tab[1]
+    names(tab)[tab == max_ct]
+  }
+  
+  gg_bar_mode <- function(x, col_name, top_n_bars = 20,
+                          fill_low = "#80ffdb", fill_high = "#03045e") {
+    stopifnot(col_name %in% names(x))
+    vec <- x[[col_name]]
+    # coerce to factor for consistent plotting
+    if (!is.factor(vec)) vec <- as.factor(vec)
+    vec <- fct_explicit_na(vec, na_level = "(NA)")
+    
+    counts <- as.data.frame(table(vec), stringsAsFactors = FALSE)
+    colnames(counts) <- c("level", "n")
+    if (!nrow(counts) || all(counts$n == 0)) {
+      warning(paste("Skipping", col_name, "- no valid categories"))
+      return(NULL)
+    }
+    
+    # top-N handling for readability
+    counts <- counts |>
+      arrange(desc(n))
+    if (nrow(counts) > top_n_bars) {
+      top <- counts[1:top_n_bars, ]
+      other_sum <- sum(counts$n[(top_n_bars + 1):nrow(counts)])
+      counts <- rbind(top, data.frame(level = "Other", n = other_sum))
+    }
+    counts$level <- factor(counts$level, levels = counts$level)
+    
+    # modes (could be multiple)
+    modes <- get_modes(x[[col_name]])
+    mode_txt <- if (length(modes) == 0) {
+      "Mode: (none)"
+    } else if (length(modes) == 1) {
+      paste0("Mode: ", modes[1])
+    } else {
+      paste0("Modes: ", paste(modes, collapse = ", "))
+    }
+    n_non_na <- sum(!is.na(x[[col_name]]))
+    summary_text <- paste0(mode_txt, "\nN (non-NA): ", n_non_na)
+    
+    # y cap near max
+    y_max <- max(counts$n, 1)
+    y_lim <- c(0, y_max * 1.05)
+    y_pos <- y_max * 0.98
+    
+    ggplot(counts, aes(x = level, y = n, fill = n)) +
+      geom_col(color = "black", linewidth = 0.1) +
+      scale_fill_gradient(low = fill_low, high = fill_high) +
+      ggtitle(paste("Distribution of", col_name)) +
+      xlab(col_name) + ylab("Frequency") +
+      coord_cartesian(ylim = y_lim) +
+      theme_minimal() +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1)
+      ) +
+      annotate("text", x = Inf, y = y_pos, label = summary_text,
+               hjust = 1.02, vjust = 1, size = 4, color = "black")
+  }
+  # -------------------------------------------------------------
+  
+  # ---- output dir
+  if (!dir.exists(output_directory)) dir.create(output_directory, recursive = TRUE)
+  
+  # ---- world basemap
+  world <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
+  
+  # ---- ensure coordinates
+  is_sf <- inherits(df, "sf")
+  df_local <- df
+  
+  if (is_sf) {
+    has_xy <- all(c(x_col, y_col) %in% names(df_local))
+    if (!has_xy) {
+      coords <- sf::st_coordinates(df_local)
+      df_local <- df_local %>%
+        mutate(!!x_col := coords[, 1],
+               !!y_col := coords[, 2])
+    }
+  } else {
+    if (!all(c(x_col, y_col) %in% names(df_local))) {
+      stop(paste0("x_col='", x_col, "' and y_col='", y_col,
+                  "' must exist in 'df' when df is not an sf object."))
+    }
+  }
+  
+  # ---- columns to plot (categorical)
+  if (is.null(cols_to_plot)) {
+    base <- if (is_sf) sf::st_drop_geometry(df_local) else df_local
+    cat_cols <- names(base)[vapply(base, function(col)
+      is.factor(col) || is.character(col) || is.logical(col), logical(1))]
+    cols_to_plot <- setdiff(cat_cols, c(x_col, y_col))
+  } else {
+    missing_cols <- setdiff(cols_to_plot, names(df_local))
+    if (length(missing_cols)) {
+      stop("These cols_to_plot are missing in df: ", paste(missing_cols, collapse = ", "))
+    }
+  }
+  
+  # ---- iterate
+  for (col in cols_to_plot) {
+    # Bar chart with mode (uses top_n_bars + "Other" if needed)
+    bar_plot <- gg_bar_mode(df_local, col_name = col, top_n_bars = top_n_bars)
+    if (is.null(bar_plot)) next
+    
+    # SINGLE MAP (default): color by category
+    lev_ct <- nlevels(as.factor(df_local[[col]]))
+    hide_legend <- lev_ct > legend_limit
+    
+    if (!separate_maps) {
+      map_plot <- ggplot() +
+        geom_sf(data = world, fill = "white", color = "lightblue") +
+        geom_point(
+          data = df_local,
+          aes(x = .data[[x_col]], y = .data[[y_col]], color = as.factor(.data[[col]])),
+          size = 1, alpha = 0.8, na.rm = TRUE
+        ) +
+        scale_color_discrete(name = col) +
+        ggtitle(paste("Map of", col)) +
+        xlab("Longitude") + ylab("Latitude") +
+        coord_sf(
+          xlim = c(min(df_local[[x_col]], na.rm = TRUE) - 0.1,
+                   max(df_local[[x_col]], na.rm = TRUE) + 0.0),
+          ylim = c(min(df_local[[y_col]], na.rm = TRUE) - 0.0,
+                   max(df_local[[y_col]], na.rm = TRUE) + 0.0)
+        ) +
+        theme_test() +
+        theme(
+          panel.background = element_rect(fill = "#e0edff"),
+          legend.position = if (hide_legend) "none" else "right"
+        )
+      
+      combined_plot <- grid.arrange(
+        map_plot, bar_plot,
+        layout_matrix = rbind(c(1), c(2)),
+        heights = c(2, 1)
+      )
+      print(combined_plot)
+      out_path <- file.path(output_directory, paste0("mapcat_", col, "_", version, ".png"))
+      ggsave(filename = out_path, plot = combined_plot, width = 8, height = 10, dpi = 300)
+      
+    } else {
+      # SEPARATE MAPS: facet one map per category (limited to top_n_bars most frequent)
+      # Determine top levels to facet (same criterion as bar chart, excluding "Other")
+      base_vec <- df_local[[col]]
+      base_vec <- fct_explicit_na(as.factor(base_vec), na_level = "(NA)")
+      counts_all <- as.data.frame(table(base_vec), stringsAsFactors = FALSE) |>
+        arrange(desc(Freq))
+      keep_levels <- counts_all$base_vec[seq_len(min(nrow(counts_all), top_n_bars))]
+      
+      df_panel <- df_local %>%
+        mutate(.cat = fct_explicit_na(as.factor(.data[[col]]), na_level = "(NA)")) %>%
+        filter(.cat %in% keep_levels)
+      
+      # pick grid size: ~square
+      n_levels <- nlevels(factor(df_panel$.cat))
+      ncol_facets <- ceiling(sqrt(n_levels))
+      
+      map_panel <- ggplot() +
+        geom_sf(data = world, fill = "white", color = "lightblue") +
+        geom_point(
+          data = df_panel,
+          aes(x = .data[[x_col]], y = .data[[y_col]]),
+          size = 1, alpha = 0.8, na.rm = TRUE
+        ) +
+        ggtitle(paste("Maps by category -", col)) +
+        xlab("Longitude") + ylab("Latitude") +
+        coord_sf(
+          xlim = c(min(df_panel[[x_col]], na.rm = TRUE) - 0.1,
+                   max(df_panel[[x_col]], na.rm = TRUE) + 0.0),
+          ylim = c(min(df_panel[[y_col]], na.rm = TRUE) - 0.0,
+                   max(df_panel[[y_col]], na.rm = TRUE) + 0.0)
+        ) +
+        facet_wrap(~ .cat, ncol = ncol_facets) +
+        theme_test() +
+        theme(
+          panel.background = element_rect(fill = "#e0edff"),
+          legend.position = "none",
+          strip.text = element_text(size = 9)
+        )
+      
+      # Combine panel + bar
+      combined_panel <- grid.arrange(
+        map_panel, bar_plot,
+        layout_matrix = rbind(c(1), c(2)),
+        heights = c(2, 1)
+      )
+      print(combined_panel)
+      
+      # Width scaled to facet columns
+      panel_width <- max(8, 3.5 * ncol_facets)
+      ggsave(
+        filename = file.path(output_directory, paste0("mapcatpanel_", col, "_", version, ".png")),
+        plot = combined_panel, width = panel_width, height = 10, dpi = 300
+      )
+    }
+  }
+  
+  message("Saved to: ", normalizePath(output_directory))
+}

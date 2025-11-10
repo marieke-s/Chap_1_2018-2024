@@ -594,6 +594,8 @@ occ <- occ %>% dplyr::select(-field_replicates)
 
 #------------- UNDETECTED AND RARE SPECIES --------------------------------------
 # Plot rare species frequencies ------
+source("./utils/Fct_Data-Prep.R")
+
 res <- plot_species_rarity(df = occ_pooled,
                            threshold = 10, 
                            col_to_del = c("replicates"),
@@ -602,6 +604,10 @@ res$plots$bar
 res$plots$hist
 
 
+
+# Save plots 
+ggsave("./figures/Species/Species_frequency_barplot_occ_pooled_v1.1.png", res$plots$bar, width = 8, height = 6)
+ggsave("./figures/Species/Species_frequency_histogram_occ_pooled_v1.1.png", res$plots$hist, width = 8, height = 6)
 
 
 
