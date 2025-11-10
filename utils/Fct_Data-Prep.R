@@ -471,8 +471,7 @@ reorder_spygen_codes <- function(x) {
 }
 
 
-#---------------------------------- Function to map + hist + summary numerical var --------------------
-
+#---------------------------------- Map + histogram for numeric vars (factor-aware, tiny legends, full stats) ------------------
 
 map_index_plots <- function(df,
                             cols_to_plot = NULL,
@@ -480,7 +479,15 @@ map_index_plots <- function(df,
                             version = "v1",
                             bins = 50,
                             x_col = "x",
-                            y_col = "y") {
+                            y_col = "y",
+                            factor = NULL,               # split into panels by this categorical column (e.g., "season")
+                            factor_levels = NULL,        # optional explicit order for factor levels
+                            panel_ncol = NULL,           # columns in panel grid (auto if NULL)
+                            panel_text_scale = c("auto","xs","s","m"),  # control text sizes in panels
+                            stats_in_panel_title = FALSE # also show compact stats in each panel's map title
+) {
+  panel_text_scale <- match.arg(panel_text_scale)
+  
   # ---- libs
   library(ggplot2)
   library(dplyr)
@@ -488,124 +495,137 @@ map_index_plots <- function(df,
   library(gridExtra)
   library(rlang)
   library(rnaturalearth)
+  library(grid)
   
-  # ---- helper: histogram with summary and capped y
-  gg_hist_summary <- function(x, col_name = NULL, bins = 50, 
-                              fill_low = "#80ffdb", fill_high = "#03045e") {
-    # support vector or data.frame
+  # ---- text-size presets
+  single_sizes <- list(title=14, axis_title=11, axis_text=9, annot=3.8, legend_title=10, legend_text=9)
+  panel_sizes_auto <- function(n) {
+    if (n <= 2)   list(title=12, axis_title=9,  axis_text=8,   annot=3.2, legend_title=8,  legend_text=7)
+    else if (n<=4)list(title=10, axis_title=8,  axis_text=7,   annot=3.0, legend_title=7,  legend_text=6.5)
+    else if (n<=6)list(title=9,  axis_title=7,  axis_text=6.5, annot=2.8, legend_title=6,  legend_text=6)
+    else          list(title=8,  axis_title=6.5,axis_text=6,   annot=2.4, legend_title=5,  legend_text=5)
+  }
+  panel_sizes_named <- function(scale){
+    switch(scale,
+           xs=list(title=6.5, axis_title=5.5, axis_text=5,   annot=2.0, legend_title=4, legend_text=4),
+           s =list(title=8.0, axis_title=6.5, axis_text=6.0, annot=2.1, legend_title=5, legend_text=5),
+           m =list(title=9.0, axis_title=7.0, axis_text=6.5, annot=2.8, legend_title=6, legend_text=6),
+           list(title=8.0, axis_title=6.5, axis_text=6.0, annot=2.6, legend_title=5, legend_text=5))
+  }
+  
+  # ---- helpers
+  .short_stats <- function(v) {
+    v <- suppressWarnings(as.numeric(v)); v <- v[!is.na(v)]
+    if (!length(v)) return("N=0")
+    paste0("N=", length(v),
+           " • μ=", round(mean(v),2),
+           " • σ=", round(sd(v),2),
+           " • med=", round(median(v),2),
+           " • min=", round(min(v),2),
+           " • max=", round(max(v),2))
+  }
+  
+  gg_hist_summary <- function(x, col_name = NULL, bins = 50,
+                              fill_low = "#80ffdb", fill_high = "#03045e",
+                              sizes = single_sizes) {
     if (is.data.frame(x)) {
       if (is.null(col_name)) stop("Please provide 'col_name' when passing a data frame")
       if (!col_name %in% names(x)) stop(paste0("Column '", col_name, "' not found"))
       vec <- suppressWarnings(as.numeric(x[[col_name]]))
-      x_label <- col_name
-      plot_title <- paste("Distribution of", col_name)
+      xlab_txt <- col_name
+      ttl_txt  <- paste("Distribution of", col_name)
     } else {
       vec <- suppressWarnings(as.numeric(x))
-      x_label <- if (is.null(col_name)) "Values" else col_name
-      plot_title <- if (is.null(col_name)) "Distribution" else paste("Distribution of", col_name)
+      xlab_txt <- if (is.null(col_name)) "Values" else col_name
+      ttl_txt  <- if (is.null(col_name)) "Distribution" else paste("Distribution of", col_name)
     }
     vec <- vec[!is.na(vec)]
-    if (!length(vec)) {
-      warning(paste("Skipping", col_name, "- no valid values"))
-      return(NULL)
-    }
+    if (!length(vec)) return(NULL)
     
-    # summary text
-    mean_val <- mean(vec)
-    sd_val   <- sd(vec)
-    median_val <- median(vec)
-    min_val <- min(vec)
-    max_val <- max(vec)
-    n_val   <- length(vec)
-    summary_text <- paste0(
-      "Mean: ", round(mean_val, 2),
-      "\nSD: ", round(sd_val, 2),
-      "\nMedian: ", round(median_val, 2),
-      "\nMin: ", round(min_val, 2),
-      "\nMax: ", round(max_val, 2),
-      "\nN: ", n_val
-    )
+    # stats text
+    summary_text <- .short_stats(vec)
     
-    # y-axis cap near max count
+    # headroom to avoid overlap; annotate top-left
     h <- hist(vec, plot = FALSE, breaks = bins)
     y_max <- max(h$counts, 1)
-    y_lim <- c(0, y_max * 1.05)
-    
-    # annotation position
-    x_pos <- max(vec, na.rm = TRUE)
-    y_pos <- y_max * 0.95
+    y_lim <- c(0, y_max * 1.35)
+    x_pos <- min(vec, na.rm = TRUE)
+    y_pos <- y_max * 1.24
     
     ggplot(data.frame(x = vec), aes(x = x)) +
       geom_histogram(aes(y = after_stat(count), fill = after_stat(count)),
                      bins = bins, color = "black", linewidth = 0.01) +
       scale_fill_gradient(low = fill_low, high = fill_high) +
-      ggtitle(plot_title) +
-      xlab(x_label) + ylab("Frequency") +
+      ggtitle(ttl_txt) +
+      xlab(xlab_txt) + ylab("Frequency") +
       coord_cartesian(ylim = y_lim) +
       theme_minimal() +
+      theme(
+        plot.title = element_text(size = sizes$title, face = "bold"),
+        axis.title = element_text(size = sizes$axis_title),
+        axis.text  = element_text(size = sizes$axis_text),
+        legend.position = "none"
+      ) +
       annotate("text", x = x_pos, y = y_pos, label = summary_text,
-               hjust = 1, vjust = 1, size = 4, color = "black")
+               hjust = 0, vjust = 0, size = sizes$annot, color = "black")
   }
   
-  # ---- output dir
+  # ---- output dir & basemap
   if (!dir.exists(output_directory)) dir.create(output_directory, recursive = TRUE)
-  
-  # ---- world basemap
   world <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
   
-  # ---- ensure coordinates are available
+  # ---- coordinates
   is_sf <- inherits(df, "sf")
   df_local <- df
-  
   if (is_sf) {
-    # if x/y not present, derive from geometry
-    has_xy <- all(c(x_col, y_col) %in% names(df_local))
-    if (!has_xy) {
+    if (!all(c(x_col, y_col) %in% names(df_local))) {
       coords <- sf::st_coordinates(df_local)
       df_local <- df_local %>%
         mutate(!!x_col := coords[, 1],
                !!y_col := coords[, 2])
     }
   } else {
-    # if not sf, check x/y exist
     if (!all(c(x_col, y_col) %in% names(df_local))) {
       stop(paste0("x_col='", x_col, "' and y_col='", y_col,
                   "' must exist in 'df' when df is not an sf object."))
     }
   }
   
-  # ---- columns to plot
+  # ---- columns to plot (numeric)
   if (is.null(cols_to_plot)) {
-    # default: all numeric (excluding geometry and coord cols)
     num_cols <- df_local %>%
       { if (is_sf) st_drop_geometry(.) else . } %>%
       dplyr::select(where(is.numeric)) %>%
       colnames()
-    # keep, but drop the coordinate columns if they’re numeric
     cols_to_plot <- setdiff(num_cols, c(x_col, y_col))
   } else {
-    # validate provided columns
     missing_cols <- setdiff(cols_to_plot, names(df_local))
     if (length(missing_cols)) {
       stop("These cols_to_plot are missing in df: ", paste(missing_cols, collapse = ", "))
     }
   }
   
+  # ---- factor handling
+  use_factor <- !is.null(factor)
+  if (use_factor) {
+    if (!factor %in% names(df_local)) stop("factor column '", factor, "' not found in df.")
+    if (!is.null(factor_levels)) df_local[[factor]] <- factor(df_local[[factor]], levels = factor_levels)
+    else df_local[[factor]] <- as.factor(df_local[[factor]])
+    factor_vals <- levels(droplevels(df_local[[factor]]))
+    factor_vals <- factor_vals[!is.na(factor_vals)]
+    if (!length(factor_vals)) stop("factor column '", factor, "' has no non-NA levels.")
+  }
+  
   # ---- iterate
   for (col in cols_to_plot) {
-    # Histogram
-    hist_plot <- gg_hist_summary(
-      x = df_local,
-      col_name = col,
-      bins = bins,
-      fill_low = "#80ffdb",
-      fill_high = "#03045e"
-    )
-    if (is.null(hist_plot)) next
     
-    # Map: use robust pronoun to dodge tidy-eval/function name collisions
-    if (is_sf) {
-      # point layer using numeric coordinates for speed/consistency with color mapping
+    if (!use_factor) {
+      # single plot sizing
+      sizes <- single_sizes
+      
+      hist_plot <- gg_hist_summary(df_local, col_name = col, bins = bins, sizes = sizes)
+      if (is.null(hist_plot)) next
+      
       map_plot <- ggplot() +
         geom_sf(data = world, fill = "white", color = "lightblue") +
         geom_point(
@@ -623,228 +643,98 @@ map_index_plots <- function(df,
                    max(df_local[[y_col]], na.rm = TRUE) + 0.0)
         ) +
         theme_test() +
-        theme(panel.background = element_rect(fill = "#e0edff"))
+        theme(
+          panel.background = element_rect(fill = "#e0edff"),
+          plot.title = element_text(size = sizes$title, face = "bold"),
+          axis.title = element_text(size = sizes$axis_title),
+          axis.text  = element_text(size = sizes$axis_text),
+          legend.title = element_text(size = sizes$legend_title),
+          legend.text  = element_text(size = sizes$legend_text)
+        )
+      
+      combined_plot <- grid.arrange(map_plot, hist_plot,
+                                    layout_matrix = rbind(c(1), c(2)),
+                                    heights = c(2, 1))
+      print(combined_plot)
+      ggsave(file.path(output_directory, paste0("map_", col, "_", version, ".png")),
+             plot = combined_plot, width = 8, height = 10, dpi = 300)
+      
     } else {
-      map_plot <- ggplot() +
-        geom_sf(data = world, fill = "white", color = "lightblue") +
-        geom_point(
-          data = df_local,
-          aes(x = .data[[x_col]], y = .data[[y_col]], color = .data[[col]]),
-          size = 1, alpha = 0.8
-        ) +
-        scale_color_gradient(low = "yellow", high = "red") +
-        ggtitle(paste("Map of", col)) +
-        xlab("Longitude") + ylab("Latitude") +
-        coord_sf(
-          xlim = c(min(df_local[[x_col]], na.rm = TRUE) - 0.1,
-                   max(df_local[[x_col]], na.rm = TRUE) + 0.0),
-          ylim = c(min(df_local[[y_col]], na.rm = TRUE) - 0.0,
-                   max(df_local[[y_col]], na.rm = TRUE) + 0.0)
-        ) +
-        theme_test() +
-        theme(panel.background = element_rect(fill = "#e0edff"))
+      # panel branch
+      n_levels <- length(factor_vals)
+      sizes <- if (panel_text_scale == "auto") panel_sizes_auto(n_levels) else panel_sizes_named(panel_text_scale)
+      
+      # global title (one per numeric var)
+      global_title <- grid::textGrob(
+        paste("Map and Distribution of", col),
+        gp = gpar(fontface = "bold", fontsize = sizes$title + 2)
+      )
+      
+      level_grobs <- list()
+      for (lev in factor_vals) {
+        df_sub <- dplyr::filter(df_local, .data[[factor]] == lev)
+        
+        # histogram for this level
+        hist_plot <- gg_hist_summary(df_sub, col_name = col, bins = bins, sizes = sizes)
+        if (is.null(hist_plot)) next
+        
+        # small per-panel map title; optional compact stats appended
+        sub_title <- paste(factor, ":", lev)
+        if (stats_in_panel_title) sub_title <- paste0(sub_title, "  (", .short_stats(df_sub[[col]]), ")")
+        
+        map_plot <- ggplot() +
+          geom_sf(data = world, fill = "white", color = "lightblue") +
+          geom_point(
+            data = df_sub,
+            aes(x = .data[[x_col]], y = .data[[y_col]], color = .data[[col]]),
+            size = 0.9, alpha = 0.8
+          ) +
+          scale_color_gradient(low = "yellow", high = "red") +
+          ggtitle(sub_title) +
+          xlab("Longitude") + ylab("Latitude") +
+          coord_sf(
+            xlim = c(min(df_sub[[x_col]], na.rm = TRUE) - 0.1,
+                     max(df_sub[[x_col]], na.rm = TRUE) + 0.0),
+            ylim = c(min(df_sub[[y_col]], na.rm = TRUE) - 0.0,
+                     max(df_sub[[y_col]], na.rm = TRUE) + 0.0)
+          ) +
+          theme_test() +
+          theme(
+            panel.background = element_rect(fill = "#e0edff"),
+            plot.title = element_text(size = sizes$title, face = "bold"),
+            axis.title = element_text(size = sizes$axis_title),
+            axis.text  = element_text(size = sizes$axis_text),
+            legend.title = element_text(size = sizes$legend_title),  # VERY small
+            legend.text  = element_text(size = sizes$legend_text)
+          )
+        
+        combo <- grid.arrange(map_plot, hist_plot,
+                              layout_matrix = rbind(c(1), c(2)),
+                              heights = c(2, 1))
+        level_grobs[[lev]] <- combo
+      }
+      
+      if (!length(level_grobs)) next
+      ncol_use <- if (!is.null(panel_ncol)) panel_ncol else ceiling(sqrt(length(level_grobs)))
+      panel_grid <- arrangeGrob(grobs = level_grobs, ncol = ncol_use)
+      panel_all  <- gridExtra::arrangeGrob(global_title, panel_grid, ncol = 1, heights = c(0.5, 10))
+      
+      print(panel_all)
+      
+      panel_width <- max(8, 4 * ncol_use)
+      ggsave(file.path(output_directory, paste0("panel_", col, "_by_", factor, "_", version, ".png")),
+             plot = panel_all, width = panel_width, height = 10, dpi = 300)
     }
-    
-    # Combine
-    combined_plot <- grid.arrange(
-      map_plot, hist_plot,
-      layout_matrix = rbind(c(1), c(2)),
-      heights = c(2, 1)
-    )
-    print(combined_plot)
-    
-    # Save
-    out_path <- file.path(output_directory, paste0("map_", col, "_", version, ".png"))
-    ggsave(filename = out_path, plot = combined_plot, width = 8, height = 10, dpi = 300)
   }
   
   message("Saved to: ", normalizePath(output_directory))
+  invisible(NULL)
 }
-
-
-
 
 #---------------------------------- Function to map + hist + summary categorical var --------------------
 # map_categorical_plots(): map + bar (mode summary) for categorical columns
-
-
-# map_categorical_plots <- function(df,
-#                                   cols_to_plot = NULL,
-#                                   output_directory = "./figures/Div_indices/Maps/",
-#                                   version = "v1",
-#                                   x_col = "x",
-#                                   y_col = "y",
-#                                   top_n_bars = 20,         # show top-N categories in bar chart
-#                                   legend_limit = 20        # hide legend on map if too many levels
-# ) {
-#   # ---- libs
-#   library(ggplot2)
-#   library(dplyr)
-#   library(sf)
-#   library(gridExtra)
-#   library(rlang)
-#   library(rnaturalearth)
-#   library(forcats)
-#   
-#   # ---- helpers ------------------------------------------------
-#   get_modes <- function(x) {
-#     x <- x[!is.na(x)]
-#     if (!length(x)) return(character(0))
-#     tab <- sort(table(x), decreasing = TRUE)
-#     max_ct <- tab[1]
-#     names(tab)[tab == max_ct]
-#   }
-#   
-#   gg_bar_mode <- function(x, col_name, top_n_bars = 20,
-#                           fill_low = "#80ffdb", fill_high = "#03045e") {
-#     stopifnot(col_name %in% names(x))
-#     vec <- x[[col_name]]
-#     # coerce to factor for consistent plotting
-#     if (!is.factor(vec)) vec <- as.factor(vec)
-#     vec <- fct_explicit_na(vec, na_level = "(NA)")
-#     
-#     # drop empty entirely? keep NA as explicit level
-#     counts <- as.data.frame(table(vec), stringsAsFactors = FALSE)
-#     colnames(counts) <- c("level", "n")
-#     if (!nrow(counts) || all(counts$n == 0)) {
-#       warning(paste("Skipping", col_name, "- no valid categories"))
-#       return(NULL)
-#     }
-#     
-#     # top-N handling for readability
-#     counts <- counts |>
-#       arrange(desc(n))
-#     if (nrow(counts) > top_n_bars) {
-#       # collapse tail into "Other"
-#       top <- counts[1:top_n_bars, ]
-#       other_sum <- sum(counts$n[(top_n_bars + 1):nrow(counts)])
-#       counts <- rbind(top, data.frame(level = "Other", n = other_sum))
-#     }
-#     counts$level <- factor(counts$level, levels = counts$level)
-#     
-#     # modes (could be multiple)
-#     modes <- get_modes(x[[col_name]])
-#     mode_txt <- if (length(modes) == 0) {
-#       "Mode: (none)"
-#     } else if (length(modes) == 1) {
-#       paste0("Mode: ", modes[1])
-#     } else {
-#       paste0("Modes: ", paste(modes, collapse = ", "))
-#     }
-#     n_non_na <- sum(!is.na(x[[col_name]]))
-#     summary_text <- paste0(mode_txt, "\nN (non-NA): ", n_non_na)
-#     
-#     # y cap near max
-#     y_max <- max(counts$n, 1)
-#     y_lim <- c(0, y_max * 1.05)
-#     y_pos <- y_max * 0.98
-#     
-#     ggplot(counts, aes(x = level, y = n, fill = n)) +
-#       geom_col(color = "black", linewidth = 0.1) +
-#       scale_fill_gradient(low = fill_low, high = fill_high) +
-#       ggtitle(paste("Distribution of", col_name)) +
-#       xlab(col_name) + ylab("Frequency") +
-#       coord_cartesian(ylim = y_lim) +
-#       theme_minimal() +
-#       theme(
-#         axis.text.x = element_text(angle = 45, hjust = 1)
-#       ) +
-#       annotate("text", x = Inf, y = y_pos, label = summary_text,
-#                hjust = 1.02, vjust = 1, size = 4, color = "black")
-#   }
-#   # -------------------------------------------------------------
-#   
-#   # ---- output dir
-#   if (!dir.exists(output_directory)) dir.create(output_directory, recursive = TRUE)
-#   
-#   # ---- world basemap
-#   world <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
-#   
-#   # ---- ensure coordinates
-#   is_sf <- inherits(df, "sf")
-#   df_local <- df
-#   
-#   if (is_sf) {
-#     has_xy <- all(c(x_col, y_col) %in% names(df_local))
-#     if (!has_xy) {
-#       coords <- sf::st_coordinates(df_local)
-#       df_local <- df_local %>%
-#         mutate(!!x_col := coords[, 1],
-#                !!y_col := coords[, 2])
-#     }
-#   } else {
-#     if (!all(c(x_col, y_col) %in% names(df_local))) {
-#       stop(paste0("x_col='", x_col, "' and y_col='", y_col,
-#                   "' must exist in 'df' when df is not an sf object."))
-#     }
-#   }
-#   
-#   # ---- columns to plot (categorical)
-#   if (is.null(cols_to_plot)) {
-#     base <- if (is_sf) sf::st_drop_geometry(df_local) else df_local
-#     cat_cols <- names(base)[vapply(base, function(col)
-#       is.factor(col) || is.character(col) || is.logical(col), logical(1))]
-#     cols_to_plot <- setdiff(cat_cols, c(x_col, y_col))
-#   } else {
-#     missing_cols <- setdiff(cols_to_plot, names(df_local))
-#     if (length(missing_cols)) {
-#       stop("These cols_to_plot are missing in df: ", paste(missing_cols, collapse = ", "))
-#     }
-#   }
-#   
-#   # ---- iterate
-#   for (col in cols_to_plot) {
-#     # Bar chart with mode
-#     bar_plot <- gg_bar_mode(df_local, col_name = col, top_n_bars = top_n_bars)
-#     if (is.null(bar_plot)) next
-#     
-#     # Map: color by category
-#     # convert to factor for mapping; suppress too-large legends
-#     lev_ct <- nlevels(as.factor(df_local[[col]]))
-#     hide_legend <- lev_ct > legend_limit
-#     
-#     map_plot <- ggplot() +
-#       geom_sf(data = world, fill = "white", color = "lightblue") +
-#       geom_point(
-#         data = df_local,
-#         aes(x = .data[[x_col]], y = .data[[y_col]], color = as.factor(.data[[col]])),
-#         size = 1, alpha = 0.8, na.rm = TRUE
-#       ) +
-#       scale_color_discrete(name = col) +
-#       ggtitle(paste("Map of", col)) +
-#       xlab("Longitude") + ylab("Latitude") +
-#       coord_sf(
-#         xlim = c(min(df_local[[x_col]], na.rm = TRUE) - 0.1,
-#                  max(df_local[[x_col]], na.rm = TRUE) + 0.0),
-#         ylim = c(min(df_local[[y_col]], na.rm = TRUE) - 0.0,
-#                  max(df_local[[y_col]], na.rm = TRUE) + 0.0)
-#       ) +
-#       theme_test() +
-#       theme(
-#         panel.background = element_rect(fill = "#e0edff"),
-#         legend.position = if (hide_legend) "none" else "right"
-#       )
-#     
-#     # Combine and save
-#     combined_plot <- grid.arrange(
-#       map_plot, bar_plot,
-#       layout_matrix = rbind(c(1), c(2)),
-#       heights = c(2, 1)
-#     )
-#     print(combined_plot)
-#     
-#     out_path <- file.path(output_directory, paste0("mapcat_", col, "_", version, ".png"))
-#     ggsave(filename = out_path, plot = combined_plot, width = 8, height = 10, dpi = 300)
-#   }
-#   
-#   message("Saved to: ", normalizePath(output_directory))
-# }
-# 
-
-# =========================== TEST ===================================
-# map_categorical_plots(): map + bar (mode summary) for categorical columns
 # Adds: separate_maps = TRUE to facet one map per category level
-# ==============================================================
+
 
 map_categorical_plots <- function(df,
                                   cols_to_plot = NULL,
@@ -1069,4 +959,90 @@ map_categorical_plots <- function(df,
   }
   
   message("Saved to: ", normalizePath(output_directory))
+}
+
+#---------------------------------- Function to export count tables --------------------
+
+
+# export_count_tables(): export counts + % per category as a figure 
+export_count_tables <- function(mtdt,
+                                cat_cols = c("year", "month", "season"),
+                                output_directory = "./figures/Summaries/",
+                                filename_stub = "sample_counts",
+                                version = "v1",
+                                layout = c("vertical", "horizontal"),
+                                width = NULL, height = NULL, dpi = 300) {
+  layout <- match.arg(layout)
+  # ---- libs
+  library(dplyr)
+  library(sf)
+  library(rlang)
+  library(grid)
+  library(gridExtra)
+  library(ggplot2)   # for ggsave
+  
+  # ---- prepare output directory
+  if (!dir.exists(output_directory)) dir.create(output_directory, recursive = TRUE)
+  
+  # ---- drop geometry if sf
+  base <- if (inherits(mtdt, "sf")) sf::st_drop_geometry(mtdt) else mtdt
+  
+  # ---- compute counts + percentage
+  count_list <- lapply(cat_cols, function(col) {
+    if (!col %in% names(base)) {
+      warning(paste0("Skipping '", col, "': not found"))
+      return(NULL)
+    }
+    tbl <- base %>%
+      group_by(.data[[col]]) %>%
+      summarise(count = n(), .groups = "drop") %>%
+      arrange(.data[[col]]) %>%
+      rename(!!col := .data[[col]]) %>%
+      mutate(`%` = round(100 * count / sum(count), 1))
+    tbl
+  })
+  names(count_list) <- cat_cols
+  count_list <- Filter(Negate(is.null), count_list)
+  if (length(count_list) == 0) stop("No valid columns to tabulate.")
+  
+  # ---- define table theme
+  tab_theme <- gridExtra::ttheme_minimal(
+    core = list(fg_params = list(cex = 0.9), bg_params = list(fill = c(NA, "#f7f7f7"))),
+    colhead = list(fg_params = list(fontface = 2), bg_params = list(fill = "#eaeaea"))
+  )
+  
+  # ---- build table grobs (no titles)
+  make_table_panel <- function(tbl) {
+    gridExtra::tableGrob(tbl, rows = NULL, theme = tab_theme)
+  }
+  panels <- lapply(count_list, make_table_panel)
+  
+  # ---- arrange panels
+  n <- length(panels)
+  if (layout == "horizontal") {
+    ncol <- n; nrow <- 1
+  } else {
+    ncol <- 1; nrow <- n
+  }
+  fig <- gridExtra::arrangeGrob(grobs = panels, ncol = ncol, nrow = nrow)
+  
+  # ---- auto size if not provided
+  if (is.null(width) || is.null(height)) {
+    if (layout == "horizontal") {
+      width  <- if (is.null(width)) 3.5 * n  else width
+      height <- if (is.null(height)) 4.5     else height
+    } else {
+      width  <- if (is.null(width)) 5.0      else width
+      height <- if (is.null(height)) 2.8 * n else height
+    }
+  }
+  
+  # ---- save figure
+  out_file <- file.path(
+    output_directory,
+    paste0(filename_stub, "_", version, ".png")
+  )
+  ggsave(filename = out_file, plot = fig, width = width, height = height, dpi = dpi, bg = "white")
+  message("Saved: ", normalizePath(out_file))
+  invisible(out_file)
 }
