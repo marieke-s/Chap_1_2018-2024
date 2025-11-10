@@ -351,6 +351,13 @@ mtdt %>%
 
 
 #------------------------------------- Explore raw predictors ---------------------------------------------------------------------------------------------------------------
+#--- Data prep ----
+# numerical cols
+cols <- pred_raw[2:150] %>%
+  st_drop_geometry() %>%
+  dplyr::select(where(is.numeric)) %>%
+  colnames()
+
 #--- Check NAs, Inf, Negative -----
 # numerical cols
 cols <- pred_raw[2:151] %>%
@@ -425,7 +432,7 @@ map_index_plots(df = pred_raw,
                 panel_text_scale = "s")
 
 
-
+rm(env_cols, cols_to_plot)
 
 
 #--- Summary env predictors by season -----
@@ -531,11 +538,6 @@ cat("Saved figures:\n", paste0(" - ", outputs), sep = "\n")
 
 
 #--- variance-to-mean ratio ------
-# numerical cols
-cols <- pred_raw[2:151] %>%
-  st_drop_geometry() %>%
-  dplyr::select(where(is.numeric)) %>%
-  colnames()
 
 sapply(cols, function(h) {
   var_to_mean <- var(pred_raw[[h]]) / mean(pred_raw[[h]])
@@ -600,18 +602,58 @@ ggplot() +
 
 # Interpreting the variance-to-mean ratio : if the ratio is > 1, the variance is greater than the mean, indicating a high level of dispersion in the data.
 
-#--- 1.5xIQR rule [TODO] -----
+#--- boxplot ----
+plot_list <- lapply(cols, function(cn) {
+  ggplot(pred_raw, aes(y = .data[[cn]])) +
+    geom_boxplot(outlier.alpha = 0.3, fill = "steelblue") +
+    theme_minimal(base_size = 9) +
+    labs(title = cn, y = NULL, x = NULL) +
+    theme(
+      plot.title = element_text(size = 8, face = "bold"),
+      axis.text.x = element_blank(),
+      axis.ticks.x = element_blank()
+    )
+})
+
+# Split into groups of 10
+plot_groups <- split(plot_list, ceiling(seq_along(plot_list) / 10))
+
+# Save each as a 2x5 panel
+for (i in seq_along(plot_groups)) {
+  panel <- wrap_plots(plot_groups[[i]], ncol = 5, nrow = 2)
+  
+  ggsave(
+    filename = sprintf("boxplot_panel_%02d.png", i),
+    plot = panel,
+    width = 12, height = 6, dpi = 300
+  )
+}
+
+# Results, data with strong outliers : 
+# dist_shore
+# canyon data
+# roughness_min
+# slope_min
+# tri_min
+# sal_max_1y
+# chl_week_mean
+# chl_week_max
 
 
+
+
+#--- 1.5xIQR rule -----
 # Identify variables with outliers using 1.5xIQR rule
 # see here for method : https://www.khanacademy.org/math/statistics-probability/summarizing-quantitative-data/box-whisker-plots/a/identifying-outliers-iqr-rule
-outlier_vars <- names(Filter(find_outliers, pred_num))  # Apply only to numeric columns
+outlier_vars <- names(Filter(find_outliers, pred_raw[cols] %>% st_drop_geometry()))  # Apply only to numeric columns
 
 # Print variable names that contain outliers
 if (length(outlier_vars) > 0) {
   print("Variables with outliers:")
   print(outlier_vars)
-  print("Nb of variables with outliers:")
+  print("Percentage of numerical variables with outliers:")
+  print(paste(round(length(outlier_vars)/length(cols)*100,2), "%"))
+  print("Number of numerical variables with outliers:")
   print(length(outlier_vars))
 } else {
   print("No variables with outliers found.")

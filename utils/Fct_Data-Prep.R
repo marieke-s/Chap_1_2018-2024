@@ -1046,3 +1046,19 @@ export_count_tables <- function(mtdt,
   message("Saved: ", normalizePath(out_file))
   invisible(out_file)
 }
+
+#---------------------------------- Function to identify outliers using the 1.5 * IQR rule --------------
+# see here for method : https://www.khanacademy.org/math/statistics-probability/summarizing-quantitative-data/box-whisker-plots/a/identifying-outliers-iqr-rule
+
+find_outliers <- function(x) {
+  if (!is.numeric(x)) return(FALSE)  # Skip non-numeric columns
+  
+  Q1 <- quantile(x, 0.25, na.rm = TRUE)
+  Q3 <- quantile(x, 0.75, na.rm = TRUE)
+  IQR_value <- Q3 - Q1
+  
+  lower_bound <- Q1 - 1.5 * IQR_value
+  upper_bound <- Q3 + 1.5 * IQR_value
+  
+  any(x < lower_bound | x > upper_bound, na.rm = TRUE)  # Returns TRUE if outliers exist
+}
