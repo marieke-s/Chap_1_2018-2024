@@ -1,6 +1,6 @@
 
 
-
+#---------------- PRELIMINAR PREDICTORS SELECTION / CLEANING ----------------
 
 # Remove range 
 # Remove wind stress mins
@@ -26,3 +26,12 @@ pred <- pred %>% dplyr::select(-c("dist_port_min", "dist_port_max", "gravity_min
 
 
 
+
+
+# Remove zero variance predictors ----
+caret::nearZeroVar(pred_raw %>% st_drop_geometry(), saveMetrics = TRUE)
+
+# nvz : canyon_type, habitats_artificiels_mean, rock_mean + win_min 7day 1 month and 1year
+# zeroVar :  win_min 7day 1 month and 1year
+
+#--------------- PREDICTORS SELECTION PROCEDURE ----------------
