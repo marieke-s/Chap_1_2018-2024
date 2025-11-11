@@ -23,6 +23,7 @@ library(lubridate)
 library(terra)
 library(stringr)
 library(pMEM)
+library(ggplot2)
 
 
 
@@ -34,8 +35,8 @@ source("./utils/Fct_Data-Prep.R")
 # Mtdt_7
 mtdt <- st_read("./data/processed_data/Mtdt/mtdt_7.gpkg")
 
-# predictors_raw_v1.2
-pred_raw <- st_read("./data/processed_data/predictors/predictors_raw_v1.2.gpkg")
+# predictors_raw_v2.0
+pred_raw <- st_read("./data/processed_data/predictors/predictors_raw_v2.0.gpkg")
 
 # div_indices_v1.0
 div <- readr::read_csv2("./data/processed_data/Traits/div_indices_v1.0.csv") %>%
@@ -57,19 +58,6 @@ div<- pred_raw %>%
   left_join(div, by = "replicates") %>%
   filter(replicates %in% div$replicates)
 
-
-#------------------------------------- Explore Mtd_7 ------------------------------------------------------------------------------------------------------------------------
-
-#--- Check NAs -----
-sapply(mtdt, function(x) sum(is.na(x)))
-
-
-
-
-
-
-######## Temporal variability #####
-#--- Data prep ----
 # Compute year, month and season from date 
 mtdt <- mtdt %>%
   mutate(
@@ -83,6 +71,15 @@ mtdt <- mtdt %>%
       TRUE ~ NA_character_
     ))
 
+# Add area_km2 and dist_seabed_depthsampling, bathy_mean, bathy_max to mtdt
+mtdt <- mtdt %>%
+  left_join(
+    pred_raw %>%
+      st_drop_geometry() %>%
+      dplyr::select(replicates, area_km2, dist_seabed_depthsampling)
+    , by = "replicates"
+  )
+
 # Replace month number by month name
 mtdt <- mtdt %>%
   mutate(
@@ -92,8 +89,32 @@ mtdt <- mtdt %>%
 mtdt$season <- factor(mtdt$season,
                       levels = c("Winter", "Spring", "Summer", "Autumn"))
 
+# Add bathy_mean and bathy_max to mtdt
+mtdt <- mtdt %>%
+  left_join(
+    pred_raw %>%
+      st_drop_geometry() %>%
+      dplyr::select(replicates, bathy_mean, bathy_max)
+    , by = "replicates"
+  )
 
 
+
+
+
+
+
+#------------------------------------- Explore Mtd_7 ------------------------------------------------------------------------------------------------------------------------
+
+#--- Check NAs -----
+sapply(mtdt, function(x) sum(is.na(x)))
+
+
+
+
+
+
+######## Temporal variability #####
 
 #--- Map + hist season | month | year -----
 
@@ -133,24 +154,10 @@ mtdt %>%
 
 
 ######## Sampling effort  ####
-#--- Data prep ----
-# Add area_km2 and dist_seabed_depthsampling, bathy_mean, bathy_max to mtdt
-mtdt <- mtdt %>%
-  left_join(
-    pred_raw %>%
-      st_drop_geometry() %>%
-      dplyr::select(replicates, area_km2, dist_seabed_depthsampling)
-    , by = "replicates"
-  )
 
 
-mtdt <- mtdt %>%
-  left_join(
-    pred_raw %>%
-      st_drop_geometry() %>%
-      dplyr::select(replicates, bathy_mean, bathy_max)
-    , by = "replicates"
-  )
+
+
 
 
 #--- Map and hist of sampling effort -----
@@ -177,6 +184,76 @@ colnames(mtdt)
 
 
 
+
+#--- Sampling bias ----
+# Renames cols 
+dt <- mtdt %>% 
+  st_drop_geometry() %>%
+  left_join(
+    div %>%
+      st_drop_geometry() %>%
+      dplyr::select(replicates, R),
+    by = "replicates"
+  )%>%
+  dplyr::rename("decimalLongitude" = "x", "decimalLatitude" = "y", "species" = "R")
+
+# Set decimalLatitude and decimalLongitude as numeric
+dt$decimalLatitude <- as.numeric(dt$decimalLatitude)
+dt$decimalLongitude <- as.numeric(dt$decimalLongitude)
+
+# Add/remove sampling rate predictors
+# Remove : airports, waterbodies
+# Add : ports
+
+# Compute sampling bias
+bias <- sampbias::calculate_bias(x = dt, 
+                                 gaz = NULL, # use default geographic gazetteers
+                                 res = 0.01, 
+                                 terrestrial = FALSE)
+
+# Check results
+str(bias)
+summary(bias)
+plot(bias)
+
+proj <- project_bias(bias)
+map_bias(proj, type = "log_sampling_rate")
+
+
+# Interpretation
+# Fig 1.
+# Strong effect of cities and roads. 
+# Negligable effect of airports and waterbodies (expected).
+
+
+# Fig 2. (map)
+# Estimation of sampling rate according to the predictors reflect well the reality. 
+
+# Problem is that sampling rate is computer on all marine space of the extent, when our study actually focuses on the coast. 
+# We will need to filter the data to keep only the coastal extent. 
+# --> This can be done using restrict_sample parameter.
+
+
+grid <- st_read("/media/marieke/Shared/Chap-1/Model/Scripts/Chap_1/data/processed_data/data_prep/eDNA/Pts_to_Grid/grid_med005_coastal.shp")
+class(grid)
+
+bias <- sampbias::calculate_bias(x = dt, 
+                                 gaz = NULL, # use default geographic gazetteers
+                                 res = 0.01, # 10km resolution
+                                 terrestrial = FALSE, 
+                                 restrict_sample = grid
+)
+
+
+# Results interpretation with coastal extent
+# With coastal extent we see that bias are way lower. 
+
+
+# Export results
+saveRDS(bias, "./output/bias_sampling_coastal.rds")
+
+
+rm(dt, proj, bias, grid, cols_to_plot)
 
 ######## Lockdown ####
 #--- Map + hist lockdown -----
@@ -350,13 +427,16 @@ mtdt %>%
 
 
 
+
 #------------------------------------- Explore raw predictors ---------------------------------------------------------------------------------------------------------------
 #--- Data prep ----
 # numerical cols
-cols <- pred_raw[2:150] %>%
+cols <- pred_raw %>%
   st_drop_geometry() %>%
   dplyr::select(where(is.numeric)) %>%
+  dplyr::select(-c("y"))%>%
   colnames()
+
 
 #--- Check NAs, Inf, Negative -----
 # numerical cols
@@ -659,6 +739,23 @@ if (length(outlier_vars) > 0) {
   print("No variables with outliers found.")
 }
 
+#--- Max >= 10*median rule --------
+# Identify high variability predictors : if max >= to 10*median 
+
+for (col in names(pred_raw)) {
+  if (is.numeric(pred_raw[[col]])) {
+    max_val <- max(pred_raw[[col]], na.rm = TRUE)
+    med_val <- median(pred_raw[[col]], na.rm = TRUE)
+    threshold <- 10 * med_val
+
+    if (max_val >= threshold) {
+      message(col)
+    } 
+  }
+}
+
+
+
 #--- Near zero var -----
 # Check near 0 variance variable 
 print(caret::nearZeroVar(pred)) # output designate columns 28 and 31
@@ -680,59 +777,186 @@ caret::nearZeroVar(pred_raw %>% st_drop_geometry(), saveMetrics = TRUE)
 
 # Env predictors : more variability in mean data compared to min and max. 
 
-#--- Normality [TODO] ----
-#-------------------------- 0. CHECKS : normality --------------------------
-# Explanation : We check if predictors are normally distributed in order to determine which correlation test to use.
-
-# Initialize results dataframe
-normality_results <- data.frame(Column = character(), Shapiro_p = numeric(), KS_p = numeric(), Normality = character(), stringsAsFactors = FALSE)
-
-# Loop through each column
-for (col in colnames(num)) {
-  cat("\nColumn:", col, "\n")
+#--- Normality ----
+#--- Histograms + Normality test ---------------------
+# Function to create histogram with Shapiro-Wilk normality test
+create_hist_plot <- function(var_name, values) {
   
-  shapiro_res <- shapiro.test(num[[col]])
-  ks_res <- ks.test(num[[col]], "pnorm", mean(num[[col]]), sd(num[[col]]))
+  # Remove NAs to avoid errors
+  values <- na.omit(values)
   
-  print(shapiro_res)
-  print(ks_res)
+  # Perform Shapiro-Wilk Normality Test
+  shapiro_test <- shapiro.test(values)
+  p_value <- shapiro_test$p.value
+  interpretation <- ifelse(p_value >= 0.05, "Normal", "Not Normal")
   
-  # Determine normality based on Shapiro-Wilk test
-  normality_status <- ifelse(shapiro_res$p.value > 0.05, "Normal", "Not-Normal")
+  # Create histogram
+  p <- ggplot(data.frame(x = values), aes(x = x)) +
+    geom_histogram(bins = 50, fill = "gray", color = "black", alpha = 0.6) +
+    labs(title = var_name, x = "", y = "Frequency") +
+    theme_minimal(base_size = 12) +
+    annotate("text", x = max(values, na.rm = TRUE) * 0.7, 
+             y = max(hist(values, plot = FALSE)$counts) * 0.9,
+             label = paste0("SW p = ", round(p_value, 3), "\n(", interpretation, ")"),
+             size = 4, hjust = 0, vjust = 1, color = "black", fontface = "bold",
+             fill = "white", label.size = 0.5)
   
-  # Store results in dataframe
-  normality_results <- rbind(normality_results, 
-                             data.frame(Column = col, 
-                                        Shapiro_p = shapiro_res$p.value, 
-                                        KS_p = ks_res$p.value, 
-                                        Normality = normality_status))
+  return(p)
 }
 
-# Check and save results
-print(normality_results)
-write.csv(normality_results, "./output/predictors_normality_test.csv", row.names = FALSE)
 
-# Interpretation and Conclusion : 
-# The majority of predictors are not normally distributed.
-# We will thus need to use non parametric test to check correlation among predictors --> use spearman correlation instaed of pearson correlation.
+# Generate histograms for each variable 
+ind <- pred_raw[, cols] %>%
+  st_drop_geometry()
 
-#--- Spatial autocorrelation ----
+plots <- lapply(names(ind), function(var) create_hist_plot(var, ind[[var]]))
 
-
-
-
-
-
-
-
+# Save all plots
+for (i in seq_along(plots)) {
+  ggsave(
+    filename = paste0("./figures/Predictors/Hist_Normality-test/predictors_raw_v1.2_hist_norm_", names(ind)[i], ".png"),
+    plot = plots[[i]],
+    width = 8, height = 6, dpi = 300
+  )
+}
 
 
+#--- Table summary -----
+# Var-to-mean ratio + IQG + median rule + NZV + Normality 
+#  Packages 
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(purrr)
+  library(tidyr)
+  library(tibble)
+  library(stringr)
+  library(sf)
+  library(caret)
+  library(readr)   # for write_csv (optional)
+})
 
+#  Helpers 
+has_outliers_iqr <- function(x) {
+  x <- x[is.finite(x)]
+  if (length(x) < 4) return(NA)
+  qs <- stats::quantile(x, probs = c(0.25, 0.75), na.rm = TRUE, names = FALSE)
+  iqr <- qs[2] - qs[1]
+  if (iqr == 0) return(FALSE)
+  lower <- qs[1] - 1.5 * iqr
+  upper <- qs[2] + 1.5 * iqr
+  any(x < lower | x > upper)
+}
 
+safe_shapiro_p <- function(x) {
+  x <- x[is.finite(x)]
+  n <- length(x)
+  if (n < 3) return(NA_real_)
+  if (n > 5000) {
+    set.seed(123)
+    idx <- base::sample.int(n, 5000, replace = FALSE)
+    x <- x[idx]
+  }
+  out <- tryCatch(stats::shapiro.test(x)$p.value, error = function(e) NA_real_)
+  as.numeric(out)
+}
 
+fmt_flag <- function(x) ifelse(is.na(x), NA, ifelse(x, "Yes", "No"))
 
+#  Data selection (sf-safe) 
+num_df <- pred_raw %>%
+  sf::st_drop_geometry() %>%
+  dplyr::select(where(is.numeric))
 
+vars <- names(num_df)
 
+#  NZV metrics from caret 
+nzv_metrics <- caret::nearZeroVar(num_df, saveMetrics = TRUE) %>%
+  tibble::rownames_to_column("Variable") %>%
+  tibble::as_tibble() %>%
+  dplyr::select(Variable, freqRatio, percentUnique, zeroVar, nzv)
+
+#  Core diagnostics per variable 
+diag_tbl <- purrr::map_dfr(vars, function(v) {
+  x <- num_df[[v]]
+  m   <- mean(x, na.rm = TRUE)
+  vr  <- stats::var(x,  na.rm = TRUE)
+  vmr <- ifelse(is.finite(m) && m != 0, vr / m, NA_real_)
+  
+  out_iqr <- has_outliers_iqr(x)
+  
+  mx   <- suppressWarnings(max(x, na.rm = TRUE))
+  med  <- stats::median(x, na.rm = TRUE)
+  max_ge_10x_med <- ifelse(is.finite(mx) && is.finite(med), mx >= 10 * med, NA)
+  
+  p_sw <- safe_shapiro_p(x)
+  normality <- dplyr::case_when(
+    is.na(p_sw)   ~ NA_character_,
+    p_sw >= 0.05  ~ "Normal",
+    TRUE          ~ "Not Normal"
+  )
+  
+  tibble::tibble(
+    Variable = v,
+    Variance_to_Mean = vmr,
+    Outliers_IQR = out_iqr,
+    Max_ge_10x_Median = max_ge_10x_med,
+    Shapiro_p = p_sw,
+    Normality = normality
+  )
+})
+
+#  Join NZV + finalize summary 
+summary_tbl <- diag_tbl %>%
+  dplyr::left_join(nzv_metrics, by = "Variable") %>%
+  dplyr::mutate(
+    NearZeroVar = dplyr::coalesce(nzv, FALSE),
+    ZeroVar     = dplyr::coalesce(zeroVar, FALSE),
+    `Variance / Mean Ratio`        = Variance_to_Mean,
+    `Outlier (1.5×IQR)`            = fmt_flag(Outliers_IQR),
+    `Max ≥ 10×Median`              = fmt_flag(Max_ge_10x_Median),
+    `Near-Zero Variance`           = fmt_flag(NearZeroVar),
+    `Zero Variance`                = fmt_flag(ZeroVar),
+    `Normality (Shapiro-Wilk p)`   = Shapiro_p,
+    `Normality Interpretation`     = Normality,
+    `Key Conclusion` = purrr::pmap_chr(
+      list(Variance_to_Mean, Outliers_IQR, Max_ge_10x_Median, NearZeroVar, ZeroVar, Normality),
+      function(vmr, oi, max10, nzv, zv, normi) {
+        con <- character(0)
+        if (isTRUE(zv))  con <- c(con, "Constant (drop)")
+        else if (isTRUE(nzv)) con <- c(con, "Near-zero variance (consider drop)")
+        if (!is.na(vmr) && vmr > 1) con <- c(con, "High dispersion")
+        if (isTRUE(oi))             con <- c(con, "IQR outliers")
+        if (isTRUE(max10))          con <- c(con, "Heavy right tail")
+        if (!is.na(normi) && normi == "Not Normal") con <- c(con, "Non-normal (transform?)")
+        if (!length(con)) "No red flags" else paste(unique(con), collapse = "; ")
+      }
+    )
+  ) %>%
+  dplyr::select(
+    Variable,
+    `Variance / Mean Ratio`,
+    `Outlier (1.5×IQR)`,
+    `Max ≥ 10×Median`,
+    `Near-Zero Variance`,
+    `Zero Variance`,
+    `Normality (Shapiro-Wilk p)`,
+    `Normality Interpretation`,
+    freqRatio,
+    percentUnique,
+    `Key Conclusion`
+  ) %>%
+  dplyr::arrange(dplyr::desc(`Variance / Mean Ratio`))
+
+# Inspect / export
+print(summary_tbl, n = Inf)
+ readr::write_csv(summary_tbl, "./output/predictors_raw_v1.2_variance_outliers_norm.csv")
+
+#--- Cleanup ----
+rm(diag_tbl, fmt_flag, has_outliers_iqr, make_var_figure, num_df, safe_shapiro_p, summary_tbl, nzv_metrics, vars)
+rm(ad_res, dag_res, ind, ks_res, normality_results, plots, shapiro_res, col, cols, i, max_val, med_val, median_val, normality_status, outlier_vars, threshold)
+
+dev.off()
+gc()
 #------------------------------------- Explore div indices --------------
 # Data prep ----
 indicators <- div
@@ -857,573 +1081,9 @@ map_index_plots(df = indicators, version = "div_indices_v1.0", output_directory 
 # Div x sampling effort | region | season-month | depth | habitat | etc. [TODO] ---
 
 
-#------------------------------------- Useful bits of code  ---------------------------------------------------------------------------------------------------------------
+#------------------------------------- ******** USEFUL CODES *******  ---------------------------------------------------------------------------------------------------------------
 
 #------------------------------------------------------------ Resp var distribution ---------------------
-#----------- CHECKS : normality + poisson --------------------------
-# Explanation : We check if response variables are normally distributed in order to determine which distribution to use in glm.
-# Documentation for normality tests : https://www.geeksforgeeks.org/how-to-test-for-normality-in-r/
-
-# Initialize results dataframe
-normality_results <- data.frame(Column = character(), Shapiro_p = numeric(), KS_p = numeric(), Normality = character(), stringsAsFactors = FALSE)
-
-for (col in colnames(ind)) {
-  cat("\n🔹 Column:", col, "\n")
-  
-  # Compute normality tests
-  shapiro_res <- shapiro.test(ind[[col]])
-  
-  # Handle ties issue in KS test
-  ks_res <- tryCatch({
-    ks.test(ind[[col]], "pnorm", mean(ind[[col]]), sd(ind[[col]]))
-  }, warning = function(w) {
-    cat("⚠️ Warning: Ties detected in KS test. Using jittered values.\n")
-    ks.test(jitter(ind[[col]]), "pnorm", mean(ind[[col]]), sd(ind[[col]]))
-  })
-  
-  ad_res <- ad.test(ind[[col]])   # Anderson-Darling test
-  dag_res <- agostino.test(ind[[col]])  # D’Agostino test
-  
-  # Print results
-  print(shapiro_res)
-  print(ks_res)
-  print(ad_res)
-  print(dag_res)
-  
-  # Determine normality based on multiple tests
-  normality_status <- ifelse(shapiro_res$p.value > 0.05 & ks_res$p.value > 0.05 & 
-                               ad_res$p.value > 0.05 & dag_res$p.value > 0.05, 
-                             "Normal", "Not-Normal")
-  
-  # Store results in dataframe
-  normality_results <- rbind(normality_results, 
-                             data.frame(Column = col, 
-                                        Shapiro_p = shapiro_res$p.value, 
-                                        KS_p = ks_res$p.value, 
-                                        AD_p = ad_res$p.value, 
-                                        DAg_p = dag_res$p.value, 
-                                        Normality = normality_status))
-}
-
-# Print results
-print(normality_results)
-
-# Save results
-write.csv(normality_results, "./output/resp-var_normality_test.csv", row.names = FALSE)
-
-
-
-
-
-#----------- FIGURE : Histograms + Normality test ---------------------
-# Function to create histogram with Shapiro-Wilk normality test
-create_hist_plot <- function(var_name, values) {
-  
-  # Remove NAs to avoid errors
-  values <- na.omit(values)
-  
-  # Perform Shapiro-Wilk Normality Test
-  shapiro_test <- shapiro.test(values)
-  p_value <- shapiro_test$p.value
-  interpretation <- ifelse(p_value >= 0.05, "Normal", "Not Normal")
-  
-  # Create histogram
-  p <- ggplot(data.frame(x = values), aes(x = x)) +
-    geom_histogram(bins = 15, fill = "gray", color = "black", alpha = 0.6) +
-    labs(title = var_name, x = "", y = "Frequency") +
-    theme_minimal(base_size = 12) +
-    annotate("text", x = max(values, na.rm = TRUE) * 0.7, 
-             y = max(hist(values, plot = FALSE)$counts) * 0.9,
-             label = paste0("SW p = ", round(p_value, 3), "\n(", interpretation, ")"),
-             size = 4, hjust = 0, vjust = 1, color = "black", fontface = "bold",
-             fill = "white", label.size = 0.5)
-  
-  return(p)
-}
-
-
-# Generate histograms for each variable in 'ind'
-plots <- lapply(names(ind), function(var) create_hist_plot(var, ind[[var]]))
-
-# Arrange all plots in a grid
-grid.arrange(grobs = plots, ncol = 3, top = "Histograms with Shapiro-Wilk Normality Test Results")
-
-
-
-
-#----------- FIGURE : QQ Plot + Poisson test --------------------------
-# See doc here on how we check if data is Poisson distributed : https://www.geeksforgeeks.org/how-to-know-if-a-data-follows-a-poisson-distribution-in-r/
-
-# Function to create QQ plot for Poisson distribution with chi-squared test
-create_qq_plot <- function(var_name, values) {
-  
-  # Remove NA values
-  values <- na.omit(values)
-  
-  # Convert non-integer values to nearest integers
-  values <- round(values)
-  
-  # Compute mean & variance
-  lambda <- mean(values)
-  variance <- var(values)
-  
-  # Observed frequencies
-  obs_freq <- table(values)
-  
-  # Expected frequencies based on Poisson distribution
-  exp_freq <- dpois(as.numeric(names(obs_freq)), lambda) * length(values)
-  
-  # Perform Chi-Squared Test with Monte Carlo approximation
-  chisq_test <- tryCatch(
-    chisq.test(obs_freq, p = exp_freq, rescale.p = TRUE, simulate.p.value = TRUE, B = 10000),
-    error = function(e) return(NULL)
-  )
-  
-  # Interpretation
-  if (!is.null(chisq_test)) {
-    p_value <- chisq_test$p.value
-    interpretation <- ifelse(p_value >= 0.05, "Poisson Distributed", "Not Poisson Distributed")
-  } else {
-    p_value <- NA
-    interpretation <- "Chi-Squared Test Failed"
-  }
-  
-  # Generate QQ Plot
-  qqplot_data <- data.frame(
-    x = qpois(ppoints(length(values)), lambda),
-    y = sort(values)
-  )
-  
-  # Fixed annotation position using `Inf` (top-right of plot)
-  p <- ggplot(qqplot_data, aes(x = x, y = y)) +
-    geom_point(color = "blue") +
-    geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
-    labs(title = var_name, x = "Theoretical Quantiles", y = "Sample Quantiles") +
-    theme_minimal(base_size = 12) +
-    annotate("text", x = Inf, y = Inf,
-             label = paste0("Mean: ", round(lambda, 2), 
-                            "\nVar: ", round(variance, 2),
-                            "\nChi-sq p = ", ifelse(is.na(p_value), "NA", round(p_value, 3)),
-                            "\n(", interpretation, ")"),
-             hjust = 1, vjust = 1, size = 4, fontface = "bold", color = "black")
-  
-  return(p)
-}
-
-
-
-
-
-
-# Generate QQ plots for each variable in 'ind'
-qq_plots <- lapply(names(ind), function(var) create_qq_plot(var, ind[[var]]))
-
-# Arrange all QQ plots in a grid using patchwork
-final_plot <- patchwork::wrap_plots(qq_plots, ncol = 3) +
-  patchwork::plot_annotation(title = "QQ Plots for Poisson Distribution with Chi-Squared Test")
-
-# Display plot
-print(final_plot)
-
-
-
-
-#----------- CHECKS : 0 inflation --------------------------
-# Load required package
-if (!require("pscl")) install.packages("pscl", dependencies = TRUE)
-library(pscl)
-
-# Initialize results dataframe
-zero_inflation_results <- data.frame(Column = character(), 
-                                     Zero_Proportion = numeric(), 
-                                     Vuong_p = numeric(), 
-                                     Zero_Inflated = character(), 
-                                     stringsAsFactors = FALSE)
-
-# Loop over each column
-for (col in colnames(ind)) {
-  cat("\n🔹 Column:", col, "\n")
-  
-  # Count zeros
-  zero_count <- sum(ind[[col]] == 0, na.rm = TRUE)
-  zero_proportion <- zero_count / length(ind[[col]])
-  
-  # Perform Vuong test for zero inflation in Poisson regression
-  tryCatch({
-    poisson_model <- glm(ind[[col]] ~ 1, family = poisson)
-    zip_model <- zeroinfl(ind[[col]] ~ 1, dist = "poisson")
-    vuong_test <- vuong(poisson_model, zip_model)  # Vuong test
-    
-    # Extract p-value
-    vuong_p <- vuong_test$p
-  }, error = function(e) {
-    cat("⚠️ Error: Vuong test failed for", col, "\n")
-    vuong_p <<- NA
-  })
-  
-  # Print results
-  cat("   - Zero Proportion:", round(zero_proportion, 3), "\n")
-  cat("   - Vuong Test p-value:", ifelse(is.na(vuong_p), "Failed", round(vuong_p, 3)), "\n")
-  
-  # Determine zero inflation based on Vuong test (p < 0.05 suggests zero inflation)
-  zero_inflation_status <- ifelse(!is.na(vuong_p) & vuong_p < 0.05, "Zero-Inflated", "Not Zero-Inflated")
-  
-  # Store results in dataframe
-  zero_inflation_results <- rbind(zero_inflation_results, 
-                                  data.frame(Column = col, 
-                                             Zero_Proportion = zero_proportion, 
-                                             Vuong_p = vuong_p, 
-                                             Zero_Inflated = zero_inflation_status))
-}
-
-# Print final results
-print(zero_inflation_results)
-
-#----------- CHECKS : Overdispersion --------------------------
-check_overdispersion <- function(dataset, response_vars, predictors) {
-  
-  # Store all plots
-  plots <- list()
-  
-  # Loop through each response variable
-  for (response_var in response_vars) {
-    
-    cat("\n🔹 Checking Overdispersion for:", response_var, "\n")
-    
-    # Define formula
-    formula <- as.formula(paste(response_var, "~", paste(predictors, collapse = " + ")))
-    
-    # Fit Poisson Model
-    poisson_model <- glm(formula, data = dataset, family = poisson(link = "log"))
-    
-    # Run Overdispersion Test
-    aer_test <- AER::dispersiontest(poisson_model)
-    dispersion_ratio <- aer_test$estimate["dispersion"]
-    p_value <- aer_test$p.value
-    overdisp_status <- ifelse(p_value < 0.05, "Significant Overdispersion", "No Strong Evidence of Overdispersion")
-    
-    # Generate Residual Plots
-    residual_data <- data.frame(
-      Fitted = poisson_model$fitted.values,
-      Residuals = residuals(poisson_model, type = "pearson")
-    )
-    
-    p <- ggplot(residual_data, aes(x = Fitted, y = Residuals)) +
-      geom_point(color = "blue", alpha = 0.7) +
-      geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
-      labs(title = paste("Overdispersion Check -", response_var), 
-           x = "Fitted Values", y = "Pearson Residuals") +
-      theme_minimal(base_size = 12) +
-      annotate("text", x = Inf, y = Inf, hjust = 1, vjust = 1, size = 4, color = "black", fontface = "bold",
-               label = paste0(
-                 "Dispersion: ", round(dispersion_ratio, 2), 
-                 "\nP-value: ", round(p_value, 3),
-                 "\n", overdisp_status
-               ))
-    
-    plots[[response_var]] <- p
-  }
-  
-  # Arrange all plots in a grid
-  grid.arrange(grobs = plots, ncol = 2, top = "Overdispersion Analysis Across Variables")
-}
-check_overdispersion <- function(dataset, response_vars, predictors) {
-  
-  # Store all plots
-  plots <- list()
-  
-  # Initialize a data frame to store results
-  results_df <- data.frame(
-    Response_Variable = character(),
-    Dispersion_Index = numeric(),
-    P_Value = numeric(),
-    Interpretation = character(),
-    stringsAsFactors = FALSE
-  )
-  
-  # Loop through each response variable
-  for (response_var in response_vars) {
-    
-    cat("\n🔹 Checking Overdispersion for:", response_var, "\n")
-    
-    # Define formula
-    formula <- as.formula(paste(response_var, "~", paste(predictors, collapse = " + ")))
-    
-    # Fit Poisson Model
-    poisson_model <- glm(formula, data = dataset, family = poisson(link = "log"))
-    
-    # Run Overdispersion Test
-    aer_test <- AER::dispersiontest(poisson_model)
-    dispersion_ratio <- aer_test$estimate["dispersion"]
-    p_value <- aer_test$p.value
-    overdisp_status <- ifelse(p_value < 0.05, "Significant Overdispersion", "No Strong Evidence of Overdispersion")
-    
-    # Save results in the data frame
-    results_df <- rbind(results_df, data.frame(
-      Response_Variable = response_var,
-      Dispersion_Index = round(dispersion_ratio, 2),
-      P_Value = round(p_value, 3),
-      Interpretation = overdisp_status,
-      stringsAsFactors = FALSE
-    ))
-    
-    # Generate Residual Plots
-    residual_data <- data.frame(
-      Fitted = poisson_model$fitted.values,
-      Residuals = residuals(poisson_model, type = "pearson")
-    )
-    
-    p <- ggplot(residual_data, aes(x = Fitted, y = Residuals)) +
-      geom_point(color = "blue", alpha = 0.7) +
-      geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
-      labs(title = paste("Overdispersion Check -", response_var), 
-           x = "Fitted Values", y = "Pearson Residuals") +
-      theme_minimal(base_size = 12) +
-      annotate("text", x = Inf, y = Inf, hjust = 1, vjust = 1, size = 4, color = "black", fontface = "bold",
-               label = paste0(
-                 "Dispersion: ", round(dispersion_ratio, 2), 
-                 "\nP-value: ", round(p_value, 3),
-                 "\n", overdisp_status
-               ))
-    
-    plots[[response_var]] <- p
-  }
-  
-  # Print results table
-  print(results_df)
-  
-  # Arrange all plots in a grid
-  grid.arrange(grobs = plots, ncol = 2, top = "Overdispersion Analysis Across Variables")
-  
-  # Return the results dataframe
-  return(results_df)
-}
-
-# Usage
-check_overdispersion(dataset = tot, response_vars = colnames(ind), predictors = predictors)
-
-
-#----------- CHECKS : mean and variance --------------------------
-# Initialize results dataframe
-mean_variance_results <- data.frame(Column = character(), 
-                                    Mean = numeric(), 
-                                    Variance = numeric(), 
-                                    Overdispersed = character(), 
-                                    stringsAsFactors = FALSE)
-
-# Loop over each column
-for (col in colnames(ind)) {
-  cat("\n🔹 Column:", col, "\n")
-  
-  # Compute mean & variance
-  mean_val <- mean(ind[[col]], na.rm = TRUE)
-  var_val <- var(ind[[col]], na.rm = TRUE)
-  
-  # Print results
-  cat("   - Mean:", round(mean_val, 3), "\n")
-  cat("   - Variance:", round(var_val, 3), "\n")
-  
-  # Determine overdispersion (Variance > Mean)
-  overdispersion_status <- ifelse(var_val > mean_val, "Yes", "No")
-  
-  # Store results in dataframe
-  mean_variance_results <- rbind(mean_variance_results, 
-                                 data.frame(Column = col, 
-                                            Mean = mean_val, 
-                                            Variance = var_val, 
-                                            Overdispersed = overdispersion_status))
-}
-
-# Print final results
-print(mean_variance_results)
-
-
-
-#----------- DOC : quasipoisson vs nb distribution ---------------------
-# how do I now if my overdispersion is "mild" or "severe" ?
-#   ChatGPT said:
-#   
-#   ​Overdispersion in Poisson regression occurs when the observed variance in the count data exceeds the mean, violating the Poisson model's assumption that the mean equals the variance. Assessing the severity of overdispersion is crucial for selecting an appropriate statistical model. Here's how you can evaluate it:​
-# en.wikipedia.org
-# 
-# 1. Calculate the Dispersion Statistic:
-#   
-#   The dispersion statistic (also known as the dispersion parameter or index of dispersion) is calculated as:​
-# 
-# Dispersion Statistic=∑(Yi−Y^i)2/Y^in−pDispersion Statistic=n−p∑(Yi​−Y^i​)2/Y^i​​​
-# 
-# where YiYi​ are the observed counts, Y^iY^i​ are the predicted counts from the model, nn is the number of observations, and pp is the number of parameters estimated in the model.​
-# 
-# 2. Interpret the Dispersion Statistic:
-#   
-#   Close to 1: Indicates that the variance is approximately equal to the mean, suggesting no overdispersion.​
-# 
-# Greater than 1: Indicates overdispersion.​
-# 
-# 3. Assess the Severity of Overdispersion:
-#   
-#   Mild Overdispersion: Dispersion statistic is slightly above 1 (e.g., between 1 and 2). In such cases, the standard errors may be slightly underestimated, but the Poisson model might still be adequate with robust standard errors.​
-# 
-# Moderate to Severe Overdispersion: Dispersion statistic significantly exceeds 2. This suggests that the Poisson model is likely inappropriate, and alternative modeling approaches should be considered.​
-# 
-# 4. Alternative Modeling Approaches:
-#   
-#   Quasi-Poisson Model: Adjusts the standard errors to account for overdispersion without altering the mean structure. Suitable for mild to moderate overdispersion.​
-# 
-# Negative Binomial Model: Introduces an additional parameter to model the overdispersion explicitly. Preferred for moderate to severe overdispersion.​
-# 
-# 5. Formal Testing:
-#   
-#   While calculating the dispersion statistic provides a straightforward assessment, formal statistical tests, such as Dean's test for overdispersion, can also be employed to evaluate the presence and extent of overdispersion. ​
-# civil.colorado.edu
-# 
-# Note: It's essential to consider the context of your data and the implications of overdispersion on your model's inferences. Consulting subject-matter experts or a statistician can provide additional guidance tailored to your specific analysis.
-
-
-
-#----------- DOC : over and underdispersion issues --------------------------
-# is underdispersion an issue for normally distributed variables ? 
-#   ChatGPT said:
-#   🔍 Is Underdispersion an Issue for Normally Distributed Variables?
-#   
-#   No, underdispersion is not an issue for normally distributed variables. The concept of underdispersion primarily applies to count data models (Poisson, Negative Binomial, etc.), where variance is expected to follow a specific structure (e.g., equal to the mean in Poisson models).
-
-# 🔹 Why Doesn't Underdispersion Matter for Normal Distributions?
-# 
-#     Normal Distribution Assumes Constant Variance
-#         In a normal distribution:
-#         Y∼N(μ,σ2)
-#         Y∼N(μ,σ2) variance (σ2σ2) is a free parameter that is estimated from the data.
-#         There's no requirement that variance follows the mean, unlike in Poisson models.
-# Whether variance is "too small" or "too large" relative to expectations does not break any assumptions.
-# 
-# Overdispersion and Underdispersion are Concerns for Poisson-Based Models
-# In Poisson models, variance must equal the mean (λλ).
-# Underdispersion (Var<MeanVar<Mean) causes issues because standard Poisson models cannot accommodate it.
-# Overdispersion (Var>MeanVar>Mean) causes similar problems.
-# This is why alternative models (Quasi-Poisson, Negative Binomial, Generalized Poisson) exist.
-# 
-# In Normal Regression (GLM, GAM, etc.), Variance is Simply Estimated
-# In a Gaussian GLM/GAM (family = gaussian()), we assume:
-#   Y=Xβ+ε,ε∼N(0,σ2)
-# Y=Xβ+ε,ε∼N(0,σ2)
-# The model does not expect variance to follow a specific function of the mean, so underdispersion is not problematic.
-
-
-
-# 🔍 Is Overdispersion an Issue for Normally Distributed Variables?
-#   
-#   No, overdispersion is not an issue for normally distributed variables because:
-#   
-#   The Normal (Gaussian) distribution does not assume a strict relationship between the mean and variance.
-# Unlike Poisson or Negative Binomial models, where variance is linked to the mean, a Gaussian model explicitly estimates variance (σ2σ2) as a separate parameter.
-
-
-
-
-# 
-# is underdispersion or overdispersion an issue for negative binomial distribution ? 
-#   ChatGPT said:
-#   🔍 Is Underdispersion or Overdispersion an Issue for Negative Binomial (NB) Distribution?
-#   🔹 Overdispersion: NO, NB is designed for it
-# 
-# Overdispersion is NOT an issue for the Negative Binomial distribution because it is explicitly designed to handle count data where variance exceeds the mean.
-# 🔹 Underdispersion: YES, NB is NOT suited for it
-# 
-# Underdispersion is a problem because the Negative Binomial assumes variance is always greater than the mean:
-#   Var(Y)=μ+κμ2
-# Var(Y)=μ+κμ2
-# 
-# where κ>0κ>0 controls the dispersion. This means the variance must be greater than the mean. If the observed variance is less than expected, the NB model will likely perform poorly.
-# 🔹 When is Overdispersion or Underdispersion a Problem?
-#   Dispersion Type	Impact on NB Model	Solution
-# Overdispersion (Var>MeanVar>Mean)	✅ NB models this well	Use glm.nb() or mgcv::nb()
-# Underdispersion (Var<MeanVar<Mean)	❌ NB does not fit well	Use Generalized Poisson or COM-Poisson
-
-
-
-
-
-#----------- DOC : random effect vs residuals ---------------------
-#----------- RUN : Assign distribution to each resp var --------------------------
-
-# Create a df to store the distribution of each response variable
-distrib <- data.frame(response_var = colnames(ind))
-
-# Assign distribution for each response variable : 
-# poisson for count variables,
-# gaussian for continuous variables,
-# nb for overdispersed count variables,
-# (using nb for overdispersion because quasipoisson is better suited for "mild" overdispersion (ie between 1 and 2) and nb for "severe" overdispersion (ie > 2))
-distrib$Distribution <- c("nb", "poisson", "nb", "nb", "gaussian", "poisson", "poisson", "nb", "poisson", "gaussian", "gaussian")
-
-distrib
-
-
-
-
-
-#-------------------------------------------------------------- Check Sampling Bias ------------------
-# Renames cols 
-dt <- df %>% dplyr::rename("decimalLongitude" = "x", "decimalLatitude" = "y", "species" = "species_richness")
-
-# Set decimalLatitude and decimalLongitude as numeric
-dt$decimalLatitude <- as.numeric(dt$decimalLatitude)
-dt$decimalLongitude <- as.numeric(dt$decimalLongitude)
-
-# Add/remove sampling rate predictors
-# Remove : airports, waterbodies
-# Add : ports
-
-
-# Compute sampling bias
-bias <- sampbias::calculate_bias(x = dt, 
-                                 gaz = NULL, # use default geographic gazetteers
-                                 res = 0.01, 
-                                 terrestrial = FALSE)
-
-# Check results
-str(bias)
-summary(bias)
-plot(bias)
-
-proj <- project_bias(bias)
-map_bias(proj, type = "log_sampling_rate")
-
-
-# Interpretation
-# Fig 1.
-# Strong effect of cities and roads. 
-# Negligable effect of airports and waterbodies (expected).
-
-
-# Fig 2. (map)
-# Estimation of sampling rate according to the predictors reflect well the reality. 
-
-# Problem is that sampling rate is computer on all marine space of the extent, when our study actually focuses on the coast. 
-# We will need to filter the data to keep only the coastal extent. 
-# --> This can be done using restrict_sample parameter.
-
-
-grid <- st_read("/media/marieke/Shared/Chap-1/Model/Scripts/Chap_1/data/processed_data/data_prep/eDNA/Pts_to_Grid/grid_med005_coastal.shp")
-class(grid)
-
-bias <- sampbias::calculate_bias(x = dt, 
-                                 gaz = NULL, # use default geographic gazetteers
-                                 res = 0.01, # 10km resolution
-                                 terrestrial = FALSE, 
-                                 restrict_sample = grid
-)
-
-
-# Results interpretation with coastal extent
-# With coastal extent we see that bias are way lower. 
-
-
-# Export results
-saveRDS(bias, "./output/bias_sampling_coastal.rds")
-
-
 
 #-------------------------------------------------------------- TEST BlockCV ------------------
 #------- cv_spatial_autocor ------------------

@@ -471,6 +471,28 @@ reorder_spygen_codes <- function(x) {
 }
 
 
+#---------------------------------- Function to reorder SPY within replicates groups ----------------
+# Function to reorder SPY within within "_" groups, keeping "/" structure
+reorder_replicates <- function(x) {
+  # Split the string by "/" to handle each group separately
+  groups <- unlist(strsplit(x, "/"))
+  
+  # Process each group independently
+  reordered_groups <- sapply(groups, function(g) {
+    # Only reorder if multiple SPY codes separated by "_"
+    if (grepl("_", g)) {
+      codes <- unlist(strsplit(g, "_"))
+      nums <- as.numeric(sub("SPY", "", codes))
+      codes <- codes[order(nums)]
+      paste(codes, collapse = "_")
+    } else {
+      g
+    }
+  })
+  
+  # Recombine the groups using "/"
+  paste(reordered_groups, collapse = "/")
+}
 #---------------------------------- Map + histogram for numeric vars (factor-aware, tiny legends, full stats) ------------------
 
 map_index_plots <- function(df,

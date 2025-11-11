@@ -79,30 +79,10 @@ mtdt_3$pool <- sapply(mtdt_3$pool, reorder_spygen_codes)
 mtdt_3$spygen_code[mtdt_3$pool != "no"] <- mtdt_3$pool[mtdt_3$pool != "no"]
 
 # Reorder pool within replicates
-# Function to reorder SPY codes within "_" groups, keeping "/" structure
-reorder_replicates <- function(x) {
-  # Split the string by "/" to handle each group separately
-  groups <- unlist(strsplit(x, "/"))
-  
-  # Process each group independently
-  reordered_groups <- sapply(groups, function(g) {
-    # Only reorder if multiple SPY codes separated by "_"
-    if (grepl("_", g)) {
-      codes <- unlist(strsplit(g, "_"))
-      nums <- as.numeric(sub("SPY", "", codes))
-      codes <- codes[order(nums)]
-      paste(codes, collapse = "_")
-    } else {
-      g
-    }
-  })
-  
-  # Recombine the groups using "/"
-  paste(reordered_groups, collapse = "/")
-}
-
-# Apply to your dataframe column
 mtdt_3$replicates <- sapply(mtdt_3$replicates, reorder_replicates)
+
+# Replace SPY201174/SPY201181/SPY202491SPY202495 by SPY201174/SPY201181/SPY202491/SPY202495
+mtdt_3$replicates <- gsub("SPY202491SPY202495", "SPY202491/SPY202495", mtdt_3$replicates)
 
 
 
@@ -129,28 +109,28 @@ separated_species[separated_species %in% colnames(occ)] # "Centrolabrus melanoce
 # v1.0 -----
 # 
 # occ <- occ %>%
-#   
-#   
+# 
+# 
 #   ##--- 1. Species complex to delete (1 complex):
-#   dplyr::select(-c("Coptodon_rendalli.Oreochromis_niloticus", # Both african fish that can be introduced in the Med. Common subfamily : Pseudocrenilabrinae. Oreochromis niloticus is in the traits db while Coptodon rendalli is not. --> DELETE 
+#   dplyr::select(-c("Coptodon_rendalli.Oreochromis_niloticus", # Both african fish that can be introduced in the Med. Common subfamily : Pseudocrenilabrinae. Oreochromis niloticus is in the traits db while Coptodon rendalli is not. --> DELETE
 #   )) %>%
 # 
 # rename(
-#   
-#   
+# 
+# 
 #   ##--- 2. Species where geographical distributions help to choose (5 complexes):
-#   
+# 
 #   "Cheilopogon_heterurus" = "Cheilopogon_heterurus.Hirundichthys_speculiger", # Hirundichthys speculiger mostly found in tropical open water while Cheilopogon heterurus is a mediterranean fish.  (https://fishbase.se/summary/1029 and https://fishbase.se/summary/Hirundichthys-speculiger) --> KEEP Cheilopogon heterurus
 #   "Trachurus_mediterraneus" = "Trachurus_mediterraneus.Trachurus_trachurus", # This complex is present in 56% of the 2018-2024 samples detected on average on 4 PCR replicates (when present). Thus most probably Trachurus mediterraneus which is a least concerned fish that can widely spread in the Mediterranean sea (https://www.fishbase.se/summary/trachurus-mediterraneus) while Trachurus trachurus is a mostly atlantic species + is vulnerable (https://www.fishbase.se/summary/Trachurus-trachurus.html) --> KEEP Trachurus mediterraneus
 #   "Trisopterus_capelanus" = "Trisopterus_capelanus.Trisopterus_minutus", # Trisopterus minutus is not present in the Mediterranean sea (https://www.fishbase.se/summary/trisopterus-minutus) while Trisopterus capelanu is a mediterranean species (https://fishbase.se/summary/Trisopterus-capelanus.html) --> KEEP Trisopterus capelanus
 #   "Notoscopelus_elongatus" = "Notoscopelus_elongatus.Notoscopelus_kroyeri", # Notoscopelus kroyeri is endemic to the Atlantic sea (https://www.fishbase.se/summary/Notoscopelus-kroyeri) and Notoscopelus elongatus is found in the Mediterranean sea (https://fishbase.se/summary/841) --> KEEP Notoscopelus elongatus
 #   "Sphyraena_sphyraena" = "Sphyraena_chrysotaenia.Sphyraena_sphyraena", # Sphyraena chrysotaenia can be found in the Med as a Lessepsian migrant while Sphyraena sphyraena is commonly found in the Med (https://fishbase.se/Summary/SpeciesSummary.php?id=16905&lang=french and https://www.fishbase.se/summary/sphyraena-sphyraena) --> KEEP Sphyraena sphyraena
-#   
-#   
+# 
+# 
 #   ##--- 3. All species found in Med : keep closest common taxo level (8 complexes):
 # 
 # 
-#   
+# 
 #   "Parablennius_sp_1" = "Parablennius_tentacularis.Parablennius_zvonimiri", # Both can be found in our study area -->  Parablennius sp.
 #   "Parablennius_sp_2" = "Parablennius_incognitus.Parablennius_sanguinolentus", # Both can be found in our study area -->  Parablennius sp.
 #   "Gaidropsarus_sp" = "Gaidropsarus_biscayensis.Gaidropsarus_vulgaris", # Both can be found in our study area (https://www.fishbase.se/summary/1877 and https://doris.ffessm.fr/Especes/Gaidropsarus-vulgaris-Motelle-commune-2699) --->  Gaidropsarus sp.
@@ -159,14 +139,14 @@ separated_species[separated_species %in% colnames(occ)] # "Centrolabrus melanoce
 #   "Triglinae_sp_1" = "Eutrigla_gurnardus.Trigla_lyra", # Both can be found in our study area (fishbase) -->  Triglinae sp.
 #   "Sparidae_sp_2" = "Dentex_dentex.Pagrus_auriga.Pagrus_pagrus", # All 3 can be found in our study area (fishbase) -->  Sparidae sp.
 #   "Raja_sp" = "Raja_asterias.Raja_clavata.Raja_polystigma" # All 3 can be found in our study area (fishbase) -->  Raja sp.
-# ) 
+# )
 # 
 # 
 # 
 # 
 # # Those where I don't know what to do : (checked with reference data base on how they were detected)
 # # "Labrus merula.Labrus viridis", # also present in the complex Labrus merula.Labrus viridis.Centrolabrus melanocercus --> ??
-# # "Labrus merula.Labrus viridis.Centrolabrus melanocercus", # Centrolabrus melanocercus also present alone. Detected both alone and in the complex with MED_2025.  
+# # "Labrus merula.Labrus viridis.Centrolabrus melanocercus", # Centrolabrus melanocercus also present alone. Detected both alone and in the complex with MED_2025.
 # # "Spicara flexuosum.Spicara smaris", # Spicara smaris also present alone. Detected both alone and in the complex with MED_2025.
 # # "Argyrosomus regius.Umbrina cirrosa", # Umbrina cirrosa also present alone. Detected alone with GenBank MIDORI_v264 and in the complex by MED_2025.
 # 
@@ -183,13 +163,13 @@ separated_species[separated_species %in% colnames(occ)] # "Centrolabrus melanoce
 #     FALSE
 #   ))
 # 
-# t$match %>% table() 
+# t$match %>% table()
 # t$Spicara_smaris %>% table()
 # t$Spicara_flexuosum.Spicara_smaris %>% table()
 # 
 # rm(t)
 # 
-# # [Temporary decision : remove complexes where one of the species is also present alone] 
+# # [Temporary decision : remove complexes where one of the species is also present alone]
 # occ <- occ %>%
 #   dplyr::select(-c("Labrus_merula.Labrus_viridis",
 #                    "Labrus_merula.Labrus_viridis.Centrolabrus_melanocercus",
@@ -640,11 +620,11 @@ rm(res)
 
 #------------- EXPORT POOLED DATA ----------------------
 # v1.0 ----
-write.csv(occ_pooled, "./data/processed_data/eDNA/occ_pooled_v1.0.csv", row.names = FALSE)
-write.csv(occ_f_incertitude, "./data/processed_data/eDNA/occ_f_incertitude_pooled_v1.0.csv", row.names = FALSE)
-write.csv(occ_pcr_incertitude, "./data/processed_data/eDNA/occ_pcr_incertitude_pooled_v1.0.csv", row.names = FALSE)
+# write.csv(occ_pooled, "./data/processed_data/eDNA/occ_pooled_v1.0.csv", row.names = FALSE)
+# write.csv(occ_f_incertitude, "./data/processed_data/eDNA/occ_f_incertitude_pooled_v1.0.csv", row.names = FALSE)
+# write.csv(occ_pcr_incertitude, "./data/processed_data/eDNA/occ_pcr_incertitude_pooled_v1.0.csv", row.names = FALSE)
 
-# v1.1 :  ----
+# v1.1   ----
 # handling complex differently
 
 write.csv(occ_pooled, "./data/processed_data/eDNA/occ_pooled_v1.1.csv", row.names = FALSE)
@@ -653,7 +633,7 @@ write.csv(occ_pcr_incertitude, "./data/processed_data/eDNA/occ_pcr_incertitude_p
 
 
 #------------- EXPORT MODIFIED MTDT ----------------------
-# In this script we made somes changes to the mtdt_3 that needs to be saved : removing of no detection samples, removing of Ange2Mer project, adding sampling effort columns. --> MTDT_6 (rows = sample)
+# In this script we made somes changes to the mtdt_3 that needs to be saved : removing of no detection samples, removing of Ange2Mer project, adding sampling effort columns, correcting the "SPY201174/SPY201181/SPY202491SPY202495" error. --> MTDT_6 (rows = sample)
 
 # When pooled by replicates the mtdt should re-calculate the estimated_volume_total without the removed samples --> MTDT_7 (rows = replicates)
 
