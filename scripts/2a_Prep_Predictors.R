@@ -1003,7 +1003,7 @@ rm(sst, extra_cols, c, na_count)
 
 
 
-#------------- pMEM [not in v1_0] ------------- 
+#------------- pMEM [not saved in predictors] ------------- 
 ----------------
 # Explanation : check Spatially explicit predictions using spatial eigenvector maps ( https://doi.org/10.1111/2041-210X.14413)
 
@@ -1149,9 +1149,9 @@ st_write(buff, "./data/processed_data/predictors/predictors_raw_v1.1.gpkg", appe
 # predictors_raw_v1.2
 # 11/11/2025. 
 # Based on mtdt_5.gpkg (788 replicates buffers).
-# same as redictors_raw_v1.1 but removing columns linked to metadata + some other useless cols + reodering spygen_codes within replicates column
+# same as redictors_raw_v1.1 but removing columns linked to metadata + some other useless cols
 
-# Predictors (185) : area_km2, mpa_fully, canyon_dist_m_min, canyon_dist_m_max, canyon_dist_m_mean, canyon_dist_m_range, canyon_dist_m_weight, port_dist_m_min, port_dist_m_max, port_dist_m_mean, port_dist_m_range, port_dist_m_weight, mpa_dist_m_min, mpa_dist_m_max, mpa_dist_m_mean, mpa_dist_m_range, mpa_dist_m_weight, shore_dist_m_min, shore_dist_m_max, shore_dist_m_mean, shore_dist_m_range, shore_dist_m_weight, canyon_area_km2, canyon_delta_d, canyon_type, canyon_mean_depth, canyon_length, canyon_width, canyon_canyon_id, canyon_shape_length, canyon_shape_area, port_nomzonepor, port_nomport, mpa_protection, mpa_name, gravity_mean, gravity_min, gravity_max, gravity_range, aspect_min, aspect_max, aspect_mean, roughness_min, roughness_max, roughness_mean, slope_min, slope_max, slope_mean, tpi_min, tpi_max, tpi_mean, tri_min, tri_max, tri_mean, main_habitat, nb_habitat_per_km2, grouped_main_habitat, grouped_nb_habitat_per_km2, matte_morte_p_oceanica_mean, algues_infralittorales_mean, habitats_artificiels_mean, soft_bottom_mean, meadow_mean, rock_mean, coralligenous_mean, bathy_mean, bathy_range, bathy_min, bathy_max, date_x, time_start, depth_sampling_x, depth_seafloor_x, lockdown, biodivmed2023, method, country, region, site, subsite, component, habitat, protection, mpa_name_x, project, tele01, pleo, mamm01, vert01, x16s_metazoa, bact02, euka02, estimated_volume_total, duration_total, comments, mpa_name_y, dist_seabed_depthsampling, date_y, depth_sampling_y, depth_seafloor_y, datetime, day_24h, date_7j, date_1mois, date_1an, wind_min_24h, wind_max_24h, wind_mean_24h, vel_min_24h, vel_max_24h, vel_mean_24h, wind_max_7j, wind_min_7j, wind_mean_7j, vel_max_7j, vel_min_7j, vel_mean_7j, wind_max_1m, wind_min_1m, wind_mean_1m, vel_max_1m, vel_min_1m, vel_mean_1m, ws_max_1y, ws_min_1y, ws_mean_1y, vel_max_1y, vel_min_1y, vel_mean_1y, temp_min_24h, temp_max_24h, temp_mean_24h, sal_min_24h, sal_max_24h, sal_mean_24h, temp_max_7j, temp_min_7j, temp_mean_7j, sal_max_7j, sal_min_7j, sal_mean_7j, temp_max_1m, temp_min_1m, temp_mean_1m, sal_max_1m, sal_min_1m, sal_mean_1m, temp_max_1y, temp_min_1y, temp_mean_1y, sal_max_1y, sal_min_1y, sal_mean_1y, cop_chl_day_mean, cop_chl_day_min, cop_chl_day_max, cop_chl_week_mean, cop_chl_week_min, cop_chl_week_max, cop_chl_month_mean, cop_chl_month_min, cop_chl_month_max, cop_chl_year_mean, cop_chl_year_min, cop_chl_year_max, cop_chl_5years_mean, cop_chl_5years_min, cop_chl_5years_max, cop_analysed_sst_day_mean, cop_analysed_sst_day_min, cop_analysed_sst_day_max, cop_analysed_sst_week_mean, cop_analysed_sst_week_min, cop_analysed_sst_week_max, cop_analysed_sst_month_mean, cop_analysed_sst_month_min, cop_analysed_sst_month_max, cop_analysed_sst_year_mean, cop_analysed_sst_year_min, cop_analysed_sst_year_max, cop_analysed_sst_5years_mean, cop_analysed_sst_5years_min, cop_analysed_sst_5years_max, x, y
+# Predictors (152) : replicates, area_km2, mpa_fully, canyon_dist_m_min, canyon_dist_m_max, canyon_dist_m_mean, canyon_dist_m_range, canyon_dist_m_weight, port_dist_m_min, port_dist_m_max, port_dist_m_mean, port_dist_m_range, port_dist_m_weight, mpa_dist_m_min, mpa_dist_m_max, mpa_dist_m_mean, mpa_dist_m_range, mpa_dist_m_weight, shore_dist_m_min, shore_dist_m_max, shore_dist_m_mean, shore_dist_m_range, shore_dist_m_weight, canyon_area_km2, canyon_delta_d, canyon_type, canyon_mean_depth, canyon_length, canyon_width, canyon_canyon_id, canyon_shape_length, canyon_shape_area, port_nomzonepor, port_nomport, mpa_protection, mpa_name, gravity_mean, gravity_min, gravity_max, gravity_range, aspect_min, aspect_max, aspect_mean, roughness_min, roughness_max, roughness_mean, slope_min, slope_max, slope_mean, tpi_min, tpi_max, tpi_mean, tri_min, tri_max, tri_mean, main_habitat, nb_habitat_per_km2, grouped_main_habitat, grouped_nb_habitat_per_km2, matte_morte_p_oceanica_mean, algues_infralittorales_mean, habitats_artificiels_mean, soft_bottom_mean, meadow_mean, rock_mean, coralligenous_mean, bathy_mean, bathy_range, bathy_min, bathy_max, dist_seabed_depthsampling, wind_min_24h, wind_max_24h, wind_mean_24h, vel_min_24h, vel_max_24h, vel_mean_24h, wind_max_7j, wind_min_7j, wind_mean_7j, vel_max_7j, vel_min_7j, vel_mean_7j, wind_max_1m, wind_min_1m, wind_mean_1m, vel_max_1m, vel_min_1m, vel_mean_1m, ws_max_1y, ws_min_1y, ws_mean_1y, vel_max_1y, vel_min_1y, vel_mean_1y, temp_min_24h, temp_max_24h, temp_mean_24h, sal_min_24h, sal_max_24h, sal_mean_24h, temp_max_7j, temp_min_7j, temp_mean_7j, sal_max_7j, sal_min_7j, sal_mean_7j, temp_max_1m, temp_min_1m, temp_mean_1m, sal_max_1m, sal_min_1m, sal_mean_1m, temp_max_1y, temp_min_1y, temp_mean_1y, sal_max_1y, sal_min_1y, sal_mean_1y, cop_chl_day_mean, cop_chl_day_min, cop_chl_day_max, cop_chl_week_mean, cop_chl_week_min, cop_chl_week_max, cop_chl_month_mean, cop_chl_month_min, cop_chl_month_max, cop_chl_year_mean, cop_chl_year_min, cop_chl_year_max, cop_chl_5years_mean, cop_chl_5years_min, cop_chl_5years_max, cop_analysed_sst_day_mean, cop_analysed_sst_day_min, cop_analysed_sst_day_max, cop_analysed_sst_week_mean, cop_analysed_sst_week_min, cop_analysed_sst_week_max, cop_analysed_sst_month_mean, cop_analysed_sst_month_min, cop_analysed_sst_month_max, cop_analysed_sst_year_mean, cop_analysed_sst_year_min, cop_analysed_sst_year_max, cop_analysed_sst_5years_mean, cop_analysed_sst_5years_min, cop_analysed_sst_5years_max, x, y, geom
 cat(colnames(pred), sep = ", ")
 
 
@@ -1161,8 +1161,6 @@ pred <- st_read("./data/processed_data/predictors/predictors_raw_v1.1.gpkg") %>%
   dplyr::select(-mpa_fully_1)%>% # duplicate of mpa_fully
   dplyr::select(-c(canyon_objectid)) # useless canyon column
 
-pred$replicates <- sapply(pred$replicates, reorder_replicates)
-
 
 
 st_write(pred, "./data/processed_data/predictors/predictors_raw_v1.2.gpkg", append = FALSE)
@@ -1171,23 +1169,65 @@ st_write(pred, "./data/processed_data/predictors/predictors_raw_v1.2.gpkg", appe
 # Export predictors_raw_v2.0 ----
 # predictors_raw_v2.0
 # 11/11/2025. 
-# Based on mtdt_7.gpkg (743 replicates buffers) = mtdt_3 - 42 obs (samples with no detections and samples done in the Ange2Mer project)
-# same as redictors_raw_v1.2 regarding the predictors
+# ROWS
+# Based on mtdt_7.gpkg 
+# MODIFICATION : rows from Ange2Mer and no detection are removed
+# PREDICTORS : 
+# same as predictors_raw_v1.2 regarding the predictors
+# replicates : predictor's replicates changed to incorporate removed samples (ie to correspond to mtdt$replicates instead of mtdt$replicates_old)
 
-# Predictors (185) : area_km2, mpa_fully, canyon_dist_m_min, canyon_dist_m_max, canyon_dist_m_mean, canyon_dist_m_range, canyon_dist_m_weight, port_dist_m_min, port_dist_m_max, port_dist_m_mean, port_dist_m_range, port_dist_m_weight, mpa_dist_m_min, mpa_dist_m_max, mpa_dist_m_mean, mpa_dist_m_range, mpa_dist_m_weight, shore_dist_m_min, shore_dist_m_max, shore_dist_m_mean, shore_dist_m_range, shore_dist_m_weight, canyon_area_km2, canyon_delta_d, canyon_type, canyon_mean_depth, canyon_length, canyon_width, canyon_canyon_id, canyon_shape_length, canyon_shape_area, port_nomzonepor, port_nomport, mpa_protection, mpa_name, gravity_mean, gravity_min, gravity_max, gravity_range, aspect_min, aspect_max, aspect_mean, roughness_min, roughness_max, roughness_mean, slope_min, slope_max, slope_mean, tpi_min, tpi_max, tpi_mean, tri_min, tri_max, tri_mean, main_habitat, nb_habitat_per_km2, grouped_main_habitat, grouped_nb_habitat_per_km2, matte_morte_p_oceanica_mean, algues_infralittorales_mean, habitats_artificiels_mean, soft_bottom_mean, meadow_mean, rock_mean, coralligenous_mean, bathy_mean, bathy_range, bathy_min, bathy_max, date_x, time_start, depth_sampling_x, depth_seafloor_x, lockdown, biodivmed2023, method, country, region, site, subsite, component, habitat, protection, mpa_name_x, project, tele01, pleo, mamm01, vert01, x16s_metazoa, bact02, euka02, estimated_volume_total, duration_total, comments, mpa_name_y, dist_seabed_depthsampling, date_y, depth_sampling_y, depth_seafloor_y, datetime, day_24h, date_7j, date_1mois, date_1an, wind_min_24h, wind_max_24h, wind_mean_24h, vel_min_24h, vel_max_24h, vel_mean_24h, wind_max_7j, wind_min_7j, wind_mean_7j, vel_max_7j, vel_min_7j, vel_mean_7j, wind_max_1m, wind_min_1m, wind_mean_1m, vel_max_1m, vel_min_1m, vel_mean_1m, ws_max_1y, ws_min_1y, ws_mean_1y, vel_max_1y, vel_min_1y, vel_mean_1y, temp_min_24h, temp_max_24h, temp_mean_24h, sal_min_24h, sal_max_24h, sal_mean_24h, temp_max_7j, temp_min_7j, temp_mean_7j, sal_max_7j, sal_min_7j, sal_mean_7j, temp_max_1m, temp_min_1m, temp_mean_1m, sal_max_1m, sal_min_1m, sal_mean_1m, temp_max_1y, temp_min_1y, temp_mean_1y, sal_max_1y, sal_min_1y, sal_mean_1y, cop_chl_day_mean, cop_chl_day_min, cop_chl_day_max, cop_chl_week_mean, cop_chl_week_min, cop_chl_week_max, cop_chl_month_mean, cop_chl_month_min, cop_chl_month_max, cop_chl_year_mean, cop_chl_year_min, cop_chl_year_max, cop_chl_5years_mean, cop_chl_5years_min, cop_chl_5years_max, cop_analysed_sst_day_mean, cop_analysed_sst_day_min, cop_analysed_sst_day_max, cop_analysed_sst_week_mean, cop_analysed_sst_week_min, cop_analysed_sst_week_max, cop_analysed_sst_month_mean, cop_analysed_sst_month_min, cop_analysed_sst_month_max, cop_analysed_sst_year_mean, cop_analysed_sst_year_min, cop_analysed_sst_year_max, cop_analysed_sst_5years_mean, cop_analysed_sst_5years_min, cop_analysed_sst_5years_max, x, y
+# Predictors (152) : replicates, area_km2, mpa_fully, canyon_dist_m_min, canyon_dist_m_max, canyon_dist_m_mean, canyon_dist_m_range, canyon_dist_m_weight, port_dist_m_min, port_dist_m_max, port_dist_m_mean, port_dist_m_range, port_dist_m_weight, mpa_dist_m_min, mpa_dist_m_max, mpa_dist_m_mean, mpa_dist_m_range, mpa_dist_m_weight, shore_dist_m_min, shore_dist_m_max, shore_dist_m_mean, shore_dist_m_range, shore_dist_m_weight, canyon_area_km2, canyon_delta_d, canyon_type, canyon_mean_depth, canyon_length, canyon_width, canyon_canyon_id, canyon_shape_length, canyon_shape_area, port_nomzonepor, port_nomport, mpa_protection, mpa_name, gravity_mean, gravity_min, gravity_max, gravity_range, aspect_min, aspect_max, aspect_mean, roughness_min, roughness_max, roughness_mean, slope_min, slope_max, slope_mean, tpi_min, tpi_max, tpi_mean, tri_min, tri_max, tri_mean, main_habitat, nb_habitat_per_km2, grouped_main_habitat, grouped_nb_habitat_per_km2, matte_morte_p_oceanica_mean, algues_infralittorales_mean, habitats_artificiels_mean, soft_bottom_mean, meadow_mean, rock_mean, coralligenous_mean, bathy_mean, bathy_range, bathy_min, bathy_max, dist_seabed_depthsampling, wind_min_24h, wind_max_24h, wind_mean_24h, vel_min_24h, vel_max_24h, vel_mean_24h, wind_max_7j, wind_min_7j, wind_mean_7j, vel_max_7j, vel_min_7j, vel_mean_7j, wind_max_1m, wind_min_1m, wind_mean_1m, vel_max_1m, vel_min_1m, vel_mean_1m, ws_max_1y, ws_min_1y, ws_mean_1y, vel_max_1y, vel_min_1y, vel_mean_1y, temp_min_24h, temp_max_24h, temp_mean_24h, sal_min_24h, sal_max_24h, sal_mean_24h, temp_max_7j, temp_min_7j, temp_mean_7j, sal_max_7j, sal_min_7j, sal_mean_7j, temp_max_1m, temp_min_1m, temp_mean_1m, sal_max_1m, sal_min_1m, sal_mean_1m, temp_max_1y, temp_min_1y, temp_mean_1y, sal_max_1y, sal_min_1y, sal_mean_1y, cop_chl_day_mean, cop_chl_day_min, cop_chl_day_max, cop_chl_week_mean, cop_chl_week_min, cop_chl_week_max, cop_chl_month_mean, cop_chl_month_min, cop_chl_month_max, cop_chl_year_mean, cop_chl_year_min, cop_chl_year_max, cop_chl_5years_mean, cop_chl_5years_min, cop_chl_5years_max, cop_analysed_sst_day_mean, cop_analysed_sst_day_min, cop_analysed_sst_day_max, cop_analysed_sst_week_mean, cop_analysed_sst_week_min, cop_analysed_sst_week_max, cop_analysed_sst_month_mean, cop_analysed_sst_month_min, cop_analysed_sst_month_max, cop_analysed_sst_year_mean, cop_analysed_sst_year_min, cop_analysed_sst_year_max, cop_analysed_sst_5years_mean, cop_analysed_sst_5years_min, cop_analysed_sst_5years_max, x, y, geom
 cat(colnames(pred), sep = ", ")
 
 
-pred <- st_read("./data/processed_data/predictors/predictors_raw_v1.2.gpkg") 
-mtdt_7 <- st_read("./data/processed_data/Mtdt/mtdt_7.gpkg") 
+## 1. Same columns as predictors_raw_v1.2 : 
+pred <- st_read("./data/processed_data/predictors/predictors_raw_v1.2.gpkg")
+
+## 2. Removing rows not in mtdt_7$replicates_old (deleted because either no detection nor ange2mer) :
+mtdt_7 <- st_read("./data/processed_data/Mtdt/mtdt_7.gpkg")
+pred <- pred %>% filter(replicates %in% mtdt_7$replicates_old)
+
+setdiff(pred$replicates, mtdt_7$replicates_old) # 0 : now we have the same nb of rows for predictors and mtdt_7 (and thus occ_pooled_v1.1 and div_indices_v1.0)
 
 
-# Keep only replicates present in mtdt_7
+## 3. Clean predictor's replicate column
+## 3.1. Add mtdt_7$replicates correct replicates column to predictors_raw (needed for later)
+mtdt_7$replicates_c <- mtdt_7$replicates
+
 pred <- pred %>%
-  st_drop_geometry() %>%
-  semi_join(mtdt_7, by = "replicates")
+  left_join(
+    mtdt_7 %>%
+      st_drop_geometry() %>%
+      dplyr::select(replicates_c, replicates_old),
+    by = c("replicates" = "replicates_old")
+  )
+
+## 3.2. Reorder predictor's replicates (as in mtdt_7$replicates) :
+pred$replicates <- sapply(pred$replicates, reorder_replicates)
+
+length(setdiff(pred$replicates, mtdt_7$replicates_old)) # 4 : now we differ a bit from replicates_old because we reodered the samples
+length(setdiff(pred$replicates, mtdt_7$replicates)) # 16 : but we still differ from replicates because we didnt take into account missing samples. 
+length(setdiff(mtdt_7$replicates, pred$replicates)) # 16
 
 
+## 3.2  Replace predictor's replicates by 'new' replicates (mtdt_7$replicates_c) to account for removed no-detection-samples within replicate groups : 
+
+pred <- pred %>% 
+  dplyr::select(-replicates) %>%
+  rename("replicates" = "replicates_c")
+  
+
+length(setdiff(pred$replicates, mtdt_7$replicates))
+length(setdiff(mtdt_7$replicates, pred$replicates))
+
+# Check with occ_pooled_v1.1 and div_indices_v1.0
+occ_pooled_v1.1 <- st_read("./data/processed_data/eDNA/occ_pooled_v1.1.csv")
+div_indices_v1.0  <- readr::read_csv2("./data/processed_data/Traits/div_indices_v1.0.csv")
+
+length(setdiff(pred$replicates, occ_pooled_v1.1$replicates)) # 0
+length(setdiff(pred$replicates, div_indices_v1.0$replicates)) # 0
+
+# All good
 
 st_write(pred, "./data/processed_data/predictors/predictors_raw_v2.0.gpkg", append = FALSE)
 

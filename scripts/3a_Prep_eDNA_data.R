@@ -72,18 +72,25 @@ mtdt_3 <- sf::st_read("./data/processed_data/Mtdt/mtdt_3.gpkg")
 # Replace replicates = "no" by "spygen_code"
 mtdt_3$replicates[mtdt_3$replicates == "no"] <- mtdt_3$spygen_code[mtdt_3$replicates == "no"]
 
+# Duplicate replicates column
+mtdt_3$replicates_old <- mtdt_3$replicates
+
 # Reorder pool
 mtdt_3$pool <- sapply(mtdt_3$pool, reorder_spygen_codes)
 
 # When pool =/= "no" --> spygen_code = pool
 mtdt_3$spygen_code[mtdt_3$pool != "no"] <- mtdt_3$pool[mtdt_3$pool != "no"]
 
-# Reorder pool within replicates
+# Reorder replicates
 mtdt_3$replicates <- sapply(mtdt_3$replicates, reorder_replicates)
 
-# Replace SPY201174/SPY201181/SPY202491SPY202495 by SPY201174/SPY201181/SPY202491/SPY202495
-mtdt_3$replicates <- gsub("SPY202491SPY202495", "SPY202491/SPY202495", mtdt_3$replicates)
 
+
+
+
+# # Replace SPY201174/SPY201181/SPY202491SPY202495 by SPY201174/SPY201181/SPY202491/SPY202495 -----
+# mtdt_3$replicates <- gsub("SPY202491SPY202495", "SPY202491/SPY202495", mtdt_3$replicates)
+# 
 
 
 
@@ -420,7 +427,6 @@ clean_replicates <- function(replicates, remove_codes) {
 }
 
 # Apply the function
-mtdt_3 <- mtdt_3 %>% rename(replicates_old = replicates) 
 mtdt_3$replicates <- clean_replicates(mtdt_3$replicates, nd$spygen_code)
 
 
@@ -436,12 +442,6 @@ occ <- occ %>%
 
 pcr <- pcr %>%
   left_join(mtdt_3 %>% dplyr::select(c(spygen_code, replicates)), by = "spygen_code")
-
-
-
-
-
-
 
 
 
@@ -711,3 +711,41 @@ print(paste("Columns only in mtdt_7:", paste(only_in_mtdt_7, collapse = ", ")))
 sf::st_write(mtdt_7, "./data/processed_data/Mtdt/mtdt_7.gpkg", delete_dsn = TRUE)
 
 
+
+# CHECKS REPLICATES across occ pred and mtdt ----
+# Occ and mtdt have similar replicates
+setdiff(occ_pooled$replicates, mtdt_7$replicates)
+setdiff(mtdt_7$replicates, occ_pooled$replicates)
+
+# Check with pred : there should be 26 more rows in pred than in mtdt_7 (Ange2Mer ; no detection)
+pred_v1.0 <- st_read("./data/processed_data/predictors/predictors_raw_v1_0.gpkg")
+pred_v1.1 <- st_read("./data/processed_data/predictors/predictors_raw_v1.1.gpkg")
+pred_v1.2 <- st_read("./data/processed_data/predictors/predictors_raw_v1.2.gpkg")
+
+mtdt_7 <- st_read("./data/processed_data/Mtdt/mtdt_7.gpkg")
+mtdt_5 <- st_read("./data/processed_data/Mtdt/mtdt_5.gpkg")
+
+# check with replicates_old and replicates
+length(setdiff(pred_v1.0$replicates, mtdt_5$replicates)) # 0
+length(setdiff(pred_v1.1$replicates, mtdt_5$replicates)) # 0
+length(setdiff(pred_v1.2$replicates, mtdt_5$replicates)) # 0
+
+length(setdiff(pred_v1.0$replicates, mtdt_7$replicates_old)) # 26 # 45 (reoredered replicates + missing samples)
+length(setdiff(pred_v1.1$replicates, mtdt_7$replicates_old)) # 26 # 45
+
+length(setdiff(pred_v1.2$replicates, mtdt_7$replicates)) # 45
+length(setdiff(pred_v1.2$replicates, mtdt_7$replicates_old)) # 26 --> removed rows 
+
+
+# predictors_raw_v2 : nb of rows and replicates column modified to correspond to mtdt_7, occ_pooled_v1.1 and div_indices_v1.0 (see Prep_Predictors.R)
+pred_2.0 <- st_read("./data/processed_data/predictors/predictors_raw_v2.0.gpkg")
+
+length(setdiff(pred_2.0$replicates, mtdt_7$replicates)) # 0 <-- ALL GOOD. 
+length(setdiff(pred_2.0$replicates, mtdt_7$replicates_old)) # 19 
+
+
+
+
+
+
+  
