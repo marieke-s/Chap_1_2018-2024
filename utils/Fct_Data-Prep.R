@@ -1069,6 +1069,7 @@ export_count_tables <- function(mtdt,
   invisible(out_file)
 }
 
+
 #---------------------------------- Function to identify outliers using the 1.5 * IQR rule --------------
 # see here for method : https://www.khanacademy.org/math/statistics-probability/summarizing-quantitative-data/box-whisker-plots/a/identifying-outliers-iqr-rule
 
@@ -1083,4 +1084,48 @@ find_outliers <- function(x) {
   upper_bound <- Q3 + 1.5 * IQR_value
   
   any(x < lower_bound | x > upper_bound, na.rm = TRUE)  # Returns TRUE if outliers exist
+}
+#---------------------------------- Function to plot variables distrbution ----------------
+plot_distributions <- function(data, 
+                               n_per_page = 8, 
+                               hist_color = "lightblue", 
+                               output_path = NULL, 
+                               version_number = 1) {
+  n_predictors <- ncol(data)
+  n_pages <- ceiling(n_predictors / n_per_page)
+  
+  for (page in 1:n_pages) {
+    start <- (page - 1) * n_per_page + 1
+    end <- min(page * n_per_page, n_predictors)
+    predictors <- colnames(data)[start:end]
+    
+    # Create filename for this page
+    if (!is.null(output_path)) {
+      file_name <- file.path(output_path, 
+                             paste0("distribution_v", version_number, "_page", page, ".png"))
+      png(filename = file_name, width = 1600, height = 900)
+    }
+    
+    # Set up a grid layout (2 rows, 4 columns)
+    par(mfrow = c(2, 4))
+    
+    # Plot histograms
+    for (predictor in predictors) {
+      hist(data[[predictor]], 
+           main = predictor, 
+           xlab = predictor,
+           col = hist_color, 
+           border = "white", 
+           breaks = 20)
+    }
+    
+    # Close the plotting device if outputting to file
+    if (!is.null(output_path)) {
+      dev.off()
+      message("Saved: ", file_name)
+    } else {
+      # Pause for manual browsing if not saving
+      readline(prompt = "Press [Enter] to see the next set of plots...")
+    }
+  }
 }
