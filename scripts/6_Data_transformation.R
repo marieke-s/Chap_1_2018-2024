@@ -144,7 +144,8 @@ rm(X, Z, hab_cols, i)
 dev.off()
 
 
-#------------- Log  ------------------
+#--- Aspect and slope [TODO] ----
+#--- Log  ------------------
 # Transform variables with outliers using max value >/= to 10*median value rule
 # Iterate on all predictors, if max value >/= to 10*median value, apply log(x + 1) transformation, else keep the same
 # Create a new data frame to store transformed variables
@@ -174,10 +175,21 @@ for (i in colnames(pred_num)) {
 
 # Print the nb of transformed columns
 print(paste("Number of log-transformed columns:", sum(grepl("_log$", colnames(pred_num_log))))) # 51 
-
 colnames(pred_num_log)
 
-#------------- Scale -------------------------------
+# Replace original numeric columns in pred_tr with transformed ones
+pred_tr <- pred_tr %>%
+  st_drop_geometry() %>%
+  dplyr::select(-colnames(pred_num)) %>%  # Drop the original numeric columns
+  dplyr::bind_cols(pred_num_log) %>%       # Add the transformed numeric columns
+  dplyr::bind_cols(st_geometry(pred_tr)) %>% # Reattach geometry
+  st_as_sf() %>%  # Convert back to sf 
+  dplyr::select(-"...145")
+
+rm(pred_num, pred_num_log, i, max_val, median_val, new_col_name)
+
+
+#--- Scale [TODO] -------------------------------
 # Explanation
 # Why scale and normalize variables?
 # First, they can improve the performance and accuracy of many machine learning algorithms, such as linear regression, logistic regression, k-means clustering, and principal component analysis. These algorithms rely on the assumption that the features have similar ranges and distributions, and are sensitive to large differences in scale or magnitude. 
@@ -188,8 +200,6 @@ colnames(pred_num_log)
 
 
 
-###### Aspect ############
-# Non linear variable --> northerness/ easterness. 
 
 
 
@@ -197,7 +207,15 @@ colnames(pred_num_log)
 
 
 
-# FROM CHAPTER 1 -----------------
+
+
+
+
+
+
+
+
+# CODES FROM  CHAPTER 1 -----------------
 #----- Log predictors -------------
 # Explanation : We log the predictors with high variance to reduce the impact of outliers. We log Fishing Effort and Vessel presence because of that, see their distribution :
 hist(pred_pooled$Fishing_Eff, breaks = 100)
