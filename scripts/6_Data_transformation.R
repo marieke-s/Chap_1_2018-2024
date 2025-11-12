@@ -1,21 +1,190 @@
-###### Surface proportion of each habitat within buffer ############
-
-# --> we need to apply transformation to avoid compositional data bias (see here for details : https://docs.google.com/document/d/1cN9vJ6I4fHzPXZfXjOm77Klk5hCSFBBkOj6Mhgum_S8/edit?tab=t.0 and https://medium.com/@nextgendatascientist/a-guide-for-data-scientists-log-ratio-transformations-in-machine-learning-a2db44e2a455) 
-
+#------------- Description ----
+# The aim of this script is to explore all data (Mtdt, species, predictos, div_indices both raw and transformed)
 
 
 
 
 
-###### Distance between seabed and depth sampling ############
+#------------- Setting up ------------------
+# Remove existing objects
+rm(list = ls())
+
+# Set current working directory
+setwd("/media/marieke/Shared/Chap-1/Model/Scripts/Chap_1_2018-2024")
+
+# Libraries
+library(compositions)
+library(dplyr)
+library(exactextractr)
+library(sf)
+library(raster)
+library(ncdf4)
+library(patchwork)
+library(lubridate)
+library(terra)
+library(stringr)
+library(pMEM)
+library(ggplot2)
+
+
+
+
+#------------- Load functions ------------------------------------------------
+source("./utils/Fct_Data-Prep.R")
+
+#------------- Load data ----
+# Mtdt_7
+mtdt <- st_read("./data/processed_data/Mtdt/mtdt_7.gpkg")
+
+# predictors_raw_v2.0
+pred_raw <- st_read("./data/processed_data/predictors/predictors_raw_v2.1.gpkg")
+
+# div_indices_v1.0
+div <- readr::read_csv2("./data/processed_data/Traits/div_indices_v1.0.csv") %>%
+  mutate(DeBRa = as.numeric(DeBRa))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#----------------------------------------- Predictors transformation ------------------
+#--- Remove 0 variance predictors ------------------
+nzv <- caret::nearZeroVar(pred_raw %>% st_drop_geometry(), saveMetrics = TRUE)
+
+# zeroVar cols
+nzv_cols <- rownames(nzv[nzv$zeroVar == TRUE, ]) # "wind_min_7j" "wind_min_1m" "ws_min_1y"  
+
+# Remove zero variance predictors
+pred_tr <- pred_raw %>%
+  dplyr::select(-all_of(nzv_cols)) # -3 predictors
+
+rm(nzv, nzv_cols)
+
+#--- Replace negative distance values by 0 ------------------
+# Distance between seabed and depth sampling  contains negative values due to the difference in bathymetry sources used to compute this variable : depth seafloor is retrieved from SHOM MNT extraction at the buffer level, depth sampling comes from observation of scientist on field with varying measurement instruments (eg. diving coputer). 
 
 # Check negative dist_seabed_depthsampling
-dsamp %>%
+pred_tr %>% st_drop_geometry() %>%
+  left_join(mtdt %>% st_drop_geometry() %>% dplyr::select(replicates, method), by = "replicates") %>%
   filter(dist_seabed_depthsampling < 0) %>%
-  pull (method) # dive_transect, dive_motionless and motionless_descended_from_surface
-  
-  # Set negative dist_seabed_depthsampling to 0
+  pull(method) %>%
+  unique() # dive_transect, dive_motionless and motionless_descended_from_surface --> In all these methods the sampling can occur very close from seafloor --> negative values can be transformed in 0.
 
+# Set negative dist_seabed_depthsampling to 0
+pred_tr <- pred_tr %>%
+  mutate(dist_seabed_depthsampling = ifelse(dist_seabed_depthsampling < 0, 0, dist_seabed_depthsampling))
+
+#--- CLT of habitat composition ---------
+# For the variables : Surface proportion of each habitat within buffer
+# --> we need to apply transformation to avoid compositional data bias (see here for details : https://docs.google.com/document/d/1cN9vJ6I4fHzPXZfXjOm77Klk5hCSFBBkOj6Mhgum_S8/edit?tab=t.0 and https://medium.com/@nextgendatascientist/a-guide-for-data-scientists-log-ratio-transformations-in-machine-learning-a2db44e2a455) 
+# We apply Centered log-ratio transformation.
+# Aitchison, J. (1986) The Statistical Analysis of Compositional Data, Monographs on Statistics and Applied Probability. Chapman & Hall Ltd., London (UK). 416p. (https://doi.org/10.1111/j.2517-6161.1982.tb01195.x)
+
+# Habitat columns
+hab_cols <- c(
+  "habitats_artificiels_mean",
+  "matte_morte_p_oceanica_mean",
+  "algues_infralittorales_mean",
+  "soft_bottom_mean",
+  "meadow_mean",
+  "rock_mean",
+  "coralligenous_mean"
+)
+
+# Check data
+summary(pred_tr[, hab_cols])
+
+# Format data
+X <- as.data.frame(pred_tr[, hab_cols])
+X <- data.frame(lapply(X, function(col) as.numeric(as.character(col))))
+X <- as.matrix(X) + 1e-6  # pseudocount to avoid zeros
+
+# Centered log-ratio transformation
+Z <- compositions::clr(acomp(X))
+Z <- as.matrix(Z)  # ensures it's 2D even if only one row
+
+# Set column names
+Z <- Z[, colnames(Z) != "geom", drop = FALSE]
+colnames(Z) <- sub("_mean$", "_clr", hab_cols)
+
+# remove original mean columns and add CLR-transformed ones
+pred_tr <- pred_tr[, setdiff(names(pred_tr), hab_cols)]
+pred_tr <- cbind(pred_tr, as.data.frame(Z))
+
+
+# Plots new hab_cols
+for (i in colnames(Z)) {
+  hist(Z[, i], main = i, breaks = 100)
+}
+
+# Check NA  in all cols 
+sapply(pred_tr, function(col) sum(is.na(col))) # no NA --> need to handle habitat NA points (5 of them)
+
+rm(X, Z, hab_cols, i)
+dev.off()
+
+
+#------------- Log  ------------------
+# Transform variables with outliers using max value >/= to 10*median value rule
+# Iterate on all predictors, if max value >/= to 10*median value, apply log(x + 1) transformation, else keep the same
+# Create a new data frame to store transformed variables
+
+# Detect numeric columns
+pred_num <- pred_tr %>% st_drop_geometry() %>%
+  dplyr::select(where(is.numeric)) %>%
+  dplyr::select(-c("x", "y"))  # Do not log coordinates
+
+pred_num_log <- pred_num  # Make a copy to modify
+
+for (i in colnames(pred_num)) {
+  # Compute max and median
+  max_val <- max(pred_num[[i]], na.rm = TRUE)
+  median_val <- median(pred_num[[i]], na.rm = TRUE)
+  
+  # Apply log transformation if the condition is met
+  if (max_val >= 10 * median_val) {
+    print(paste("Transforming:", i))  # Print transformed column name
+    new_col_name <- paste0(i, "_log")  # New name with _log suffix
+    
+    # Replace original column with log-transformed version (renamed)
+    pred_num_log <- pred_num_log[, !colnames(pred_num_log) %in% i]  # Drop old column
+    pred_num_log[[new_col_name]] <- log(pred_num[[i]] + 1)  # Add new transformed column
+  }
+}
+
+# Print the nb of transformed columns
+print(paste("Number of log-transformed columns:", sum(grepl("_log$", colnames(pred_num_log))))) # 51 
+
+colnames(pred_num_log)
+
+#------------- Scale -------------------------------
+# Explanation
+# Why scale and normalize variables?
+# First, they can improve the performance and accuracy of many machine learning algorithms, such as linear regression, logistic regression, k-means clustering, and principal component analysis. These algorithms rely on the assumption that the features have similar ranges and distributions, and are sensitive to large differences in scale or magnitude. 
+# Second, they can make the data more interpretable and comparable, by eliminating the influence of units or scales. For example, if you want to compare the heights and weights of different people, you need to scale them to a common unit, such as meters and kilograms. 
+# Third, they can reduce the risk of numerical errors or overflow, by limiting the range of values and avoiding extremely large or small numbers.
+
+# source : https://www.linkedin.com/advice/3/what-most-effective-techniques-scaling-normalizing-57jlc
 
 
 
@@ -28,7 +197,7 @@ dsamp %>%
 
 
 
-# FROM CHAPT 1 -----------------
+# FROM CHAPTER 1 -----------------
 #----- Log predictors -------------
 # Explanation : We log the predictors with high variance to reduce the impact of outliers. We log Fishing Effort and Vessel presence because of that, see their distribution :
 hist(pred_pooled$Fishing_Eff, breaks = 100)

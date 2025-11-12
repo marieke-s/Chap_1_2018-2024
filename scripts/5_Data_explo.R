@@ -617,6 +617,41 @@ cat("Saved figures:\n", paste0(" - ", outputs), sep = "\n")
 
 
 
+#--- Habitat surface proportion -----
+
+habitat_cols <- c("habitats_artificiels_mean",
+                  "matte_morte_p_oceanica_mean",
+                  "algues_infralittorales_mean", 
+                  "soft_bottom_mean",
+                  "meadow_mean", 
+                  "rock_mean",
+                  "coralligenous_mean")
+
+# Sum the habitat surface proportions and check if they equal 1
+pred_raw <- pred_raw %>%
+  mutate(habitat_sum = rowSums(across(all_of(habitat_cols)), na.rm = TRUE))
+
+summary(pred_raw$habitat_sum)
+hist(pred_raw$habitat_sum, breaks = 50)
+boxplot(pred_raw$habitat_sum)
+
+# Result : almost all equal to 1. Some are not --> can be due to the removed habitats. 
+
+# Map geom where habitat_sum != 1
+t <- pred_raw %>%
+  filter(habitat_sum != 1)
+
+ggplot() +
+  geom_sf(data = t, aes(color = habitat_sum), size = 2) +
+  scale_color_viridis_c() +
+  theme_minimal() +
+  labs(title = "Habitat Surface Proportion Sum across Sampling Locations",
+       color = "Habitat Sum")
+
+pred_raw <- pred_raw %>%
+  dplyr::select(-habitat_sum)
+rm(t, habitat_cols)
+
 #--- variance-to-mean ratio ------
 
 sapply(cols, function(h) {

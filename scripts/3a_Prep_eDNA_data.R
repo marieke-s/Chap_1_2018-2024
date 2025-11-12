@@ -84,13 +84,9 @@ mtdt_3$spygen_code[mtdt_3$pool != "no"] <- mtdt_3$pool[mtdt_3$pool != "no"]
 # Reorder replicates
 mtdt_3$replicates <- sapply(mtdt_3$replicates, reorder_replicates)
 
-
-
-
-
-# # Replace SPY201174/SPY201181/SPY202491SPY202495 by SPY201174/SPY201181/SPY202491/SPY202495 -----
-# mtdt_3$replicates <- gsub("SPY202491SPY202495", "SPY202491/SPY202495", mtdt_3$replicates)
-# 
+# Replace SPY201174/SPY201181/SPY202491SPY202495 by SPY201174/SPY201181/SPY202491/SPY202495
+mtdt_3$replicates <- gsub("SPY202491SPY202495", "SPY202491/SPY202495", mtdt_3$replicates)
+ 
 
 
 
@@ -741,7 +737,7 @@ length(setdiff(pred_v1.2$replicates, mtdt_7$replicates_old)) # 26 --> removed ro
 pred_2.0 <- st_read("./data/processed_data/predictors/predictors_raw_v2.0.gpkg")
 
 length(setdiff(pred_2.0$replicates, mtdt_7$replicates)) # 0 <-- ALL GOOD. 
-length(setdiff(pred_2.0$replicates, mtdt_7$replicates_old)) # 19 
+length(setdiff(pred_2.0$replicates, mtdt_7$replicates_old)) # 20  
 
 
 
