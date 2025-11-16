@@ -36,8 +36,8 @@ source("./utils/Fct_Data-Prep.R")
 # Mtdt_7
 mtdt <- st_read("./data/processed_data/Mtdt/mtdt_7.gpkg")
 
-# predictors_raw_v2.0
-pred_raw <- st_read("./data/processed_data/predictors/predictors_raw_v2.1.gpkg")
+# predictors_raw_v2.2
+pred_raw <- st_read("./data/processed_data/predictors/predictors_raw_v2.2.gpkg")
 
 # div_indices_v1.0
 div <- readr::read_csv2("./data/processed_data/Traits/div_indices_v1.0.csv") %>%
@@ -156,7 +156,7 @@ pred_tr <- pred_tr %>%
 
 
 
-#--- Log  ------------------
+#--- Log when max value >/= to 10*median ------------------
 # Transform variables with outliers using max value >/= to 10*median value rule
 # Iterate on all predictors, if max value >/= to 10*median value, apply log(x + 1) transformation, else keep the same
 # Create a new data frame to store transformed variables
@@ -200,7 +200,7 @@ pred_tr <- pred_tr %>% dplyr::select(-"...143")
 rm(pred_num, pred_num_log, i, max_val, median_val, new_col_name)
 
 
-#--- Scale -------------------------------
+#--- Standard scale all -------------------------------
 # Explanation
 # Why scale and normalize variables?
 # First, they can improve the performance and accuracy of many machine learning algorithms, such as linear regression, logistic regression, k-means clustering, and principal component analysis. These algorithms rely on the assumption that the features have similar ranges and distributions, and are sensitive to large differences in scale or magnitude. 
@@ -209,128 +209,128 @@ rm(pred_num, pred_num_log, i, max_val, median_val, new_col_name)
 
 # source : https://www.linkedin.com/advice/3/what-most-effective-techniques-scaling-normalizing-57jlc
 
-# Explo : compare scaling methods ----
-# Select numerical predictors 
-dt <- pred_tr %>% st_drop_geometry() %>%
-  dplyr::select(where(is.numeric)) %>%
-  dplyr::select(-c("x", "y"))  # Do not scale coordinates
-
-#---- Plot predictors distribution 
-plot_distributions(dt, 
-                   output_path = "./figures/Predictors/Hist_transfo_scaling/", 
-                   version_number = "predictors_raw_v2.1")
-
-
-
-# Observations
-# Highly skewed data (mostly to the left) with some outliers to the right.
-
-#---- Scale and plot again 
-# Standardization
-# Explanation : Standardization rescales values to have a mean of 0 and a standard deviation of 1, by subtracting the mean and dividing by the standard deviation. 
-# Convert scaled matrix to data frame
-dt_standard <- as.data.frame(scale(dt))
-plot_distributions(dt_standard, hist_color = "gold",
-                   output_path = "./figures/Predictors/Hist_transfo_scaling/", 
-                   version_number = "predictors_raw_v2.1_strandard_scaling")
-
-
-# Min Max scale (values between 0 and 1)
-# Explanation : Min-max scaling rescales values to a range between 0 and 1, by subtracting the minimum value and dividing by the range. 
-process <- caret::preProcess(dt, method=c("range"))
-dt_minmax <- predict(process, dt)
-
-plot_distributions(dt_minmax, hist_color = "pink",
-                   output_path = "./figures/Predictors/Hist_transfo_scaling/", 
-                   version_number = "predictors_raw_v2.1_minmax_scaling")
-
-
-# Robust scaling 
-# Explanation : Robust scaling rescales values to have a median of 0 and an interquartile range of 1, by subtracting the median and dividing by the interquartile range. The advantage of robust scaling is that it is less sensitive to outliers than min-max scaling or standardization.
-robust <- apply(dt, 2, function(x) {
-  x <- as.numeric(x)  # ensure numeric
-  if (all(is.na(x))) return(rep(NA, length(x)))  # handle all-NA columns
-  (x - median(x, na.rm = TRUE)) / IQR(x, na.rm = TRUE)
-})
-dt_robust <- as.data.frame(robust)
-plot_distributions(dt_robust, hist_color = "lightgreen",
-                   output_path = "./figures/Predictors/Hist_transfo_scaling/", 
-                   version_number = "predictors_raw_v2.1_robust_scaling")
-
-
-# All
-# Define transparent color helper
-color_transparent <- function(color, alpha) {
-  rgb_col <- col2rgb(color)
-  rgb(rgb_col[1]/255, rgb_col[2]/255, rgb_col[3]/255, alpha)
-}
-
-# Parameters
-colors <- c("lightblue", "gold", "pink", "lightgreen")
-alpha <- 0.3
-colors <- sapply(colors, color_transparent, alpha = alpha)
-
-# Combine datasets into a list
-data_list <- list(dt, dt_standard, dt_minmax, dt_robust)
-
-# Set up parameters
-n_predictors <- ncol(dt)
-n_per_page <- 8
-n_pages <- ceiling(n_predictors / n_per_page)
-
-# Output directory and version number
-output_path <- "./figures/Predictors/Hist_transfo_scaling/"
-version_number <-  "predictors_raw_v2.1_all_scaling"
-
-# Create output folder if it doesn't exist
-if (!dir.exists(output_path)) dir.create(output_path, recursive = TRUE)
-
-# Loop through pages
-for (page in 1:n_pages) {
-  start <- (page - 1) * n_per_page + 1
-  end <- min(page * n_per_page, n_predictors)
-  predictors <- colnames(dt)[start:end]
-  
-  # Define filename for this page
-  file_name <- file.path(output_path, paste0("overlay_v", version_number, "_page", page, ".png"))
-  
-  # Open PNG device (high resolution)
-  png(filename = file_name, width = 1600, height = 900)
-  par(mfrow = c(2, 4), mar = c(4, 4, 2, 1))  # Adjust margins if needed
-  
-  # Plot histograms
-  for (predictor in predictors) {
-    # First dataset
-    hist(
-      data_list[[1]][[predictor]], 
-      main = predictor, 
-      xlab = predictor, 
-      col = colors[1], 
-      border = "white", 
-      breaks = 20, 
-      freq = FALSE
-    )
-    
-    # Overlay remaining datasets
-    for (i in 2:length(data_list)) {
-      hist(
-        data_list[[i]][[predictor]], 
-        col = colors[i], 
-        border = NA, 
-        breaks = 20, 
-        freq = FALSE, 
-        add = TRUE
-      )
-    }
-  }
-  
-  dev.off()
-  message("Saved: ", file_name)
-}
-
-
-rm(alpha, colors, end, file_name, i, n_pages, n_per_page, n_predictors, output_path, page, plots, predictor, predictors, start, version_number)
-rm(robust, process, dt_robust, dt_standard, dt_minmax, dt, data_list)
+# # Explo : compare scaling methods ----
+# # Select numerical predictors 
+# dt <- pred_tr %>% st_drop_geometry() %>%
+#   dplyr::select(where(is.numeric)) %>%
+#   dplyr::select(-c("x", "y"))  # Do not scale coordinates
+# 
+# #---- Plot predictors distribution 
+# plot_distributions(dt, 
+#                    output_path = "./figures/Predictors/Hist_transfo_scaling/", 
+#                    version_number = "predictors_raw_v2.1")
+# 
+# 
+# 
+# # Observations
+# # Highly skewed data (mostly to the left) with some outliers to the right.
+# 
+# #---- Scale and plot again 
+# # Standardization
+# # Explanation : Standardization rescales values to have a mean of 0 and a standard deviation of 1, by subtracting the mean and dividing by the standard deviation. 
+# # Convert scaled matrix to data frame
+# dt_standard <- as.data.frame(scale(dt))
+# plot_distributions(dt_standard, hist_color = "gold",
+#                    output_path = "./figures/Predictors/Hist_transfo_scaling/", 
+#                    version_number = "predictors_raw_v2.1_strandard_scaling")
+# 
+# 
+# # Min Max scale (values between 0 and 1)
+# # Explanation : Min-max scaling rescales values to a range between 0 and 1, by subtracting the minimum value and dividing by the range. 
+# process <- caret::preProcess(dt, method=c("range"))
+# dt_minmax <- predict(process, dt)
+# 
+# plot_distributions(dt_minmax, hist_color = "pink",
+#                    output_path = "./figures/Predictors/Hist_transfo_scaling/", 
+#                    version_number = "predictors_raw_v2.1_minmax_scaling")
+# 
+# 
+# # Robust scaling 
+# # Explanation : Robust scaling rescales values to have a median of 0 and an interquartile range of 1, by subtracting the median and dividing by the interquartile range. The advantage of robust scaling is that it is less sensitive to outliers than min-max scaling or standardization.
+# robust <- apply(dt, 2, function(x) {
+#   x <- as.numeric(x)  # ensure numeric
+#   if (all(is.na(x))) return(rep(NA, length(x)))  # handle all-NA columns
+#   (x - median(x, na.rm = TRUE)) / IQR(x, na.rm = TRUE)
+# })
+# dt_robust <- as.data.frame(robust)
+# plot_distributions(dt_robust, hist_color = "lightgreen",
+#                    output_path = "./figures/Predictors/Hist_transfo_scaling/", 
+#                    version_number = "predictors_raw_v2.1_robust_scaling")
+# 
+# 
+# # All
+# # Define transparent color helper
+# color_transparent <- function(color, alpha) {
+#   rgb_col <- col2rgb(color)
+#   rgb(rgb_col[1]/255, rgb_col[2]/255, rgb_col[3]/255, alpha)
+# }
+# 
+# # Parameters
+# colors <- c("lightblue", "gold", "pink", "lightgreen")
+# alpha <- 0.3
+# colors <- sapply(colors, color_transparent, alpha = alpha)
+# 
+# # Combine datasets into a list
+# data_list <- list(dt, dt_standard, dt_minmax, dt_robust)
+# 
+# # Set up parameters
+# n_predictors <- ncol(dt)
+# n_per_page <- 8
+# n_pages <- ceiling(n_predictors / n_per_page)
+# 
+# # Output directory and version number
+# output_path <- "./figures/Predictors/Hist_transfo_scaling/"
+# version_number <-  "predictors_raw_v2.1_all_scaling"
+# 
+# # Create output folder if it doesn't exist
+# if (!dir.exists(output_path)) dir.create(output_path, recursive = TRUE)
+# 
+# # Loop through pages
+# for (page in 1:n_pages) {
+#   start <- (page - 1) * n_per_page + 1
+#   end <- min(page * n_per_page, n_predictors)
+#   predictors <- colnames(dt)[start:end]
+#   
+#   # Define filename for this page
+#   file_name <- file.path(output_path, paste0("overlay_v", version_number, "_page", page, ".png"))
+#   
+#   # Open PNG device (high resolution)
+#   png(filename = file_name, width = 1600, height = 900)
+#   par(mfrow = c(2, 4), mar = c(4, 4, 2, 1))  # Adjust margins if needed
+#   
+#   # Plot histograms
+#   for (predictor in predictors) {
+#     # First dataset
+#     hist(
+#       data_list[[1]][[predictor]], 
+#       main = predictor, 
+#       xlab = predictor, 
+#       col = colors[1], 
+#       border = "white", 
+#       breaks = 20, 
+#       freq = FALSE
+#     )
+#     
+#     # Overlay remaining datasets
+#     for (i in 2:length(data_list)) {
+#       hist(
+#         data_list[[i]][[predictor]], 
+#         col = colors[i], 
+#         border = NA, 
+#         breaks = 20, 
+#         freq = FALSE, 
+#         add = TRUE
+#       )
+#     }
+#   }
+#   
+#   dev.off()
+#   message("Saved: ", file_name)
+# }
+# 
+# 
+# rm(alpha, colors, end, file_name, i, n_pages, n_per_page, n_predictors, output_path, page, plots, predictor, predictors, start, version_number)
+# rm(robust, process, dt_robust, dt_standard, dt_minmax, dt, data_list)
 
 # Scale : standardization method  ----
 # We choose the standardization method
@@ -347,7 +347,14 @@ pred_tr[, num] <- scale(pred_tr[, num] %>% st_drop_geometry())
 
 #--- Export transformed predictors -------------------------------
 # predictors_tr_v1.0 ----
+# based on predictors_raw_v2.1
+# transformations : Remove 0 variance predictors, Replace negative distance values by 0, CLT of habitat composition, Log when max value >/= to 10*median, Standard scale all
 st_write(pred_tr, "./data/processed_data/predictors/predictors_tr_v1.0.gpkg", append = FALSE)
+
+# predictors_tr_v1.1 ----
+# based on predictors_raw_v2.1
+# transformations : Remove 0 variance predictors, Replace negative distance values by 0, CLT of habitat composition, Log when max value >/= to 10*median, Standard scale all --> same as predictors_tr_v1.0
+st_write(pred_tr, "./data/processed_data/predictors/predictors_tr_v1.1.gpkg", append = FALSE)
 
 
 
