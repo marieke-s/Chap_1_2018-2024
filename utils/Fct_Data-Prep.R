@@ -89,7 +89,7 @@ compute_pcr_replicates <- function(rep_string) {
 #---------------------------------- Function : spatial_extraction --------------------
 # This function extracts pixel values from a raster within a polygon (ie replicates buffer).
 # It reprojects the polygon to the raster's CRS if necessary.
-# It computes the mean, min, max, and range of the pixel values within the polygon.
+# It computes the mean (weighted by pixel surface intersected), min, max, and range of the pixel values within the polygon.
 # The mean is weighted by the area of the pixels intersected with the.
 
 
@@ -195,6 +195,240 @@ compute_selected_terrain_ind <- function(rast, folder_path, neighbors, name, ind
     filename_roughness <- paste0(folder_path, "roughness", neighbors, "_", tile_name, ".tif")
     terra::terrain(x = rast, v = "roughness", neighbors = neighbors, filename = filename_roughness)
   }
+}
+
+#---------------------------------- Functions to compute habitat metrics ---------------------------
+calculate_habitats <- function(buff, rast, id_column_name, name = "", buff_area) {
+  # Check inputs
+  if (!inherits(buff, "sf") && !inherits(buff, "SpatVector")) stop("buff must be an sf or SpatVector object")
+  if (!inherits(rast, "SpatRaster")) stop("rast must be a SpatRaster object")
+  if (!id_column_name %in% colnames(buff)) stop(paste("Column", id_column_name, "not found in buff"))
+  if (!buff_area %in% colnames(buff)) stop(paste("Area column", buff_area, "not found in buff"))
+  if (!is.character(name)) stop("name must be a character string")
+  
+  # Define dynamic column names
+  main_habitat_col <- paste0(name, "main_habitat")
+  nb_habitat_col <- paste0(name, "nb_habitat_per_km2")
+  
+  # Initialize output columns
+  buff[[main_habitat_col]] <- NA_character_
+  buff[[nb_habitat_col]] <- NA_real_
+  
+  # Total number of raster bands (after exclusion)
+  total_bands <- terra::nlyr(rast)
+  band_names <- names(rast)
+  
+  for (i in seq_len(nrow(buff))) {
+    polygon_id <- buff[[id_column_name]][i]
+    area_km2 <- buff[[buff_area]][i]
+    
+    message(
+      "--------------------------------------------\n",
+      "Processed polygon: ", polygon_id, "\n",
+      "Polygon number: ", i, "\n",
+      "--------------------------------------------"
+    )
+    
+    polygon_sums <- list()
+    
+    for (band in seq_len(total_bands)) {
+      band_name <- band_names[band]
+      raster_band <- terra::subset(rast, band)
+      
+      val <- terra::extract(raster_band, buff[i, ], weights = TRUE, na.rm = TRUE)
+      
+      if (!is.null(val) && nrow(val) > 0) {
+        weighted_values <- val[, 2] * val[, 3]
+        weighted_sum <- if (all(is.na(weighted_values))) 0 else sum(weighted_values, na.rm = TRUE)
+      } else {
+        weighted_sum <- 0
+      }
+      
+      polygon_sums[[band_name]] <- weighted_sum
+      message(band_name, " weighted sum: ", weighted_sum)
+    }
+    
+    sums_vector <- unlist(polygon_sums)
+    max_band <- if (all(sums_vector == 0)) NA else names(sums_vector)[which.max(sums_vector)]
+    number_habitat <- sum(sums_vector != 0)
+    
+    habitat_density <- if (is.na(area_km2) || area_km2 == 0) NA else number_habitat / area_km2
+    
+    buff[[main_habitat_col]][i] <- max_band
+    buff[[nb_habitat_col]][i] <- habitat_density
+    
+    message(" - Main habitat for ", polygon_id, ": ", ifelse(is.na(max_band), "None", max_band))
+    message(" - Habitat density (/km2) for ", polygon_id, ": ", habitat_density)
+  }
+  
+  return(buff)
+}
+
+
+
+
+
+
+# Function that retreive habitat variables using nearest neighbors when NA
+calculate_habitats_nn <- function(buff,
+                                  rast,
+                                  id_column_name,
+                                  buff_area,
+                                  name       = "",
+                                  k_nearest  = 3) {
+  require(terra)
+  require(sf)
+  require(nngeo)
+  
+  #----------------------#
+  #       Checks         #
+  #----------------------#
+  if (!inherits(buff, "sf") && !inherits(buff, "SpatVector")) {
+    stop("buff must be an sf or SpatVector object")
+  }
+  if (inherits(buff, "SpatVector")) {
+    buff <- sf::st_as_sf(buff)
+  }
+  if (!inherits(rast, "SpatRaster")) stop("rast must be a SpatRaster object")
+  if (!id_column_name %in% colnames(buff)) {
+    stop(paste("Column", id_column_name, "not found in buff"))
+  }
+  if (!buff_area %in% colnames(buff)) {
+    stop(paste("Area column", buff_area, "not found in buff"))
+  }
+  if (!is.character(name)) stop("name must be a character string")
+  
+  # Make sure CRS is consistent (transform polygons to raster CRS)
+  rast_crs <- terra::crs(rast, proj = TRUE)
+  if (!is.na(rast_crs)) {
+    buff <- sf::st_transform(buff, crs = rast_crs)
+  }
+  
+  #----------------------#
+  #  Dynamic col names   #
+  #----------------------#
+  band_names       <- names(rast)
+  main_habitat_col <- paste0(name, "main_habitat")
+  nb_habitat_col   <- paste0(name, "nb_habitat_per_km2")
+  
+  # Initialize columns
+  buff[[main_habitat_col]] <- NA_character_
+  buff[[nb_habitat_col]]   <- NA_real_
+  
+  #----------------------#
+  #  Raster as points    #
+  #----------------------#
+  # Used only when polygons do not intersect the raster
+  rast_df <- terra::as.data.frame(rast, xy = TRUE, cells = TRUE, na.rm = TRUE)
+  rast_pts_sf <- sf::st_as_sf(
+    rast_df,
+    coords = c("x", "y"),
+    crs    = rast_crs
+  )
+  
+  total_bands <- terra::nlyr(rast)
+  
+  #----------------------#
+  #      Main loop       #
+  #----------------------#
+  for (i in seq_len(nrow(buff))) {
+    polygon_id <- buff[[id_column_name]][i]
+    area_km2   <- buff[[buff_area]][i]
+    
+    message(
+      "--------------------------------------------\n",
+      "Processed polygon: ", polygon_id, "\n",
+      "Polygon number: ", i, "\n",
+      "--------------------------------------------"
+    )
+    
+    # Test overlap using the first band
+    test_val <- terra::extract(rast[[1]], buff[i, ], weights = TRUE, na.rm = TRUE)
+    has_overlap <- !is.null(test_val) && nrow(test_val) > 0 && any(!is.na(test_val[, 2]))
+    
+    polygon_values <- numeric(total_bands)
+    names(polygon_values) <- band_names
+    
+    if (has_overlap) {
+      #--------------------------------------#
+      #   Standard area-weighted extraction  #
+      #--------------------------------------#
+      for (b in seq_len(total_bands)) {
+        band_name   <- band_names[b]
+        raster_band <- rast[[b]]
+        
+        val <- terra::extract(raster_band, buff[i, ], weights = TRUE, na.rm = TRUE)
+        
+        if (!is.null(val) && nrow(val) > 0) {
+          # val: ID, value, weight
+          weighted_values <- val[, 2] * val[, 3]
+          weighted_sum <- if (all(is.na(weighted_values))) 0 else sum(weighted_values, na.rm = TRUE)
+        } else {
+          weighted_sum <- 0
+        }
+        
+        polygon_values[band_name] <- weighted_sum
+        message(band_name, " weighted sum: ", weighted_sum)
+      }
+      
+    } else {
+      #--------------------------------------#
+      #   NO OVERLAP -> 3 NEAREST PIXELS    #
+      #--------------------------------------#
+      message("Polygon ", polygon_id, " does not intersect raster, using ", k_nearest, " nearest pixels.")
+      
+      # Find k nearest raster points to the polygon
+      nn_cells <- nngeo::st_nn(buff[i, ], rast_pts_sf, k = k_nearest)
+      nn_idx   <- unlist(nn_cells)
+      
+      if (length(nn_idx) == 0) {
+        polygon_values[] <- NA_real_
+      } else {
+        # For each band: sum the values of the k nearest pixels
+        for (b in seq_len(total_bands)) {
+          band_name <- band_names[b]
+          vals_near <- rast_df[nn_idx, band_name]
+          
+          if (all(is.na(vals_near))) {
+            polygon_values[band_name] <- NA_real_
+          } else {
+            polygon_values[band_name] <- sum(vals_near, na.rm = TRUE)
+          }
+          
+          message(band_name, " nearest sum (", k_nearest, " pixels): ", polygon_values[band_name])
+        }
+      }
+    }
+    
+    #----------------------#
+    #  Metrics per polygon #
+    #----------------------#
+    vals_for_calc <- polygon_values
+    vals_for_calc[is.na(vals_for_calc)] <- 0
+    
+    total_sum <- sum(vals_for_calc)
+    
+    if (total_sum == 0) {
+      max_band       <- NA_character_
+      number_habitat <- 0
+    } else {
+      max_band       <- names(vals_for_calc)[which.max(vals_for_calc)]
+      number_habitat <- sum(vals_for_calc > 0)
+    }
+    
+    # Habitat density (number per km2)
+    habitat_density <- if (is.na(area_km2) || area_km2 == 0) NA_real_ else number_habitat / area_km2
+    
+    # Write outputs
+    buff[[main_habitat_col]][i] <- max_band
+    buff[[nb_habitat_col]][i]   <- habitat_density
+    
+    
+    message(" - Main habitat for ", polygon_id, ": ", ifelse(is.na(max_band), "None", max_band))
+    message(" - Habitat density (/km2) for ", polygon_id, ": ", habitat_density)
+  }
+  
+  return(buff)
 }
 
 #---------------------------------- Function : identify_columns   ------------------

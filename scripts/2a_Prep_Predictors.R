@@ -531,71 +531,6 @@ plot(rast_grouped)
 # Main habitat and Number of habitat / km² ----
 # Important methodological considerations : "Zone bathyale" and "Cymodocees" are not considered as a habitat in this analysis, thus they are ignored when tehy appear to be the main habitat (we take the next more important habitat) and when counting the number of habitats per km².
 
-calculate_habitats <- function(buff, rast, id_column_name, name = "", buff_area) {
-  # Check inputs
-  if (!inherits(buff, "sf") && !inherits(buff, "SpatVector")) stop("buff must be an sf or SpatVector object")
-  if (!inherits(rast, "SpatRaster")) stop("rast must be a SpatRaster object")
-  if (!id_column_name %in% colnames(buff)) stop(paste("Column", id_column_name, "not found in buff"))
-  if (!buff_area %in% colnames(buff)) stop(paste("Area column", buff_area, "not found in buff"))
-  if (!is.character(name)) stop("name must be a character string")
-  
-  # Define dynamic column names
-  main_habitat_col <- paste0(name, "main_habitat")
-  nb_habitat_col <- paste0(name, "nb_habitat_per_km2")
-  
-  # Initialize output columns
-  buff[[main_habitat_col]] <- NA_character_
-  buff[[nb_habitat_col]] <- NA_real_
-  
-  # Total number of raster bands (after exclusion)
-  total_bands <- terra::nlyr(rast)
-  band_names <- names(rast)
-  
-  for (i in seq_len(nrow(buff))) {
-    polygon_id <- buff[[id_column_name]][i]
-    area_km2 <- buff[[buff_area]][i]
-    
-    message(
-      "--------------------------------------------\n",
-      "Processed polygon: ", polygon_id, "\n",
-      "Polygon number: ", i, "\n",
-      "--------------------------------------------"
-    )
-    
-    polygon_sums <- list()
-    
-    for (band in seq_len(total_bands)) {
-      band_name <- band_names[band]
-      raster_band <- terra::subset(rast, band)
-      
-      val <- terra::extract(raster_band, buff[i, ], weights = TRUE, na.rm = TRUE)
-      
-      if (!is.null(val) && nrow(val) > 0) {
-        weighted_values <- val[, 2] * val[, 3]
-        weighted_sum <- if (all(is.na(weighted_values))) 0 else sum(weighted_values, na.rm = TRUE)
-      } else {
-        weighted_sum <- 0
-      }
-      
-      polygon_sums[[band_name]] <- weighted_sum
-      message(band_name, " weighted sum: ", weighted_sum)
-    }
-    
-    sums_vector <- unlist(polygon_sums)
-    max_band <- if (all(sums_vector == 0)) NA else names(sums_vector)[which.max(sums_vector)]
-    number_habitat <- sum(sums_vector != 0)
-    
-    habitat_density <- if (is.na(area_km2) || area_km2 == 0) NA else number_habitat / area_km2
-    
-    buff[[main_habitat_col]][i] <- max_band
-    buff[[nb_habitat_col]][i] <- habitat_density
-    
-    message(" - Main habitat for ", polygon_id, ": ", ifelse(is.na(max_band), "None", max_band))
-    message(" - Habitat density (/km2) for ", polygon_id, ": ", habitat_density)
-  }
-  
-  return(buff)
-}
 
 # For all habitats
 buff1 <- calculate_habitats(buff = buff, 
@@ -658,7 +593,7 @@ rm(buff1, extra_cols)
 
 
 
-# Surface proportion of each habitat ----
+# Surface proportion of each grouped habitat ----
 
 # Make buff a spatial object
 buff <- sf::st_as_sf(buff)
@@ -708,23 +643,78 @@ rm(df, extra_cols)
   
 
 
-# Handle NA [TO DO | ASK CELIA ]----
+#--- predictors_raw_v2.2 ----
+# Load predictors_raw_v2.1
+buff <- sf::st_read("./data/processed_data/predictors/predictors_raw_v2.1.gpkg")
+
+# Handle NA ----
 # For habitat with NA --> take the 3 closest pixel values
 
 # Select buff with NA in habitat columns
 habitat_cols <- c("main_habitat", "grouped_main_habitat", "grouped_nb_habitat_per_km2")
 buff_na <- buff %>%
   filter(if_any(all_of(habitat_cols), is.na)) # 5 NA 
-buff_na <- buff_na[, c(1, 64:ncol(buff_na))]
+
+buff_na <- buff_na %>% 
+  dplyr::select(replicates, area_km2)
 
 # Export 
-st_write(buff_na, "./data/processed_data/predictors/Habitat/habitat_NA.gpkg")
+st_write(buff_na, "./data/processed_data/predictors/Habitat/habitat_NA.gpkg", delete_dsn = TRUE)
 
 ## QGIS check : far away from raster but considered coastal because near a small island.
 
 
-# Clean up
-rm(layer, new_cols, temp, rast, rast_grouped, buff_na, habitat_cols)
+
+
+
+# Compute main habitat and number of habitats per km2 for buff_na grouped and not grouped ----
+source("./utils/Fct_Data-Prep.R")
+
+buff1 <- calculate_habitats_nn(
+  buff           = buff_na,
+  rast           = rast_grouped,
+  id_column_name = "replicates",
+  buff_area      = "area_km2",
+  name           = "grouped_"      # or e.g. "hab_"
+  # k_nearest    = 3       # default is 3, can change if needed
+)
+
+buff2 <- calculate_habitats_nn(
+  buff           = buff_na,
+  rast           = rast,
+  id_column_name = "replicates",
+  buff_area      = "area_km2",
+  name           = ""      # or e.g. "hab_"
+  # k_nearest    = 3       # default is 3, can change if needed
+)
+
+
+# Merge back NA values -----
+
+# Merge buff1 and buff 2 by replicates 
+buff12 <- buff1 %>%
+  dplyr::select(-area_km2) %>%
+  left_join(
+    buff2 %>% st_drop_geometry() %>% dplyr::select(-area_km2),
+    by = "replicates"
+  )
+
+
+# For replicates in buff12, replace the hab_cols columns in buff with those in buff12
+
+hab_cols <- colnames(buff12[, -1] %>% sf::st_drop_geometry())
+hab_cols <- intersect(hab_cols, names(buff))
+
+
+# match buff$replicates to buff12$replicates
+idx <- match(buff$replicates, buff12$replicates)
+
+# which rows in buff have a match in buff12?
+rows_to_update <- !is.na(idx)
+
+# replace values in buff[rows_to_update, hab_cols] 
+# with the corresponding rows from buff12
+buff[rows_to_update, hab_cols] <- buff12[idx[rows_to_update], hab_cols] %>% sf::st_drop_geometry()
 
 
 
@@ -733,6 +723,166 @@ rm(layer, new_cols, temp, rast, rast_grouped, buff_na, habitat_cols)
 
 
 
+
+
+
+
+# Check and Clean up -----
+# Check na again and clean 
+
+habitat_cols <- c("main_habitat", "grouped_main_habitat", "grouped_main_habitat", "grouped_nb_habitat_per_km2")
+buff_na <- buff %>%
+  filter(if_any(all_of(habitat_cols), is.na)) 
+
+# if buff_na = 0 rows then clean up 
+
+if(nrow(buff_na) == 0){
+  message("No more NA in main habitat and nb hab per km2")
+  rm(buff_na, buff1, buff2, buff12, hab_cols, habitat_cols, idx, rows_to_update)
+} else {
+  message( "/!\ Remaining NA !")
+}
+
+
+# Handle habitats proportions (grouped only) -----
+
+# Habitats (base names, must match layers in rast_grouped)
+habitats <- c(
+  "algues_infralittorales",
+  "matte_morte_p_oceanica",
+  "coralligenous",
+  "rock",
+  "soft_bottom",
+  "meadow",
+  "habitats_artificiels"
+)
+
+mean_cols <- paste0(habitats, "_mean")
+
+## 1. Remove old habitat mean columns if present
+buff <- buff %>%
+  dplyr::select(-any_of(mean_cols))
+
+## 2. Compute weighted means of each habitat within buffers
+
+buff <- sf::st_as_sf(buff)
+df   <- buff
+
+# Extract weighted means per habitat
+for (h in names(rast_grouped)) {
+  temp <- spatial_extraction(
+    var   = h,
+    rast  = rast_grouped[[h]],
+    poly  = df,
+    stats = "mean"
+  )
+  
+  # The new column should be like "<h>_mean"
+  new_cols <- setdiff(names(temp), names(df))
+  
+  if (length(new_cols) > 0) {
+    df <- dplyr::bind_cols(df, sf::st_drop_geometry(temp)[, new_cols, drop = FALSE])
+  } else {
+    message(sprintf("No new columns returned for layer '%s'", h))
+  }
+}
+
+names(df)
+sum(is.na(df$"Habitats artificiels_mean")) # 5 NA
+
+# Determine which polygons overlapped the raster
+habitats <- paste0(names(rast_grouped), "_mean")
+df$overlap <- apply(df[, habitats], 1, function(x) any(is.na(x)))
+
+
+
+## 3. For polygons with NO overlap → compute proportions using the 3 nearest pixels
+
+# Convert raster to points
+rast_df <- terra::as.data.frame(rast_grouped, xy = TRUE, na.rm = TRUE)
+rast_pts <- sf::st_as_sf(rast_df, coords = c("x", "y"), crs = st_crs(df))
+
+
+# Compute nearest-pixel sums per habitat
+
+no_overlap_ids <- which(df$overlap == TRUE)
+
+for (i in no_overlap_ids) {
+  
+  # find nearest 3 raster points
+  nn  <- nngeo::st_nn(df[i, ], rast_pts, k = 3)
+  idx <- unlist(nn)
+  
+  if (length(idx) == 0) {
+    # nothing found – keep NA for this polygon
+    next
+  }
+  
+  # for each habitat, sum the values of the 3 nearest pixels
+  for (h in names(rast_grouped)) {
+    col_mean <- paste0(h, "_mean")
+    
+    # make sure the column exists and is numeric
+    if (!col_mean %in% names(df)) {
+      df[[col_mean]] <- NA_real_
+    }
+    
+    vals <- rast_df[idx, h]
+    new_val <- if (all(is.na(vals))) NA_real_ else sum(vals, na.rm = TRUE)
+    
+    # this is the crucial line: assign as a scalar into sf/tibble
+    df[i, col_mean] <- new_val
+  }
+}
+
+# Check results
+df %>% filter(overlap == TRUE) %>% dplyr::select(c(habitats)) %>% print()
+
+
+
+
+
+
+## 4. Convert these habitat means into TRUE PROPORTIONS
+
+mean_cols <- paste0(names(rast_grouped), "_mean")
+
+total_means <- rowSums(df[, mean_cols] %>% st_drop_geometry(), na.rm = TRUE)
+
+
+for (col in mean_cols) {
+  df[[col]] <- ifelse(
+    total_means > 0,
+    df[[col]] / total_means,
+    NA_real_
+  )
+}
+
+# Check 
+summary(rowSums(df[, mean_cols] %>% st_drop_geometry(), na.rm = TRUE)) # All 1 = good
+
+
+## 5. Merge back to buff 
+buff <- df %>% dplyr::select(-overlap)
+
+
+## Summary of what we did : 
+
+# | Case                              | Habitat value source                       | Final proportions      |
+#   | --------------------------------- | ------------------------------------------ | ---------------------- |
+#   | **Polygon overlaps raster**       | Weighted means from `spatial_extraction()` | mean_i / sum(mean_all) |
+#   | **Polygon outside raster extent** | Sum of 3 nearest pixels per habitat        | sum_i / sum(sum_all)   |
+#   
+
+
+
+
+# Clean up ----
+# Check na and clean up
+
+
+rm(h, habitats, i, idx, mean_cols, new_cols, no_overlap, vals, df, nn, rast_df, rast_pts, temp, col, col_mean, new_val, no_overlap_ids, total_means)
+rm(rast, rast_grouped)
 
 #------------- VECTOR DATA ----------------
 ###### Distance between seabed and depth sampling ############
@@ -1244,6 +1394,23 @@ cat(colnames(pred), sep = ", ")
 pred <- st_read("./data/processed_data/predictors/predictors_raw_v2.0.gpkg") %>%
   dplyr::select(-c(canyon_canyon_id, port_nomzonepor, port_nomport, mpa_name)) %>%
   dplyr::select(-canyon_delta_d)
+
+# export
+st_write(pred, "./data/processed_data/predictors/predictors_raw_v2.1.gpkg", append = FALSE)
+
+# Export predictors_raw_v2.1 ----
+# predictors_raw_v2.0
+# 12/11/2025. 
+# ROWS
+# Based on mtdt_7.gpkg, same as predictors_raw_v2.1
+# PREDICTORS : 
+# same as predictors_raw_v2.1 with mofifications on Habitat columns : 
+# habitat NA replaced 
+# proprotions computed differently --> see Habitat section 
+# predictors (147) : area_km2, mpa_fully, canyon_dist_m_min, canyon_dist_m_max, canyon_dist_m_mean, canyon_dist_m_range, canyon_dist_m_weight, port_dist_m_min, port_dist_m_max, port_dist_m_mean, port_dist_m_range, port_dist_m_weight, mpa_dist_m_min, mpa_dist_m_max, mpa_dist_m_mean, mpa_dist_m_range, mpa_dist_m_weight, shore_dist_m_min, shore_dist_m_max, shore_dist_m_mean, shore_dist_m_range, shore_dist_m_weight, canyon_area_km2, canyon_type, canyon_mean_depth, canyon_length, canyon_width, canyon_shape_length, canyon_shape_area, mpa_protection, gravity_mean, gravity_min, gravity_max, gravity_range, aspect_min, aspect_max, aspect_mean, roughness_min, roughness_max, roughness_mean, slope_min, slope_max, slope_mean, tpi_min, tpi_max, tpi_mean, tri_min, tri_max, tri_mean, main_habitat, nb_habitat_per_km2, grouped_main_habitat, grouped_nb_habitat_per_km2, bathy_mean, bathy_range, bathy_min, bathy_max, dist_seabed_depthsampling, wind_min_24h, wind_max_24h, wind_mean_24h, vel_min_24h, vel_max_24h, vel_mean_24h, wind_max_7j, wind_min_7j, wind_mean_7j, vel_max_7j, vel_min_7j, vel_mean_7j, wind_max_1m, wind_min_1m, wind_mean_1m, vel_max_1m, vel_min_1m, vel_mean_1m, ws_max_1y, ws_min_1y, ws_mean_1y, vel_max_1y, vel_min_1y, vel_mean_1y, temp_min_24h, temp_max_24h, temp_mean_24h, sal_min_24h, sal_max_24h, sal_mean_24h, temp_max_7j, temp_min_7j, temp_mean_7j, sal_max_7j, sal_min_7j, sal_mean_7j, temp_max_1m, temp_min_1m, temp_mean_1m, sal_max_1m, sal_min_1m, sal_mean_1m, temp_max_1y, temp_min_1y, temp_mean_1y, sal_max_1y, sal_min_1y, sal_mean_1y, cop_chl_day_mean, cop_chl_day_min, cop_chl_day_max, cop_chl_week_mean, cop_chl_week_min, cop_chl_week_max, cop_chl_month_mean, cop_chl_month_min, cop_chl_month_max, cop_chl_year_mean, cop_chl_year_min, cop_chl_year_max, cop_chl_5years_mean, cop_chl_5years_min, cop_chl_5years_max, cop_analysed_sst_day_mean, cop_analysed_sst_day_min, cop_analysed_sst_day_max, cop_analysed_sst_week_mean, cop_analysed_sst_week_min, cop_analysed_sst_week_max, cop_analysed_sst_month_mean, cop_analysed_sst_month_min, cop_analysed_sst_month_max, cop_analysed_sst_year_mean, cop_analysed_sst_year_min, cop_analysed_sst_year_max, cop_analysed_sst_5years_mean, cop_analysed_sst_5years_min, cop_analysed_sst_5years_max, x, y, replicates, matte_morte_P.oceanica_mean, Algues infralittorales_mean, Habitats artificiels_mean, soft_bottom_mean, meadow_mean, rock_mean, coralligenous_mean, geom
+cat(colnames(pred), sep = ", ")
+
+pred <- buff # (after modifications in the habitat section)
 
 # export
 st_write(pred, "./data/processed_data/predictors/predictors_raw_v2.1.gpkg", append = FALSE)

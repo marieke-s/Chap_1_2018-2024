@@ -98,6 +98,16 @@ mtdt <- mtdt %>%
     , by = "replicates"
   )
 
+# Merge div indices to mtdt and predictors
+full <- mtdt %>%
+  left_join(
+    div %>% st_drop_geometry(),
+    by = "replicates"
+  ) %>%
+  left_join(
+    pred_raw %>% st_drop_geometry(),
+    by = "replicates"
+  )
 
 
 
@@ -160,7 +170,7 @@ mtdt %>%
 
 
 
-#--- Map and hist of sampling effort -----
+#--- Map + hist of sampling effort -----
 cols_to_plot <- c("area_km2", "dist_seabed_depthsampling", "depth_sampling", "bathy_mean", "bathy_max", "PCR_replicates", "field_replicates", "estimated_volume_total")
 
 map_index_plots(df = mtdt, 
@@ -185,75 +195,76 @@ colnames(mtdt)
 
 
 
-#--- Sampling bias ----
-# Renames cols 
-dt <- mtdt %>% 
-  st_drop_geometry() %>%
-  left_join(
-    div %>%
-      st_drop_geometry() %>%
-      dplyr::select(replicates, R),
-    by = "replicates"
-  )%>%
-  dplyr::rename("decimalLongitude" = "x", "decimalLatitude" = "y", "species" = "R")
+#--- Map + hist of categorical sampling & seafloor depth -----
+# Make bathy categorical 
+mtdt <- mtdt %>%
+  mutate(
+    bathy_max_cat = case_when(
+      bathy_max > 0 & bathy_max <= 10 ~ "0-10m",
+      bathy_max > 10 & bathy_max <= 20 ~ "10-20m",
+      bathy_max > 20 & bathy_max <= 30 ~ "20-30m",
+      bathy_max > 30 & bathy_max <= 40 ~ "30-40m",
+      bathy_max > 40 & bathy_max <= 50 ~ "40-50m",
+      bathy_max > 50 & bathy_max <= 60 ~ "50-60m",
+      bathy_max > 60 & bathy_max <= 70 ~ "60-70m",
+      bathy_max > 70 & bathy_max <= 80 ~ "70-80m",
+      bathy_max > 80 & bathy_max <= 90 ~ "80-90m",
+      bathy_max > 80 & bathy_max <= 90 ~ "80-90m",
+      bathy_max > 90 & bathy_max <= 100 ~ "90-100m",
+      bathy_max > 100 ~ "> 100m",
+      
+      TRUE ~ NA_character_
+    ),
+    depth_sampling_cat = case_when(
+      depth_sampling > 0 & depth_sampling <= 10 ~ "0-10m",
+      depth_sampling > 10 & depth_sampling <= 20 ~ "10-20m",
+      depth_sampling > 20 & depth_sampling <= 30 ~ "20-30m",
+      depth_sampling > 30 & depth_sampling <= 40 ~ "30-40m",
+      depth_sampling > 40 & depth_sampling <= 50 ~ "40-50m",
+      depth_sampling > 50 & depth_sampling <= 60 ~ "50-60m",
+      depth_sampling > 60 & depth_sampling <= 70 ~ "60-70m",
+      depth_sampling > 70 & depth_sampling <= 80 ~ "70-80m",
+      depth_sampling > 80 & depth_sampling <= 90 ~ "80-90m",
+      depth_sampling > 80 & depth_sampling <= 90 ~ "80-90m",
+      depth_sampling > 90 & depth_sampling <= 100 ~ "90-100m",
+      depth_sampling > 100 ~ "> 100m",
+      TRUE ~ NA_character_
+    )
+  ) 
 
-# Set decimalLatitude and decimalLongitude as numeric
-dt$decimalLatitude <- as.numeric(dt$decimalLatitude)
-dt$decimalLongitude <- as.numeric(dt$decimalLongitude)
-
-# Add/remove sampling rate predictors
-# Remove : airports, waterbodies
-# Add : ports
-
-# Compute sampling bias
-bias <- sampbias::calculate_bias(x = dt, 
-                                 gaz = NULL, # use default geographic gazetteers
-                                 res = 0.01, 
-                                 terrestrial = FALSE)
-
-# Check results
-str(bias)
-summary(bias)
-plot(bias)
-
-proj <- project_bias(bias)
-map_bias(proj, type = "log_sampling_rate")
-
-
-# Interpretation
-# Fig 1.
-# Strong effect of cities and roads. 
-# Negligable effect of airports and waterbodies (expected).
-
-
-# Fig 2. (map)
-# Estimation of sampling rate according to the predictors reflect well the reality. 
-
-# Problem is that sampling rate is computer on all marine space of the extent, when our study actually focuses on the coast. 
-# We will need to filter the data to keep only the coastal extent. 
-# --> This can be done using restrict_sample parameter.
+# Make factor to ensure correct order in plots
+mtdt$bathy_max_cat <- factor(mtdt$bathy_max_cat, levels = c("0-10m", "10-20m", "20-30m", "30-40m", "40-50m", "50-60m", "60-70m", "70-80m", "80-90m", "90-100m", "> 100m"))
+mtdt$depth_sampling_cat <- factor(mtdt$depth_sampling_cat, levels = c("0-10m", "10-20m", "20-30m", "30-40m", "40-50m", "50-60m", "60-70m", "70-80m", "80-90m", "90-100m", "> 100m"))
 
 
-grid <- st_read("/media/marieke/Shared/Chap-1/Model/Scripts/Chap_1/data/processed_data/data_prep/eDNA/Pts_to_Grid/grid_med005_coastal.shp")
-class(grid)
 
-bias <- sampbias::calculate_bias(x = dt, 
-                                 gaz = NULL, # use default geographic gazetteers
-                                 res = 0.01, # 10km resolution
-                                 terrestrial = FALSE, 
-                                 restrict_sample = grid
-)
+# Map
+map_categorical_plots(mtdt,
+                      cols_to_plot = c("bathy_max_cat", "depth_sampling_cat"),
+                      version = "mtdt_7_bathy_depth_cat",
+                      output_directory = "./figures/Predictors/Map_Hist", 
+                      separate_maps = TRUE)
 
+# Results : strong spatial bias of depth_sampling : in Occitanie almost only surface sampling and 'deep' sampling > 10m mostly in PACA and Corsica. 
 
-# Results interpretation with coastal extent
-# With coastal extent we see that bias are way lower. 
+#--- Map + hist of region -----
+# Map
+map_categorical_plots(mtdt,
+                      cols_to_plot = c("region"),
+                      version = "mtdt_7_bathy_",
+                      output_directory = "./figures/Predictors/Map_Hist", 
+                      separate_maps = TRUE)
 
+table(mtdt$region)
+# Corse        Occitanie     PACA 
+# 299 39%      138 18%       325 43%
 
-# Export results
-saveRDS(bias, "./output/bias_sampling_coastal.rds")
-
-
-rm(dt, proj, bias, grid, cols_to_plot)
+#--- Map + hist year -----
+map_categorical_plots(mtdt, 
+                      cols_to_plot = c("year"),
+                      version = "mtdt_7_bathy",
+                      output_directory = "./figures/Predictors/Map_Hist", 
+                      separate_maps = TRUE)
 
 ######## Lockdown ####
 #--- Map + hist lockdown -----
@@ -396,12 +407,12 @@ ggsave(
 
 # no lowckdown points + no winter autumn point count
 mtdt %>%
-  filter(lockdown == "0" & season %in% c("Summer", "Spring")) %>%
-  filter(field_replicates == 2, PCR_replicates == 24) %>%
-  filter(estimated_volume_total >= 55 & estimated_volume_total <= 65) %>%
-  filter(bathy_max <= 35) %>%
-  filter(method == "surface_transect" | method == "seabed_transect") %>%
-  nrow() # 92
+  # filter(lockdown == "0" & season %in% c("Summer", "Spring")) %>%
+  # filter(field_replicates == 2, PCR_replicates == 24) %>%
+  # filter(estimated_volume_total >= 55 & estimated_volume_total <= 65) %>%
+  filter(bathy_max <= 50) %>%
+  # filter(method == "surface_transect" | method == "seabed_transect") %>%
+  nrow() # 121
 
 mtdt %>%
   filter(method == "seabed_transect") %>%
@@ -420,6 +431,85 @@ mtdt %>%
 
 
 
+
+
+
+
+
+
+
+
+######## season/month x depth #####
+# Scatterplot ----
+
+# bathy_max_cat vs season colored by method
+ggplot(mtdt, aes(x = season, y = bathy_max, color = method)) +
+  geom_jitter(width = 0.2, height = 0, alpha = 0.7) +
+  theme_minimal() +
+  labs(
+    title = "Scatterplot of Bathymetry Max vs Season Colored by Method",
+    x = "Season",
+    y = "Bathymetry Max (m)",
+    color = "Method"
+  )
+
+ggsave(
+  filename = "./figures/Mtdt/scatterplot_bathy_max_vs_season_method_mtdt7.jpg",
+  width = 8,
+  height = 6,
+  dpi = 300
+)
+
+# Heatmap ----
+
+# season x depth_sampling
+
+mtdt$season <- factor(
+  mtdt$season,
+  levels = c("Winter", "Spring", "Summer", "Autumn")
+)
+
+# Compute counts and percentages
+heatmap_data <- mtdt %>%
+  count(depth_sampling_cat, season) %>%
+  mutate(percentage = 100 * n / sum(n))
+
+# Plot with black buffer using two text layers
+ggplot(heatmap_data, aes(x = depth_sampling_cat, y = season, fill = n)) +
+  geom_tile(color = "black") +
+  geom_text(
+    aes(label = sprintf("%.1f%%", percentage)),
+    color = "black", size = 3.5
+  ) +
+  scale_y_discrete(limits = rev(levels(mtdt$season))) +
+  scale_fill_distiller(palette = "RdPu") +
+  labs(
+    title = "Heatmap of Method vs Season",
+    x = "depth_sampling_cat",
+    y = "Season",
+    fill = "Count"
+  ) +
+  theme(
+    plot.background = element_rect(color = "black", fill = "black"),
+    panel.background = element_rect(color = "purple", fill = "black"),
+    panel.grid = element_blank(),
+    axis.title.x = element_text(color = "white"),
+    axis.title.y = element_text(color = "white"),
+    axis.text.x = element_text(color = "white", angle = 45, hjust = 1),
+    axis.text.y = element_text(color = "white"),
+    plot.title = element_text(color = "white"),
+    legend.background = element_rect(fill = "black", color = NA),
+    legend.key = element_rect(fill = "black", color = NA),
+    legend.title = element_text(color = "white"),
+    legend.text = element_text(color = "white")
+  )
+
+ggsave(
+  filename = "./figures/Mtdt/depth_sampling_cat_vs_Season_heatmap_mtdt7.jpg",
+  width = 8,
+  height = 6,
+  dpi = 300
+)
 
 
 
@@ -993,7 +1083,7 @@ rm(ad_res, dag_res, ind, ks_res, normality_results, plots, shapiro_res, col, col
 dev.off()
 gc()
 #------------------------------------- Explore div indices --------------
-# Data prep ----
+#--- Data prep ----
 indicators <- div
 
 
@@ -1002,10 +1092,10 @@ indicators <- div
 
 
 
-# Check NAs ----
+#--- Check NAs ----
 sapply(indicators, function(x) sum(is.na(x))) 
 
-# Hist + summary ----
+#--- Hist + summary ----
 
 ## Make a numeric copy of indicators (except 'replicates')
 indicators_num <- indicators %>%
@@ -1084,7 +1174,7 @@ for (col_name in names(plots_list)) {
 rm(plots_list, indicators_num, cols_to_plot, col_name, file_name, file_path, output_dir, version)
 
 
-# Map + hist + summary -----
+#--- Map + hist + summary -----
 
 map_index_plots(df = indicators, version = "div_indices_v1.0", output_directory = "./figures/Div_indices/Map_Hist", cols_to_plot = colnames(indicators[4:13]))
 
@@ -1114,6 +1204,61 @@ map_index_plots(df = indicators, version = "div_indices_v1.0", output_directory 
 
 
 # Div x sampling effort | region | season-month | depth | habitat | etc. [TODO] ---
+
+
+#--- R x sampling effort [to do] -----
+# Make a panel of 4 scatter plots : 
+# R x area_km2
+# R x estimated_volume_total
+# R x PCR_replicates
+# R x depth_sampling
+
+
+
+
+
+
+
+#--- R x bathy [to do] -----
+#--- R x region [to do] -----
+
+#------------------------------------- Explore spcecies occurences --------------
+
+
+
+
+#------------------------------------- Prediction extent ------------
+# load bathy raster 
+bathy <- raster::raster("./data/raw_data/predictors/Bathymetry/MNT_MED_CORSE_SHOM100m_merged.tif")
+
+
+plot(bathy)
+
+# remove all values below -50 and above 0
+bathy50m <- bathy %>%
+  raster::calc(fun = function(x) {
+    x[x < -50 | x > -0.99] <- NA
+    return(x)
+  })
+
+plot(bathy50m)
+
+# Export bathy50m
+raster::writeRaster(bathy50m, filename = "./data/processed_data/predictors/Bathymetry/MNT_MED_CORSE_SHOM100m_merged-50-0.tif", format = "GTiff", overwrite=TRUE)
+
+# Extent 50m set bathy50m NA to 0 and others to 1
+extent50m <- bathy50m %>%
+  raster::calc(fun = function(x) {
+    x[!is.na(x)] <- 1
+    return(x)
+  })
+
+plot(extent50m)
+
+raster::writeRaster(extent50m, filename = "./data/processed_data/prediction_extent/extent_bathy50m.tif", format = "GTiff", overwrite=TRUE)
+
+
+
 
 
 #------------------------------------- ******** USEFUL CODES *******  ---------------------------------------------------------------------------------------------------------------

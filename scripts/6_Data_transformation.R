@@ -337,7 +337,6 @@ rm(robust, process, dt_robust, dt_standard, dt_minmax, dt, data_list)
 # Select the columns to scale
 num <- pred_tr %>% st_drop_geometry() %>%
   dplyr::select(where(is.numeric)) %>%
-  dplyr::select(-c("x", "y")) %>%  # Do not scale coordinates
   colnames()
 
 str(pred_tr[, num])
@@ -347,8 +346,11 @@ pred_tr[, num] <- scale(pred_tr[, num] %>% st_drop_geometry())
 
 
 #--- Export transformed predictors -------------------------------
-# predictors_tr_v1.0
+# predictors_tr_v1.0 ----
 st_write(pred_tr, "./data/processed_data/predictors/predictors_tr_v1.0.gpkg", append = FALSE)
+
+
+
 
 
 

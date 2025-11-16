@@ -203,12 +203,11 @@ occ <- occ %>%
     "Cheilopogon_heterurus" = "Cheilopogon_heterurus.Hirundichthys_speculiger", # Hirundichthys speculiger mostly found in tropical open water while Cheilopogon heterurus is a mediterranean fish.  (https://fishbase.se/summary/1029 and https://fishbase.se/summary/Hirundichthys-speculiger) --> KEEP Cheilopogon heterurus
     "Trachurus_mediterraneus" = "Trachurus_mediterraneus.Trachurus_trachurus", # This complex is present in 56% of the 2018-2024 samples detected on average on 4 PCR replicates (when present). Thus most probably Trachurus mediterraneus which is a least concerned fish that can widely spread in the Mediterranean sea (https://www.fishbase.se/summary/trachurus-mediterraneus) while Trachurus trachurus is a mostly atlantic species + is vulnerable (https://www.fishbase.se/summary/Trachurus-trachurus.html) --> KEEP Trachurus mediterraneus
     "Trisopterus_capelanus" = "Trisopterus_capelanus.Trisopterus_minutus", # Trisopterus minutus is not present in the Mediterranean sea (https://www.fishbase.se/summary/trisopterus-minutus) while Trisopterus capelanu is a mediterranean species (https://fishbase.se/summary/Trisopterus-capelanus.html) --> KEEP Trisopterus capelanus
-    "Notoscopelus_elongatus" = "Notoscopelus_elongatus.Notoscopelus_kroyeri", # Notoscopelus kroyeri is endemic to the Atlantic sea (https://www.fishbase.se/summary/Notoscopelus-kroyeri) and Notoscopelus elongatus is found in the Mediterranean sea (https://fishbase.se/summary/841) --> KEEP Notoscopelus elongatus
+    "Notoscopelus_elongatus" = "Notoscopelus_elongatus.Notoscopelus_kroyeri", # Notoscopelus kroyeri is endemic to the Atlantic sea (https://www.fishbase.se/summary/Notoscopelus-kroyeri) and Notoscopelus elongatus is found in the Mediterranean sea (https://fishbase.se/summary/841)  # also : Notoscopelus elongatus is considered by SpyGEN as a 'sous-sp of N. kroyeri' --> KEEP Notoscopelus elongatus
     "Sphyraena_sphyraena" = "Sphyraena_chrysotaenia.Sphyraena_sphyraena", # Sphyraena chrysotaenia can be found in the Med as a Lessepsian migrant while Sphyraena sphyraena is commonly found in the Med (https://fishbase.se/Summary/SpeciesSummary.php?id=16905&lang=french and https://www.fishbase.se/summary/sphyraena-sphyraena) --> KEEP Sphyraena sphyraena
     
     
     ##--- 3. All species found in Med : keep as compex (8 complexes) :
-    
     
     
     "Parablennius_tentacularis.Parablennius_zvonimiri" = "Parablennius_tentacularis.Parablennius_zvonimiri", # Both can be found in our study area -->  Parablennius sp.
