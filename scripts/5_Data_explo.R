@@ -35,8 +35,14 @@ source("./utils/Fct_Data-Prep.R")
 # Mtdt_7
 mtdt <- st_read("./data/processed_data/Mtdt/mtdt_7.gpkg")
 
+# Mtdt_7_sel_v1.0
+mtdt <- st_read("./data/processed_data/Mtdt/mtdt_7_sel_v1.0.gpkg")
+
 # predictors_raw_v2.0
 pred_raw <- st_read("./data/processed_data/predictors/predictors_raw_v2.0.gpkg")
+
+# predictors_raw_v2.2
+pred_raw <- st_read("./data/processed_data/predictors/predictors_raw_v2.2.gpkg")
 
 # div_indices_v1.0
 div <- readr::read_csv2("./data/processed_data/Traits/div_indices_v1.0.csv") %>%
@@ -173,8 +179,10 @@ mtdt %>%
 #--- Map + hist of sampling effort -----
 cols_to_plot <- c("area_km2", "dist_seabed_depthsampling", "depth_sampling", "bathy_mean", "bathy_max", "PCR_replicates", "field_replicates", "estimated_volume_total")
 
+cols_to_plot <- c("area_km2")
+
 map_index_plots(df = mtdt, 
-                version = "mtdt_7_sampling_effort", 
+                version = "mtdt_7_sel_v1.0_buffer_area", 
                 output_directory = "./figures/Mtdt/Map_Hist", 
                 cols_to_plot = cols_to_plot)
 
@@ -1222,12 +1230,8 @@ map_index_plots(df = indicators, version = "div_indices_v1.0", output_directory 
 #--- R x bathy [to do] -----
 #--- R x region [to do] -----
 
-#------------------------------------- Explore spcecies occurences --------------
-
-
-
-
 #------------------------------------- Prediction extent ------------
+#--- Bathymetry 50m extent -----
 # load bathy raster 
 bathy <- raster::raster("./data/raw_data/predictors/Bathymetry/MNT_MED_CORSE_SHOM100m_merged.tif")
 
@@ -1261,8 +1265,50 @@ raster::writeRaster(extent50m, filename = "./data/processed_data/prediction_exte
 
 
 
-#------------------------------------- ******** USEFUL CODES *******  ---------------------------------------------------------------------------------------------------------------
+#--- Bathymetry 50 x EEZ Fr + MC ----
+# QGIS : we crop the bathy 50m extent on EEZ France + Monaco 
+bath50mfr <- terra::rast("./data/processed_data/prediction_extent/extent_bathy50m_ZEE_FR-MC.tif")
 
+plot(bath50mfr)
+
+
+#--- Distance to shore ----
+distshore <- terra::rast("./data/processed_data/prediction_extent/debug_shore_fraction.tif.tif")
+
+
+#--- Comput 1.2km empty grid ----
+# Based on bathy50mfr extent, we compute a 1.2km grid for prediction extent. 
+# 1.2km resolution is chosen based on the mean and median buffer area of our site (see "./figure/Mtdt/Map_Hits/mtdt_7_sel_v1.0_buffer_area").
+
+# Coarse grid
+r <- rast(ext(bath50mfr), res = 0.012, vals = NA, crs = crs(bath50mfr))
+
+# Presence/absence in fine bathy
+bath_pres <- !is.na(bath50mfr)
+
+# Resample fine → coarse grid using max (any presence = 1)
+r_masked <- resample(bath_pres, r, method = "max")
+
+plot(r_masked)
+
+# Export
+terra::writeRaster(r_masked, filename = "./data/processed_data/prediction_extent/prediction_extent_12km_bathy50m_ZEE_FR-MC.tif", overwrite=TRUE)
+
+#--- Vectorize the grid ---
+# Vectorize to convert to a gpkg file 
+r_vect <- terra::as.polygons(r_masked, dissolve = TRUE)
+
+plot(r_vect)
+
+# Export
+terra::writeVector(r_vect, filename = "./data/processed_data/prediction_extent/prediction_extent_12km_bathy50m_ZEE_FR-MC.gpkg", overwrite=TRUE)
+
+
+
+
+#--**************************************************************************************************** ******** AUTRES CODES *******  ---------------------------------------------------------------------------------------------------------------
+
+#--***********************************************************************************************************************************------
 #------------------------------------------------------------ Resp var distribution ---------------------
 
 #-------------------------------------------------------------- TEST BlockCV ------------------
@@ -1949,3 +1995,4 @@ writeLines(buffer_cv_recommendation, "buffer_cv_recommendation.txt")
 
 #------- Clean env ------------------
 rm(list = ls())
+#--- *********************************************************************************************************************************** -----

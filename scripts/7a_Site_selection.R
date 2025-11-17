@@ -35,12 +35,16 @@ source("./utils/Fct_Data-Prep.R")
 # Load mtdt_7
 mtdt <- read_sf("./data/processed_data/Mtdt/mtdt_7.gpkg")
 
-
 # Load bathy 50m (shom - 100m resolution)
 bathy_50m <- terra::rast("./data/processed_data/predictors/Bathymetry/MNT_MED_CORSE_SHOM100m_merged-50-0.tif")
 
+# Load div_indices_v1.0
+div <- readr::read_csv2("./data/processed_data/Traits/div_indices_v1.0.csv") %>%
+  mutate(DeBRa = as.numeric(DeBRa))
 
-#--------------- SITE SELECTION v.0.0 ---------------- 
+
+
+#--------------- SITE SELECTION v.1.0 ---------------- 
 
 # Remove buffers that do not overlap with bathy_50m -----
 
@@ -61,8 +65,11 @@ removed_polys <- bat %>%
 plot(bathy_50m)
 plot(st_geometry(removed_polys), add = TRUE, col = "red")
 
-# Remove polygons from pred ----
+# Remove polygons from mtdt ----
 mtdt <- mtdt %>%
+  filter(!replicates %in% removed_polys$replicates)
+
+div <- div %>%
   filter(!replicates %in% removed_polys$replicates)
 
 
@@ -71,6 +78,11 @@ st_write(mtdt,
          "./data/processed_data/Mtdt/mtdt_7_sel_v1.0.gpkg", 
          delete_dsn = TRUE)
 
+
+# Export div_indices_v1.0_sel_v1.0.csv ----
+# Based on div_indices_v1.0
+# write csv 
+write_csv2(div,"./data/processed_data/Traits/div_indices_v1.0_sel_v1.0.csv")
 
 #--------------- AUTRES ---------------- 
 # remove lockdown

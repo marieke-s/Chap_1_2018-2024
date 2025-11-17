@@ -33,6 +33,9 @@ source("./utils/Fct_Data-Prep.R")
 #------------- Load data ------------------
 # predictors_tr_v.1.1 ----
 pred <- st_read("./data/processed_data/predictors/predictors_tr_v1.1.gpkg")
+# predictors_tr_v.1.2 ----
+pred <- st_read("./data/processed_data/predictors/predictors_tr_v1.2.gpkg")
+
 # mtdt_7_sel_v1.0 ----
 mtdt <- st_read("./data/processed_data/Mtdt/mtdt_7_sel_v1.0.gpkg")
 
@@ -98,11 +101,6 @@ sel <- sel[, !canyon_cols]
 
 
 rm(canyon_cols)
-# Remove coordinates ----
-sel <- sel %>%
-  dplyr::select(-c(x, y))
-
-
 # Remove not grouped habitat ----
 hab_cols <- c("nb_habitat_per_km2", "main_habitat")
 
@@ -133,76 +131,76 @@ rm(samp_cols)
 sel <- sel %>%
   dplyr::select(-mpa_protection) %>%
   dplyr::select(-mpa_fully)
-# Correlation matrix -----
-# Compute Spearman correlation matrix
-# Select numerical cols
-df <- sel %>%
-  dplyr::select(where(is.numeric))
-
-# Compute correlation matrix
-cor_mat <- cor(df, method = "spearman", use = "pairwise.complete.obs")
-
-# Open PNG device *before* plotting
-png("./figures/Predictors/Selection/corr_matrix_sel_v1.0_pre-selection.png",
-    width = 2000, height = 2000, res = 300)
-
-# Plot correlation matrix
-corrplot(cor_mat,
-         method = "color",
-         type = "upper",
-         tl.col = "black",
-         addCoef.col = "black", 
-         tl.cex = 0.5,
-         cl.cex = 0.5,
-         number.cex = 0.5)
-
-# Close device (this actually writes the file)
-dev.off()
-
-# Results 
-# Very high correlation > 0.9 between : 
-# cop_analysed_sst_month_mean and temp_mean_1m --> we remove cop_analysed_sst_month_mean
-# roughness & tri & slope
-
-# High correlation > 0.7 between :
-# canyon_dist and roughness, slope and tri
-
-
-# VIF ----
-# Explanation : VIF can be used to detect collinearity (Strong correlation between two or more predictor variables). Collinearity causes instability in parameter estimation in regression-type models. The VIF is based on the square of the multiple correlation coefficient resulting from regressing a predictor variable against all other predictor variables. If a variable has a strong linear relationship with at least one other variables, the correlation coefficient would be close to 1, and VIF for that variable would be large. A VIF greater than 10 is a signal that the model has a collinearity problem. (source = usdm documentation)
-
-# vifcor : first finds a pair of variables which has the maximum linear correlation (greater than the threshold; th), and exclude the one with a greater VIF. The procedure is repeated untill no pair of variables with a high corrrelation coefficient (grater than the threshold) remains.
-
-# vifstep calculates VIF for all variables, excludes the one with the highest VIF (if it is greater than the threshold), repeat the procedure untill no variables with a VIF greater than th remains.
-
-
-# Select numerical cols
-df <- sel %>%
-  dplyr::select(where(is.numeric))
-
-
-# Print all VIF values
-vif <- usdm::vif(df)
-vif[order(-vif$VIF), ]
-
-# Perform stepwise VIF selection
-p_vifstep <- usdm::vifstep(df, th = 10, keep = NULL)
-
-# Perform VIF correlation selection
-p_vifcor <- usdm::vifcor(df, th = 0.7, keep = NULL, method = 'spearman') # remaining predictors with corr < th # default th is 0.9 # # make again with th = 0.7 method = spearman because we have non-normal data.
-
-# Filter vif selected predictors
-df_vifcor <- df[, p_vifcor@results$Variable]
-df_vifstep <- df[, p_vifstep@results$Variable]
-
-# Check removed predictors
-setdiff(names(df), names(df_vifcor))
-# [1] "temp_mean_1m"       "roughness_mean_log" "slope_mean_log"     "tri_mean_log"      
-setdiff(names(df), names(df_vifstep))
-# [1] "slope_mean_log" "tri_mean_log"  
-
-
-rm(cor_mat, vif, p_vifcor, p_vifstep, df, df_vifcor, df_vifstep)
+# # Correlation matrix -----
+# # Compute Spearman correlation matrix
+# # Select numerical cols
+# df <- sel %>%
+#   dplyr::select(where(is.numeric))
+# 
+# # Compute correlation matrix
+# cor_mat <- cor(df, method = "spearman", use = "pairwise.complete.obs")
+# 
+# # Open PNG device *before* plotting
+# png("./figures/Predictors/Selection/corr_matrix_sel_v1.0_pre-selection.png",
+#     width = 2000, height = 2000, res = 300)
+# 
+# # Plot correlation matrix
+# corrplot(cor_mat,
+#          method = "color",
+#          type = "upper",
+#          tl.col = "black",
+#          addCoef.col = "black", 
+#          tl.cex = 0.5,
+#          cl.cex = 0.5,
+#          number.cex = 0.5)
+# 
+# # Close device (this actually writes the file)
+# dev.off()
+# 
+# # Results 
+# # Very high correlation > 0.9 between : 
+# # cop_analysed_sst_month_mean and temp_mean_1m --> we remove cop_analysed_sst_month_mean
+# # roughness & tri & slope
+# 
+# # High correlation > 0.7 between :
+# # canyon_dist and roughness, slope and tri
+# 
+# 
+# # VIF ----
+# # Explanation : VIF can be used to detect collinearity (Strong correlation between two or more predictor variables). Collinearity causes instability in parameter estimation in regression-type models. The VIF is based on the square of the multiple correlation coefficient resulting from regressing a predictor variable against all other predictor variables. If a variable has a strong linear relationship with at least one other variables, the correlation coefficient would be close to 1, and VIF for that variable would be large. A VIF greater than 10 is a signal that the model has a collinearity problem. (source = usdm documentation)
+# 
+# # vifcor : first finds a pair of variables which has the maximum linear correlation (greater than the threshold; th), and exclude the one with a greater VIF. The procedure is repeated untill no pair of variables with a high corrrelation coefficient (grater than the threshold) remains.
+# 
+# # vifstep calculates VIF for all variables, excludes the one with the highest VIF (if it is greater than the threshold), repeat the procedure untill no variables with a VIF greater than th remains.
+# 
+# 
+# # Select numerical cols
+# df <- sel %>%
+#   dplyr::select(where(is.numeric))
+# 
+# 
+# # Print all VIF values
+# vif <- usdm::vif(df)
+# vif[order(-vif$VIF), ]
+# 
+# # Perform stepwise VIF selection
+# p_vifstep <- usdm::vifstep(df, th = 10, keep = NULL)
+# 
+# # Perform VIF correlation selection
+# p_vifcor <- usdm::vifcor(df, th = 0.7, keep = NULL, method = 'spearman') # remaining predictors with corr < th # default th is 0.9 # # make again with th = 0.7 method = spearman because we have non-normal data.
+# 
+# # Filter vif selected predictors
+# df_vifcor <- df[, p_vifcor@results$Variable]
+# df_vifstep <- df[, p_vifstep@results$Variable]
+# 
+# # Check removed predictors
+# setdiff(names(df), names(df_vifcor))
+# # [1] "temp_mean_1m"       "roughness_mean_log" "slope_mean_log"     "tri_mean_log"      
+# setdiff(names(df), names(df_vifstep))
+# # [1] "slope_mean_log" "tri_mean_log"  
+# 
+# 
+# rm(cor_mat, vif, p_vifcor, p_vifstep, df, df_vifcor, df_vifstep)
 
 # Selection based on VIF and correlation results ----
 # Remove roughness slope and tri -----
@@ -221,37 +219,69 @@ sel <- sel %>%
 
 
 
-# Correlation matrix after selection -----
+# # Correlation matrix after selection -----
+# 
+# # Compute Spearman correlation matrix
+# df <- sel %>%
+#   dplyr::select(where(is.numeric))
+# 
+# cor_mat <- cor(df, method = "spearman", use = "pairwise.complete.obs")
+# 
+# # Open PNG device *before* plotting
+# png("./figures/Predictors/Selection/corr_matrix_sel_v1.0_post-selection.png",
+#     width = 2000, height = 2000, res = 300)
+# 
+# # Plot correlation matrix
+# corrplot(cor_mat,
+#          method = "color",
+#          type = "upper",
+#          tl.col = "black",
+#          addCoef.col = "black", 
+#          tl.cex = 0.5,
+#          cl.cex = 0.5,
+#          number.cex = 0.5)
+# 
+# # Close device (this actually writes the file)
+# dev.off()
+# 
+# # Clean 
+# rm(cor_mat, df)
 
-# Compute Spearman correlation matrix
-df <- sel %>%
-  dplyr::select(where(is.numeric))
 
-cor_mat <- cor(df, method = "spearman", use = "pairwise.complete.obs")
 
-# Open PNG device *before* plotting
-png("./figures/Predictors/Selection/corr_matrix_sel_v1.0_post-selection.png",
-    width = 2000, height = 2000, res = 300)
+#--------------- EXPORTS ----------------
+# Add back geometry from pred ----
+sel <- sel %>%
+  left_join(pred %>% dplyr::select(replicates, geom),
+            by = "replicates") %>%
+  st_as_sf()
 
-# Plot correlation matrix
-corrplot(cor_mat,
-         method = "color",
-         type = "upper",
-         tl.col = "black",
-         addCoef.col = "black", 
-         tl.cex = 0.5,
-         cl.cex = 0.5,
-         number.cex = 0.5)
-
-# Close device (this actually writes the file)
-dev.off()
-
-# Clean 
-rm(cor_mat, df)
 
 # Export predictors_sel_v1.0.gpkg ----
 # based on mtdt_7_sel_v1.0.gpkg (755 obs) and predictors_tr_v1.1.gpkg (142 var + replicates)
+# selected predictors (16 + + x, y, replicates, geom): 
+colnames(sel)
+# [1] "grouped_main_habitat"       "x"                          "y"                          "replicates"                 "port_dist_m_weight"        
+# [6] "grouped_nb_habitat_per_km2" "bathy_mean"                 "wind_mean_1m"               "vel_mean_1m"                "temp_mean_1m"              
+# [11] "sal_mean_1m"                "northness"                  "canyon_dist_m_weight_log"   "mpa_dist_m_weight_log"      "shore_dist_m_weight_log"   
+# [16] "gravity_mean_log"           "tpi_mean_log"               "cop_chl_month_mean_log"     "eastness_log"               "geom"  
+
+
+
 st_write(sel, "./data/processed_data/predictors/predictors_sel_v1.0.gpkg", delete_dsn = TRUE)
+
+
+# Export predictors_sel_v1.2.gpkg ----
+# based on mtdt_7_sel_v1.0.gpkg (755 obs) and predictors_tr_v1.2.gpkg (142 var + replicates --> x and y not transformed + negative log)
+# selected predictors (16 + + x, y, replicates, geom): 
+colnames(sel)
+# [1] "grouped_main_habitat"       "x"                          "y"                          "replicates"                 "port_dist_m_weight"        
+# [6] "grouped_nb_habitat_per_km2" "bathy_mean"                 "wind_mean_1m"               "vel_mean_1m"                "temp_mean_1m"              
+# [11] "sal_mean_1m"                "northness"                  "canyon_dist_m_weight_log"   "mpa_dist_m_weight_log"      "shore_dist_m_weight_log"   
+# [16] "gravity_mean_log"           "tpi_mean_log"               "cop_chl_month_mean_log"     "eastness_log"               "geom"    
+
+
+st_write(sel, "./data/processed_data/predictors/predictors_sel_v1.1.gpkg", delete_dsn = TRUE)
 
 
 #----------------- AUTRES -----------------

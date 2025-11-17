@@ -67,6 +67,9 @@ div <- readr::read_csv2("./data/processed_data/Traits/div_indices_v1.0.csv") %>%
 
 
 
+#------------- Check data --------------
+# print number of na in each pred column
+sapply(pred_raw, function(x) sum(is.na(x)))
 #----------------------------------------- Predictors transformation ------------------
 #--- Remove 0 variance predictors ------------------
 nzv <- caret::nearZeroVar(pred_raw %>% st_drop_geometry(), saveMetrics = TRUE)
@@ -143,6 +146,9 @@ sapply(pred_tr, function(col) sum(is.na(col))) # no NA --> need to handle habita
 rm(X, Z, hab_cols, i)
 dev.off()
 
+# Check NA
+sapply(pred_tr, function(col) sum(is.na(col))) 
+
 
 #--- Aspect : northness and eastness ----
 # Explanation from CHATGPT : https://chatgpt.com/s/t_6914b4ea37a48191807bced590285dc3
@@ -158,13 +164,75 @@ pred_tr <- pred_tr %>%
 
 #--- Log when max value >/= to 10*median ------------------
 # Transform variables with outliers using max value >/= to 10*median value rule
+
+# Handle var with negative values  -----------
+
+# For each pred_tr cols, check if negative values exist
+var_to_fix <- c()
+
+# Loop through columns of pred_tr (after dropping geometry)
+for (col in colnames(pred_tr %>% st_drop_geometry())) {
+  if (is.numeric(pred_tr[[col]])) {
+    if (any(pred_tr[[col]] < 0, na.rm = TRUE)) {
+      print(paste("Negative values found in column:", col))
+      var_to_fix <- c(var_to_fix, col)
+    }
+  }
+}
+
+var_to_fix
+
+# Function: abs → log(abs+1) → restore sign
+log_with_sign <- function(x) {
+  abs_x  <- abs(x)
+  log_x  <- log(abs_x + 1)
+  ifelse(x < 0, -log_x, log_x)
+}
+
+# Apply transformation
+for (v in var_to_fix) {
+  print('----------')
+  print(v)
+  
+  # 0. Take abs value
+  a <- abs(pred_tr[[v]])
+  
+  # 1. Check if variable needs a log (same rule: max ≥ 10 * median)
+  if (max(a, na.rm = TRUE) > 10 * median(a, na.rm = TRUE)) {
+    message(paste(v, ": log transform applied"))
+    
+    # 2. Create the log-signed variable in pred_tr
+    pred_tr[[paste0(v, "_log")]] <- log_with_sign(pred_tr[[v]])
+    
+    # 3. Remove original variable
+    pred_tr[[v]] <- NULL
+  } else {
+    message(paste(v, ": no log transform needed"))
+  }
+}
+
+# tpi_mean and tpi_min logged 
+names(pred_tr)
+
+boxplot(pred_tr$tpi_min_log)
+boxplot(pred_tr$tpi_mean_log)
+
+summary(pred_tr$tpi_min_log) # no NA
+summary(pred_tr$tpi_mean_log) # no NA
+
+# Other variables ----------
 # Iterate on all predictors, if max value >/= to 10*median value, apply log(x + 1) transformation, else keep the same
 # Create a new data frame to store transformed variables
 
 # Detect numeric columns
+# remove tpi_min and tpi_mean from var_to_fix
+var_to_fix <- setdiff(var_to_fix, c("tpi_min", "tpi_mean"))
+
 pred_num <- pred_tr %>% st_drop_geometry() %>%
   dplyr::select(where(is.numeric)) %>%
-  dplyr::select(-c("x", "y"))  # Do not log coordinates
+  dplyr::select(-c("x", "y")) %>% # Do not log coordinates
+  dplyr::select(-c("tpi_min_log", "tpi_mean_log")) %>% # Do not log tpi (already done)
+  dplyr::select(-c(var_to_fix)) # var with negative values but no outliers(max(abs(val) < 10*median(abs(val))
 
 pred_num_log <- pred_num  # Make a copy to modify
 
@@ -184,8 +252,11 @@ for (i in colnames(pred_num)) {
   }
 }
 
+# Check NA 
+sapply(pred_num_log, function(col) sum(is.na(col))) # no NA
+
 # Print the nb of transformed columns
-print(paste("Number of log-transformed columns:", sum(grepl("_log$", colnames(pred_num_log))))) # 51 
+print(paste("Number of log-transformed columns:", sum(grepl("_log$", colnames(pred_num_log))))) # 44 (+2 tpi) 
 colnames(pred_num_log)
 
 # Replace original numeric columns in pred_tr with transformed ones
@@ -337,6 +408,7 @@ rm(pred_num, pred_num_log, i, max_val, median_val, new_col_name)
 # Select the columns to scale
 num <- pred_tr %>% st_drop_geometry() %>%
   dplyr::select(where(is.numeric)) %>%
+  dplyr::select(-c("x", "y"))%>%  # Do not scale coordinates
   colnames()
 
 str(pred_tr[, num])
@@ -346,16 +418,21 @@ pred_tr[, num] <- scale(pred_tr[, num] %>% st_drop_geometry())
 
 
 #--- Export transformed predictors -------------------------------
-# predictors_tr_v1.0 ----
-# based on predictors_raw_v2.1
-# transformations : Remove 0 variance predictors, Replace negative distance values by 0, CLT of habitat composition, Log when max value >/= to 10*median, Standard scale all
-st_write(pred_tr, "./data/processed_data/predictors/predictors_tr_v1.0.gpkg", append = FALSE)
+# # predictors_tr_v1.0 ----
+# # based on predictors_raw_v2.1
+# # transformations : Remove 0 variance predictors, Replace negative distance values by 0, CLT of habitat composition, Log when max value >/= to 10*median, Standard scale all
+# st_write(pred_tr, "./data/processed_data/predictors/predictors_tr_v1.0.gpkg", append = FALSE)
+# 
+# # predictors_tr_v1.1 ----
+# # based on predictors_raw_v2.1
+# # transformations : Remove 0 variance predictors, Replace negative distance values by 0, CLT of habitat composition, Log when max value >/= to 10*median, Standard scale all --> same as predictors_tr_v1.0
+# st_write(pred_tr, "./data/processed_data/predictors/predictors_tr_v1.1.gpkg", append = FALSE)
 
-# predictors_tr_v1.1 ----
-# based on predictors_raw_v2.1
-# transformations : Remove 0 variance predictors, Replace negative distance values by 0, CLT of habitat composition, Log when max value >/= to 10*median, Standard scale all --> same as predictors_tr_v1.0
-st_write(pred_tr, "./data/processed_data/predictors/predictors_tr_v1.1.gpkg", append = FALSE)
 
+# predictors_tr_v1.2 ----
+# based on predictors_raw_v2.1
+# transformations : Remove 0 variance predictors, Replace negative distance values by 0, CLT of habitat composition, Log when max value >/= to 10*median, Standard scale all --> same as predictors_tr_v1.1 BUT x and y are not scales nor log --> raw. + takes into acocunt for negative values in log transformation
+st_write(pred_tr, "./data/processed_data/predictors/predictors_tr_v1.2.gpkg", append = FALSE)
 
 
 
