@@ -144,6 +144,16 @@ map_categorical_plots(mtdt,
                       separate_maps = TRUE)
 
 
+#--- Map + hist 2023 months ----
+map_categorical_plots(
+  mtdt %>% filter(year == 2023),
+  cols_to_plot = "month",
+  version = "mtdt_7_2023_months",
+  output_directory = "./figures/Mtdt/Map_Hist", 
+  separate_maps = TRUE
+)
+
+
 
 #--- Count table season | month | year -----
 
@@ -1229,154 +1239,6 @@ map_index_plots(df = indicators, version = "div_indices_v1.0", output_directory 
 
 #--- R x bathy [to do] -----
 #--- R x region [to do] -----
-
-#------------------------------------- Prediction extent ------------
-#--- Distance to shore ----
-distshore <- terra::rast("./data/processed_data/prediction_extent/debug_shore_fraction.tif")
-plot(distshore)
-
-
-
-#--- Bathymetry 50m extent -----
-# load bathy raster 
-bathy <- raster::raster("./data/raw_data/predictors/Bathymetry/MNT_MED_CORSE_SHOM100m_merged.tif")
-
-
-plot(bathy)
-
-# remove all values below -50 and above 0
-bathy50m <- bathy %>%
-  raster::calc(fun = function(x) {
-    x[x < -50 | x > -0.99] <- NA
-    return(x)
-  })
-
-plot(bathy50m)
-
-# Export bathy50m
-raster::writeRaster(bathy50m, filename = "./data/processed_data/predictors/Bathymetry/MNT_MED_CORSE_SHOM100m_merged-50-0.tif", format = "GTiff", overwrite=TRUE)
-
-# Extent 50m set bathy50m NA to 0 and others to 1
-extent50m <- bathy50m %>%
-  raster::calc(fun = function(x) {
-    x[!is.na(x)] <- 1
-    return(x)
-  })
-
-plot(extent50m)
-
-raster::writeRaster(extent50m, filename = "./data/processed_data/prediction_extent/extent_bathy50m.tif", format = "GTiff", overwrite=TRUE)
-
-
-
-
-
-#--- Bathymetry 50 x EEZ Fr + MC ----
-# QGIS : we crop the bathy 50m extent on EEZ France + Monaco on Med only
-bath50mfr <- terra::rast("./data/processed_data/prediction_extent/extent_bathy50m_ZEE-FR-MC-Med.tif")
-plot(bath50mfr)
-
-# Reproject 
-bath50mfr <- terra::project(bath50mfr, "EPSG:2154") # Lambert-93
-
-
-
-
-
-#--- Comput 1.2km empty grid ----
-# Based on bathy50mfr extent, we compute a 1.2km grid for prediction extent. 
-# 1.2km resolution is chosen based on the mean and median buffer area of our site (see "./figure/Mtdt/Map_Hits/mtdt_7_sel_v1.0_buffer_area").
-
-# 1.2km grid : raster 
-r <- rast(ext(bath50mfr), res = 1200, crs = crs(bath50mfr))
-values(r) <- 1:ncell(r)           # unique value per cell
-plot(r)
-
-# 1.2 grid : vector  
-# Each pixel = 1 polygon with 1 ID
-grid_vec <- as.polygons(r, aggregate = FALSE, values = TRUE, dissolve = FALSE)
-
-# count nb of polygons in grid_vec
-nrow(as.data.frame(grid_vec))
-colnames(as.data.frame(grid_vec))
-
-# plot with color by lyr.1
-plot(grid_vec, "lyr.1")
-
-# export 
-st_write(as_sf(grid_vec), "./test.gpkg")
-
-grid_vec
-plot(grid_vec, col = NA, border = "black")
-
-# Plot with color by ID
-plot(grid_vec, "ID")
-
-
-
-
-
-# # Presence/absence in fine bathy
-# bath_pres <- !is.na(bath50mfr)
-
-# Vectorise bath50mfr
-vect_mer <- terra::as.polygons(bath50mfr, dissolve = TRUE)
-plot(vect_mer)
-class(vect_mer)
-
-# export vect_mer
-terra::writeVector(vect_mer, filename = "./data/processed_data/prediction_extent/prediction_extent_12km_bathy50m_ZEE_FR-MC_Med.gpkg", overwrite=TRUE)
-
-
-# set vect_mer$frition to 1 inside polygons and to 0 outside
-
-
-dim(vect_mer)
-
-# rasterisation avec somme de couverture (fraction d'occupation)
-r_frac <- terra::rasterize(vect_mer, r, field = "friction",
-                           fun = "sum", background = 0, touches = TRUE)
-
-plot(r_frac)
-
-seuil_couverture <- 0.8
-
-r_frac <- r_frac / max(r_frac[], na.rm = TRUE)  # application du seuil
-values(r_frac) <- ifelse(values(r_frac) >= seuil_couverture, 1, NA)
-
-
-plot(r_frac)
-
-
-
-
-
-
-
-
-
-
-
-
-
-# Resample fine → coarse grid using max (any presence = 1)
-r_masked <- resample(bath_pres, r, method = "max")
-
-plot(r_masked)
-
-# Export
-terra::writeRaster(r_masked, filename = "./data/processed_data/prediction_extent/prediction_extent_12km_bathy50m_ZEE_FR-MC_Med.tif", overwrite=TRUE)
-
-#--- Vectorize the grid ---
-# Vectorize to convert to a gpkg file 
-r_vect <- terra::as.polygons(r_masked, dissolve = TRUE)
-
-plot(r_vect)
-
-# Export
-terra::writeVector(r_vect, filename = "./data/processed_data/prediction_extent/prediction_extent_12km_bathy50m_ZEE_FR-MC.gpkg", overwrite=TRUE)
-
-
 
 
 #--**************************************************************************************************** ******** AUTRES CODES *******  ---------------------------------------------------------------------------------------------------------------
