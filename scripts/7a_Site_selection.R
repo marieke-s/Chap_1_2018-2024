@@ -84,6 +84,36 @@ st_write(mtdt,
 # write csv 
 write_csv2(div,"./data/processed_data/Traits/div_indices_v1.0_sel_v1.0.csv")
 
+#--------------- SITE SELECTION v.1.1 ---------------- 
+# Start from mtdt_7_sel_v1.0.gpkg
+mtdt <- read_sf("./data/processed_data/Mtdt/mtdt_7_sel_v1.0.gpkg")
+div <- readr::read_csv2("./data/processed_data/Traits/div_indices_v1.0_sel_v1.0.csv")
+rm(bathy_50m)
+# Remove lockdown sites -----
+mtdt <- mtdt %>%
+  filter(lockdown == 0) # removes 70 sites 
+
+# Remove automn and winter months -----
+# Remove month from October to March 
+mtdt <- mtdt %>%
+  mutate(month = month(date)) %>%
+  filter(!month %in% c(10,11,12,1,2,3)) # removes 38 sites
+
+# Export mtdt_7_sel_v1.1.gpkg ----
+st_write(mtdt, 
+         "./data/processed_data/Mtdt/mtdt_7_sel_v1.1.gpkg", 
+         delete_dsn = TRUE)
+
+# Export div_indices_v1.0_sel_v1.1.csv ----
+# Based on div_indices_v1.0_sel_v1.0
+div <- div %>%
+  filter(replicates %in% mtdt$replicates)
+
+
+
+# write csv
+write_csv2(div,"./data/processed_data/Traits/div_indices_v1.0_sel_v1.1.csv")
+
 #--------------- AUTRES ---------------- 
 # remove lockdown
 

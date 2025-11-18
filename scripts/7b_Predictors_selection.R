@@ -38,6 +38,8 @@ pred <- st_read("./data/processed_data/predictors/predictors_tr_v1.2.gpkg")
 
 # mtdt_7_sel_v1.0 ----
 mtdt <- st_read("./data/processed_data/Mtdt/mtdt_7_sel_v1.0.gpkg")
+# mtdt_7_sel_v1.1 ----
+mtdt <- st_read("./data/processed_data/Mtdt/mtdt_7_sel_v1.1.gpkg")
 
 #---------------- REMOVE ROWS BASED ON SITE SELECTION -----
 
@@ -249,7 +251,6 @@ sel <- sel %>%
 
 
 
-#--------------- EXPORTS ----------------
 # Add back geometry from pred ----
 sel <- sel %>%
   left_join(pred %>% dplyr::select(replicates, geom),
@@ -257,33 +258,46 @@ sel <- sel %>%
   st_as_sf()
 
 
-# Export predictors_sel_v1.0.gpkg ----
-# based on mtdt_7_sel_v1.0.gpkg (755 obs) and predictors_tr_v1.1.gpkg (142 var + replicates)
-# selected predictors (16 + + x, y, replicates, geom): 
-colnames(sel)
-# [1] "grouped_main_habitat"       "x"                          "y"                          "replicates"                 "port_dist_m_weight"        
-# [6] "grouped_nb_habitat_per_km2" "bathy_mean"                 "wind_mean_1m"               "vel_mean_1m"                "temp_mean_1m"              
-# [11] "sal_mean_1m"                "northness"                  "canyon_dist_m_weight_log"   "mpa_dist_m_weight_log"      "shore_dist_m_weight_log"   
-# [16] "gravity_mean_log"           "tpi_mean_log"               "cop_chl_month_mean_log"     "eastness_log"               "geom"  
 
+#--------------- EXPORTS ----------------
+# # Export predictors_sel_v1.0.gpkg ----
+# # based on mtdt_7_sel_v1.0.gpkg (755 obs) and predictors_tr_v1.1.gpkg (142 var + replicates)
+# # selected predictors (16 + + x, y, replicates, geom): 
+# colnames(sel)
+# # [1] "grouped_main_habitat"       "x"                          "y"                          "replicates"                 "port_dist_m_weight"        
+# # [6] "grouped_nb_habitat_per_km2" "bathy_mean"                 "wind_mean_1m"               "vel_mean_1m"                "temp_mean_1m"              
+# # [11] "sal_mean_1m"                "northness"                  "canyon_dist_m_weight_log"   "mpa_dist_m_weight_log"      "shore_dist_m_weight_log"   
+# # [16] "gravity_mean_log"           "tpi_mean_log"               "cop_chl_month_mean_log"     "eastness_log"               "geom"  
+# 
+# 
+# 
+# st_write(sel, "./data/processed_data/predictors/predictors_sel_v1.0.gpkg", delete_dsn = TRUE)
+# 
+# 
+# # Export predictors_sel_v1.2.gpkg ----
+# # based on mtdt_7_sel_v1.0.gpkg (755 obs) and predictors_tr_v1.2.gpkg (142 var + replicates --> x and y not transformed + negative log)
+# # selected predictors (16 + + x, y, replicates, geom): 
+# colnames(sel)
+# # [1] "grouped_main_habitat"       "x"                          "y"                          "replicates"                 "port_dist_m_weight"        
+# # [6] "grouped_nb_habitat_per_km2" "bathy_mean"                 "wind_mean_1m"               "vel_mean_1m"                "temp_mean_1m"              
+# # [11] "sal_mean_1m"                "northness"                  "canyon_dist_m_weight_log"   "mpa_dist_m_weight_log"      "shore_dist_m_weight_log"   
+# # [16] "gravity_mean_log"           "tpi_mean_log"               "cop_chl_month_mean_log"     "eastness_log"               "geom"    
+# 
+# 
+# st_write(sel, "./data/processed_data/predictors/predictors_sel_v1.1.gpkg", delete_dsn = TRUE)
+# 
 
-
-st_write(sel, "./data/processed_data/predictors/predictors_sel_v1.0.gpkg", delete_dsn = TRUE)
-
-
-# Export predictors_sel_v1.2.gpkg ----
-# based on mtdt_7_sel_v1.0.gpkg (755 obs) and predictors_tr_v1.2.gpkg (142 var + replicates --> x and y not transformed + negative log)
-# selected predictors (16 + + x, y, replicates, geom): 
-colnames(sel)
-# [1] "grouped_main_habitat"       "x"                          "y"                          "replicates"                 "port_dist_m_weight"        
-# [6] "grouped_nb_habitat_per_km2" "bathy_mean"                 "wind_mean_1m"               "vel_mean_1m"                "temp_mean_1m"              
-# [11] "sal_mean_1m"                "northness"                  "canyon_dist_m_weight_log"   "mpa_dist_m_weight_log"      "shore_dist_m_weight_log"   
-# [16] "gravity_mean_log"           "tpi_mean_log"               "cop_chl_month_mean_log"     "eastness_log"               "geom"    
-
-
-st_write(sel, "./data/processed_data/predictors/predictors_sel_v1.1.gpkg", delete_dsn = TRUE)
-
-
+# Export predictors_sel_v1.3.gpkg ----
+# based on mtdt_7_sel_v1.1.gpkg (637 obs) and predictors_tr_v1.2.gpkg (142 var + replicates) 
+# selected predictors (16 + + x, y, replicates, geom):
+# [1] "grouped_main_habitat"       "x"                          "y"                         
+# [4] "replicates"                 "northness"                  "eastness"                  
+# [7] "tpi_mean_log"               "port_dist_m_weight"         "grouped_nb_habitat_per_km2"
+# [10] "bathy_mean"                 "wind_mean_1m"               "vel_mean_1m"               
+# [13] "temp_mean_1m"               "sal_mean_1m"                "canyon_dist_m_weight_log"  
+# [16] "mpa_dist_m_weight_log"      "shore_dist_m_weight_log"    "gravity_mean_log"          
+# [19] "cop_chl_month_mean_log"    "geom" 
+st_write(sel, "./data/processed_data/predictors/predictors_sel_v1.3.gpkg", delete_dsn = TRUE)
 #----------------- AUTRES -----------------
 #---- Visualise selected pred ----
 method = 'vifcor' # 'vifcor'

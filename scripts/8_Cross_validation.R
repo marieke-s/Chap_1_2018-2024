@@ -198,11 +198,11 @@ print(results_df_2)
 #--- Figure ----
 # Create data frames for plotting, ensuring Moran's I results are included
 range_data_1 <- results_df_1 %>% 
-  select(variable, range, moran_i, moran_p) %>% 
+  dplyr::select(variable, range, moran_i, moran_p) %>% 
   mutate(method = "Method 1: Spherical")
 
 range_data_2 <- results_df_2 %>% 
-  select(variable, range, moran_i, moran_p) %>% 
+  dplyr::select(variable, range, moran_i, moran_p) %>% 
   mutate(method = "Method 2: AutoKrige")
 
 # Combine both datasets and process
@@ -312,10 +312,13 @@ print(range_plot)
 
 #------------- Div_indices spatial autocorrelation -----------------
 #--- Prep -----
-# For pred
+# Add coordinates (pred$x and pred$y) to div
+div <- div %>%
+  left_join(pred %>% st_drop_geometry() %>% dplyr::select(replicates, x, y), by = "replicates")
+
+
 # First make an sf object with 4326 projection
-spat_pred <- st_as_sf(pred %>% st_drop_geometry(), coords = c("x", "y"), crs = 2154)
-crs(pred) # 2154 = Projected coordinate system for France
+spat_pred <- st_as_sf(div %>% st_drop_geometry(), coords = c("x", "y"), crs = 2154)
 
 # Convert sf object to Spatial object
 spat_pred_sp <- as(spat_pred, "Spatial")
@@ -376,6 +379,7 @@ for (var in var_names) {
     )
   }
 }
+
 
 # Convert results list to dataframe
 results_df_1 <- bind_rows(results_list)
@@ -439,17 +443,14 @@ results_df_2 <- bind_rows(results_list)
 print(results_df_2)
 
 
-
-#---  Interpretation of results ----
-# Interpretation of results: https://chatgpt.com/share/e/691b318f-7c28-800e-ba16-49d7666f9eef
 #--- Figure ----
-# Create data frames for plotting, ensuring Moran's I results are included
+# Create data frames for plotting
 range_data_1 <- results_df_1 %>% 
-  select(variable, range, moran_i, moran_p) %>% 
+  dplyr::select(variable, range, moran_i, moran_p) %>% 
   mutate(method = "Method 1: Spherical")
 
 range_data_2 <- results_df_2 %>% 
-  select(variable, range, moran_i, moran_p) %>% 
+  dplyr::select(variable, range, moran_i, moran_p) %>% 
   mutate(method = "Method 2: AutoKrige")
 
 # Combine both datasets and process
@@ -551,6 +552,7 @@ range_plot <- range_plot +
 # Print the final plot
 print(range_plot)
 
+beepr::beep()
 
 
 
