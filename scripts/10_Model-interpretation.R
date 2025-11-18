@@ -185,10 +185,32 @@ xgb_importance <- xgb.importance(
 # Plot
 xgb.plot.importance(xgb_importance, top_n = 20)
 
-# Get folds
-folds <- models_list$R$XGB$bloo50
+
 
 ## Averaging across folds ----
+md <- models_list
+# perf <- evaluate_models(md)
+
+
+# 1.  Extract and Aggregate Variable Importance
+# Get folds
+folds <- md$Crypto$XGB$bloo50
+
+# Extract importance from each fold's model
+importance_list <- lapply(folds, function(fold) {
+  xgb.importance(model = fold$model)  # <-- change 'model' to actual element name
+})
+
+# Combine all importances into one table
+all_importance <- bind_rows(importance_list, .id = "Fold")
+
+# Average importance per variable
+mean_importance <- all_importance |>
+  group_by(Feature) |>
+  summarise(mean_gain = mean(Gain, na.rm = TRUE), .groups = "drop") |>
+  arrange(desc(mean_gain))
+
+
 # Make the plot -----
 ggplot(mean_importance, aes(x = reorder(Feature, mean_gain), y = mean_gain)) +
   geom_col() +
@@ -202,7 +224,12 @@ ggplot(mean_importance, aes(x = reorder(Feature, mean_gain), y = mean_gain)) +
   ylim(0, max(mean_importance$mean_gain) * 1.15)  # Add space for text
 
 
-
+# Save the plot 
+ggsave(
+  filename = "./figures/models/T0.0/Var_imp_T0.0_Crypto.png",
+  width    = 8,
+  height   = 6
+)
 
 
 
@@ -249,7 +276,7 @@ X_train <- as.matrix(df[, feature_cols])
 
 # Use training matrix (or full X) for SHAP
 shap_vals <- SHAPforxgboost::shap.values(
-  xgb_model = xgb_model,
+  xgb_model = models_list$R$XGB$bloo50$Fold_1$model,
   X_train   = X_train
 )
 
@@ -269,8 +296,13 @@ shap_long <- SHAPforxgboost::shap.prep(
 
 plot <- SHAPforxgboost::shap.plot.summary(shap_long)
 
-svglite::svglite(plot, "./output/figures/model/SHAP_T.0.0_$R$XGB$bloo50$Fold_1$.svg", width = 8, height = 6)
-
+# Save the plot
+ggsave(
+  filename = "./figures/models/T0.0/SHAP_T.0.0_$R$XGB$bloo50$Fold_1$.png",
+  plot     = plot,
+  width    = 8,
+  height   = 6
+)
 
 
 
@@ -303,7 +335,7 @@ for (i in seq_along(feature_chunks)) {
   
   # open a graphics device to save the panel
   png(
-    filename = sprintf("shap_dependence_panel_%02d.png", i),
+    filename = sprintf("./fugures/models/T0.0/shap_dependence_panel_%02d.png", i),
     width    = 2000,
     height   = 2000,
     res      = 300
@@ -370,4 +402,98 @@ for (i in seq_len(n_pages)) {
 }
 
 dev.off()
+
+
+# features vs R + correlation -----
+
+library(ggplot2)
+library(gridExtra)
+
+# ---------------------------------------------------------------
+# 1. Define target and predictor features
+# ---------------------------------------------------------------
+
+target_col <- "R"
+
+# numeric predictors only (you can change if needed)
+numeric_features <- setdiff(
+  names(df)[sapply(df, is.numeric)],
+  target_col
+)
+
+# Helper function: compute correlations + label
+cor_label <- function(x, y) {
+  # Pearson
+  p_cor <- suppressWarnings(cor.test(x, y, method = "pearson"))
+  pearson_r  <- round(p_cor$estimate, 3)
+  pearson_p  <- signif(p_cor$p.value, 3)
+  
+  # Spearman
+  s_cor <- suppressWarnings(cor.test(x, y, method = "spearman"))
+  spearman_r <- round(s_cor$estimate, 3)
+  spearman_p <- signif(s_cor$p.value, 3)
+  
+  label <- paste0(
+    "Pearson r = ", pearson_r, " (p=", pearson_p, ")\n",
+    "Spearman ρ = ", spearman_r, " (p=", spearman_p, ")"
+  )
+  
+  return(label)
+}
+
+# ---------------------------------------------------------------
+# 2. Create one plot per feature: feature vs R + correlation text
+# ---------------------------------------------------------------
+
+make_feature_plot <- function(feature) {
+  
+  x <- df[[feature]]          
+  y <- df[[target_col]]
+  
+  label_text <- cor_label(x, y)
+  
+  ggplot(df, aes_string(x = feature, y = target_col)) +
+    geom_point(alpha = 0.6) +
+    geom_smooth(method = "loess", se = FALSE, color = "black", linetype = "dashed") +
+    labs(
+      title    = paste("Feature:", feature),
+      subtitle = label_text,
+      x        = feature,
+      y        = target_col
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      plot.title = element_text(size = 8),       # smaller title
+      plot.subtitle = element_text(size = 6)      # optional: smaller subtitle
+    )
+}
+
+
+# ---------------------------------------------------------------
+# 3. Split features into chunks of 4 for panel plots
+# ---------------------------------------------------------------
+
+feature_chunks <- split(numeric_features, ceiling(seq_along(numeric_features) / 4))
+
+# ---------------------------------------------------------------
+# 4. Loop over chunks, make panels, save PNGs
+# ---------------------------------------------------------------
+
+for (i in seq_along(feature_chunks)) {
+  
+  this_chunk <- feature_chunks[[i]]
+  
+  fig_list <- lapply(this_chunk, make_feature_plot)
+  
+  png(
+    filename = sprintf("./figures/models/T0.0/R-features_correlation_%02d.png", i),
+    width    = 2000,
+    height   = 2000,
+    res      = 300
+  )
+  
+  gridExtra::grid.arrange(grobs = fig_list, ncol = 2)
+  
+  dev.off()
+}
 

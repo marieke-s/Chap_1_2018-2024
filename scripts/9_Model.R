@@ -204,14 +204,13 @@ perf
 
 
 #-------------------------- Plot variable importance -------------------
-md <- readRDS("/media/marieke/Shared/Chap-1/Model/Scripts/Chap_1/output/models/MEM_tests/R_bloo30_XGB_T8_pred_123.rds")
 md <- models_list
 # perf <- evaluate_models(md)
 
 
 # 1.  Extract and Aggregate Variable Importance
 # Get folds
-folds <- md$R$XGB$bloo50
+folds <- md$Crypto$XGB$bloo50
 
 # Extract importance from each fold's model
 importance_list <- lapply(folds, function(fold) {
