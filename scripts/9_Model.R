@@ -86,7 +86,30 @@ tot <- pred %>%
   left_join(st_drop_geometry(mtdt), by = "replicates") %>%
   left_join(div, by = "replicates")
 
-#-------------------------- T0.0 : XGBOOST (no habitat)  ---------------------
+#-------------------------- T0.0 : XGBOOST :  ---------------------
+## Description ----
+#--- Model : XGBOOST
+
+#--- Response var : 
+# from div_indices_v1.0_sel_v1.1.csv
+# R, Crypto and Elasmo
+
+#---- Predictors : 
+# from predictors_sel_v.1.3
+# [1] "northness"                  "eastness"                   "tpi_mean_log"               "port_dist_m_weight"        
+# [5] "grouped_nb_habitat_per_km2" "bathy_mean"                 "wind_mean_1m"               "vel_mean_1m"               
+# [9] "temp_mean_1m"               "sal_mean_1m"                "canyon_dist_m_weight_log"   "mpa_dist_m_weight_log"     
+# [13] "shore_dist_m_weight_log"    "gravity_mean_log"           "cop_chl_month_mean_log" 
+
+#---- CV config :
+# BLOO CV with buffer size = 50 km
+
+#---- Perf : 
+# R2              Pearson_Corr Spearman_Corr      MAE      RMSE AIC Response_Var Model     CV Train_Size
+# 1 0.59889763    0.7738848     0.7738419 8.598846 11.212882  NA            R   XGB bloo50         NA
+# 2 0.56089502    0.7489293     0.8188332 2.619474  3.964392  NA       Crypto   XGB bloo50         NA
+# 3 0.07769429    0.2787370     0.3864764 1.014452  1.470286  NA       Elasmo   XGB bloo50         NA
+
 ## Prep data for model ----
 # Extract predictors
 predictors <- pred %>% dplyr::select(-c("x", "y", "replicates", grouped_main_habitat)) %>%
@@ -164,90 +187,31 @@ beepr::beep()
 
 rm(model)
 
-# Save model
-saveRDS(models_list, "./output/models/T0.0.rds")
-
-beepr::beep()
-
-
-# 01:57
-
+# Save model ----
+saveRDS(models_list, "./output/models/T0.0.rds") # Response var = R, Crypto and Elasmo
 
 ##  Evaluate performance ----
 perf <- evaluate_models(models_list)
 
 
 # Compare with baseline
-md_baseline <- readRDS("./output/models/MEM_tests/R_bloo30_XGB_T8_pred_4.rds")
+md_baseline <- readRDS("/media/marieke/Shared/Chap-1/Model/Scripts/Chap_1/output/models/MEM_tests/R_bloo30_XGB_T8_pred_4.rds")
 perf_baseline <- evaluate_models(md_baseline)
 perf_baseline # 0.6613284
-perf # 0.6328245
+perf
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#************************************************************************* AUTRES CODES ---------------------------------
-#-------------------------- Load and check results ---------------------
-# Load and check performance
-R_bloo30_RF_noL3D <- readRDS("./output/models/MEM_tests/R_bloo30_RF_noLitto3Dpts.rds")
-R_bloo30_XGB_noL3D <- readRDS("./output/models/MEM_tests/R_bloo30_XGB_noLitto3Dpts.rds")
-R_bloo30_RF_pMEM_noL3D <- readRDS("./output/models/MEM_tests/R_bloo30_RF_pMEM_noLitto3Dpts.rds")
-R_bloo30_XGB_pMEM_noL3D <- readRDS("./output/models/MEM_tests/R_bloo30_XGB_pMEM_noLitto3Dpts.rds")
-R_bloo30_XGB_pMEM_1.1 <- readRDS("./output/models/MEM_tests/R_bloo30_XGB_pMEM_1.1.rds")
-R_bloo30_XGB_pMEM_1.3 <- readRDS("./output/models/MEM_tests/R_bloo30_XGB_pMEM_1.3.rds")
-R_bloo30_XGB_pMEM_1.4 <- readRDS("./output/models/MEM_tests/R_bloo30_XGB_pMEM_1.4.rds")
-R_bloo30_XGB_pMEM_1.5 <- readRDS("./output/models/MEM_tests/R_bloo30_XGB_pMEM_1.5.rds")
-R_bloo30_XGB_pMEM_4 <- readRDS("./output/models/MEM_tests/R_bloo30_XGB_pMEM_4.rds")
-R_bloo30_XGB_pMEM_5 <- readRDS("./output/models/MEM_tests/R_bloo30_XGB_pMEM_5.rds")
-R_bloo30_XGB_pMEM_6 <- readRDS("./output/models/MEM_tests/R_bloo30_XGB_pMEM_6.rds")
-R_bloo30_XGB_T8_pred_123 <- readRDS("./output/models/MEM_tests/R_bloo30_XGB_T8_pred_123.rds")
-
-perf_RF_noL3D <- evaluate_models(R_bloo30_RF_noL3D)
-perf_XGB_noL3D <- evaluate_models(R_bloo30_XGB_noL3D)
-perf_RF_pMEM_noL3D <- evaluate_models(R_bloo30_RF_pMEM_noL3D)
-perf_XGB_pMEM_noL3D <- evaluate_models(R_bloo30_XGB_pMEM_noL3D)
-perf_XGB_pMEM_1.1 <- evaluate_models(R_bloo30_XGB_pMEM_1.1)
-perf_XGB_pMEM_1.3 <- evaluate_models(R_bloo30_XGB_pMEM_1.3)
-perf_XGB_pMEM_1.4 <- evaluate_models(R_bloo30_XGB_pMEM_1.4)
-perf_XGB_pMEM_1.5 <- evaluate_models(R_bloo30_XGB_pMEM_1.5)
-perf_XGB_pMEM_4 <- evaluate_models(R_bloo30_XGB_pMEM_4)
-perf_XGB_pMEM_6 <- evaluate_models(R_bloo30_XGB_pMEM_6)
-perf_XGB_T8_pred_123 <- evaluate_models(R_bloo30_XGB_T8_pred_123)
-
-perf_RF_noL3D
-perf_XGB_noL3D
-perf_RF_pMEM_noL3D
-perf_XGB_pMEM_noL3D
-perf_XGB_pMEM_1.1
-perf_XGB_pMEM_1.3 # 0.6413447 (Pearson_Corr)
-perf_XGB_pMEM_1.4
-perf_XGB_pMEM_1.5 # 0.642432 (Pearson_Corr)
-perf_XGB_pMEM_4 # 0.6500721 (Pearson_Corr)
-perf_XGB_pMEM_5 # 0.6430543 (Pearson_Corr)
-perf_XGB_pMEM_6 # 0.6199073 (Pearson_Corr)
-perf_XGB_T8_pred_123 # 0.6116484 (Pearson_Corr)
 
 
 #-------------------------- Plot variable importance -------------------
-md <- readRDS("./output/models/MEM_tests/R_bloo30_XGB_T8_pred_123.rds")
-#perf <- evaluate_models(md)
+md <- readRDS("/media/marieke/Shared/Chap-1/Model/Scripts/Chap_1/output/models/MEM_tests/R_bloo30_XGB_T8_pred_123.rds")
+md <- models_list
+# perf <- evaluate_models(md)
 
 
 # 1.  Extract and Aggregate Variable Importance
 # Get folds
-folds <- md$R$XGB$bloo30
+folds <- md$R$XGB$bloo50
 
 # Extract importance from each fold's model
 importance_list <- lapply(folds, function(fold) {
@@ -301,6 +265,8 @@ X <- "bathy"
 
 X <- "gravity"
 
+X <- 'dist_shore'
+
 starts_with_any <- function(feature_name, prefix_vec) {
   any(startsWith(feature_name, prefix_vec))
 }
@@ -338,10 +304,6 @@ ggplot(mean_importance, aes(x = reorder(Feature, mean_gain), y = mean_gain)) +
 
 
 
-# Select predictors with gain > 0.005 -------------
-selected_predictors <- mean_importance |>
-  filter(mean_gain > 0.005) |>
-  pull(Feature)
 
 
 
@@ -355,38 +317,3 @@ selected_predictors <- mean_importance |>
 
 
 
-
-
-
-## Fit model ----------
-# Initialize list to store models
-models_list <- list()
-
-# Iterate over each response variable
-for (response_var in colnames(ind)[1]) {
-  
-  # Fit the model using fit_models function
-  model <- fit_models(
-    dataset = tot, 
-    response_var = response_var, 
-    predictors = colnames(predictors), 
-    cv_configs = cv_configs["bloo30"],
-    models = c("XGB"), 
-    distribution = NULL
-  )
-  
-  # Store model in list
-  models_list[[response_var]] <- model
-}
-rm(model)
-
-# Save model
-saveRDS(models_list, "./output/models/MEM_tests/R_bloo30_XGB_T12.1.rds")
-
-beepr::beep()
-
-
-
-
-##  Evaluate performance 
-#***********************************************************************************************************************************************************************************************************-----
