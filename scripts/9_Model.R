@@ -108,7 +108,7 @@ tot <- pred %>%
 # R2              Pearson_Corr Spearman_Corr      MAE      RMSE AIC Response_Var Model     CV Train_Size
 # 1 0.59889763    0.7738848     0.7738419 8.598846 11.212882  NA            R   XGB bloo50         NA
 # 2 0.56089502    0.7489293     0.8188332 2.619474  3.964392  NA       Crypto   XGB bloo50         NA
-# 3 0.07769429    0.2787370     0.3864764 1.014452  1.470286  NA       Elasmo   XGB bloo50         NA
+# 3 0.07769429    0.7489293      0.3864764 1.014452  1.470286  NA       Elasmo   XGB bloo50         NA
 
 ## Prep data for model ----
 # Extract predictors

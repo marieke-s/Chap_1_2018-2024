@@ -518,6 +518,8 @@ plot(rast_grouped)
 
 
 
+# Export 
+terra::writeRaster(rast_grouped, "./data/processed_data/predictors/Habitat/grouped_habitat_raster.tif")
 
 
 

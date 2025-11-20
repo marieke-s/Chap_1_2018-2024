@@ -298,6 +298,37 @@ sel <- sel %>%
 # [16] "mpa_dist_m_weight_log"      "shore_dist_m_weight_log"    "gravity_mean_log"          
 # [19] "cop_chl_month_mean_log"    "geom" 
 st_write(sel, "./data/processed_data/predictors/predictors_sel_v1.3.gpkg", delete_dsn = TRUE)
+# Export predictors_raw_sel_v1.3.gpkg ----
+# based on predictors_raw_v2.2 and predictors_sel_v1.3 
+# selects the same predictors and rows but from RAW predictors (for data explo)
+
+pred_raw <- st_read("./data/processed_data/predictors/predictors_raw_v2.2.gpkg")
+predictors_sel_v1.3 <- st_read("./data/processed_data/predictors/predictors_sel_v1.3.gpkg")
+
+sel_raw <- pred_raw %>%
+  dplyr::filter(replicates %in% predictors_sel_v1.3$replicates) %>% 
+  dplyr::select(c("replicates",
+                  "grouped_main_habitat",
+                  "x",
+                  "y",
+                  "aspect_mean",
+                  "tpi_mean",
+                  "port_dist_m_weight",
+                  "grouped_nb_habitat_per_km2",
+                  "bathy_mean",
+                  "wind_mean_1m",
+                  "vel_mean_1m",
+                  "temp_mean_1m",
+                  "sal_mean_1m",
+                  "canyon_dist_m_weight",
+                  "mpa_dist_m_weight",
+                  "shore_dist_m_weight",
+                  "gravity_mean",
+                  "cop_chl_month_mean",
+                  "geom"))
+
+st_write(sel_raw, "./data/processed_data/predictors/predictors_raw_sel_v1.3.gpkg", delete_dsn = TRUE)
+
 #----------------- AUTRES -----------------
 #---- Visualise selected pred ----
 method = 'vifcor' # 'vifcor'

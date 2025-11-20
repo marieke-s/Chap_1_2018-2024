@@ -112,7 +112,7 @@ div <- div %>%
 
 
 # write csv
-write_csv2(div,"./data/processed_data/Traits/div_indices_v1.0_sel_v1.1.csv")
+readr::write_csv2(div,"./data/processed_data/Traits/div_indices_v1.0_sel_v1.1.csv")
 
 #--------------- AUTRES ---------------- 
 # remove lockdown

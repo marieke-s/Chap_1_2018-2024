@@ -49,6 +49,25 @@ div <- readr::read_csv2("./data/processed_data/Traits/div_indices_v1.0.csv") %>%
   mutate(DeBRa = as.numeric(DeBRa))
 
 
+# predictors_raw_sel_v1.3 ----
+pred_raw <- st_read("./data/processed_data/predictors/predictors_raw_sel_v1.3.gpkg")
+
+# remove space and majuscule in habitat names
+pred_raw$grouped_main_habitat <- gsub(" ", "_", pred_raw$grouped_main_habitat)
+pred_raw$grouped_main_habitat <- tolower(pred_raw$grouped_main_habitat)
+
+# set character as factor
+pred_raw$grouped_main_habitat <- as.factor(pred_raw$grouped_main_habitat)
+
+
+# mtdt_7_sel_v1.1 ----
+mtdt <- st_read("./data/processed_data/Mtdt/mtdt_7_sel_v1.1.gpkg")
+
+# div_indices_sel_v1.1.gpkg ----
+div <- readr::read_csv2("./data/processed_data/Traits/div_indices_v1.0_sel_v1.1.csv") %>%
+  mutate(DeBRa = as.numeric(DeBRa))
+
+# Prep ----
 # Add coords to mtdt
 mtdt <- pred_raw %>%
   dplyr::select(c(x,y,replicates)) %>%
@@ -117,9 +136,17 @@ full <- mtdt %>%
 
 
 
+unique(mtdt$month)
 
 
+# Export 2023 june -----
 
+
+st_write(
+  mtdt %>% filter(year == 2023 & month == "6"),
+  "./data/processed_data/Mtdt/mtdt_7_sel_1.1_2023_june.gpkg",
+  delete_dsn = TRUE
+)
 #------------------------------------- Explore Mtd_7 ------------------------------------------------------------------------------------------------------------------------
 
 #--- Check NAs -----
@@ -140,6 +167,18 @@ cat_cols <- c("year", "month", "season")
 map_categorical_plots(mtdt,
                       cols_to_plot = cat_cols,
                       version = "mtdt_7_temporal_var",
+                      output_directory = "./figures/Mtdt/Map_Hist", 
+                      separate_maps = TRUE)
+
+map_categorical_plots(mtdt,
+                      cols_to_plot = "year",
+                      version = "mtdt_7_sel_v1.1_temporal_var",
+                      output_directory = "./figures/Mtdt/Map_Hist", 
+                      separate_maps = TRUE)
+
+map_categorical_plots(mtdt,
+                      cols_to_plot = "season",
+                      version = "mtdt_7_sel_v1.1_temporal_var",
                       output_directory = "./figures/Mtdt/Map_Hist", 
                       separate_maps = TRUE)
 
@@ -265,6 +304,47 @@ map_categorical_plots(mtdt,
 
 # Results : strong spatial bias of depth_sampling : in Occitanie almost only surface sampling and 'deep' sampling > 10m mostly in PACA and Corsica. 
 
+
+
+
+
+
+# With sel.v1.1
+
+# Make bathy categorical 
+full <- full %>%
+  mutate(
+    bathy_mean_cat = case_when(
+      bathy_mean > 0 & bathy_mean <= 10 ~ "0-10m",
+      bathy_mean > 10 & bathy_mean <= 20 ~ "10-20m",
+      bathy_mean > 20 & bathy_mean <= 30 ~ "20-30m",
+      bathy_mean > 30 & bathy_mean <= 40 ~ "30-40m",
+      bathy_mean > 40 & bathy_mean <= 50 ~ "40-50m",
+      bathy_mean > 50 & bathy_mean <= 60 ~ "50-60m",
+      bathy_mean > 60 & bathy_mean <= 70 ~ "60-70m",
+      bathy_mean > 70 & bathy_mean <= 80 ~ "70-80m",
+      bathy_mean > 80 & bathy_mean <= 90 ~ "80-90m",
+      bathy_mean > 80 & bathy_mean <= 90 ~ "80-90m",
+      bathy_mean > 90 & bathy_mean <= 100 ~ "90-100m",
+      bathy_mean > 100 ~ "> 100m",
+      
+      TRUE ~ NA_character_
+    )
+    )
+
+
+# Make factor to ensure correct order in plots
+full$bathy_mean_cat <- factor(full$bathy_mean_cat, levels = c("0-10m", "10-20m", "20-30m", "30-40m", "40-50m", "50-60m", "60-70m", "70-80m", "80-90m", "90-100m", "> 100m"))
+
+
+
+# Map
+map_categorical_plots(full,
+                      cols_to_plot = "bathy_mean_cat",
+                      version = "predictors_raw_sel_v1.3_bathy_depth_MEAN_cat",
+                      output_directory = "./figures/Predictors/Map_Hist", 
+                      separate_maps = TRUE)
+
 #--- Map + hist of region -----
 # Map
 map_categorical_plots(mtdt,
@@ -331,7 +411,11 @@ map_categorical_plots(mtdt,
                       separate_maps = TRUE)
 
 
-
+map_categorical_plots(mtdt,
+                      cols_to_plot = "method",
+                      version = "mtdt_7_sel_v1.1_method",
+                      output_directory = "./figures/Mtdt/Map_Hist", 
+                      separate_maps = TRUE)
 
 
 
@@ -1123,6 +1207,7 @@ indicators_num <- indicators %>%
 
 ## List of columns to plot
 cols_to_plot <- names(indicators_num)[names(indicators_num) != "replicates"]
+cols_to_plot <- c("R", "Crypto", "Elasmo")
 
 ## Compute histogram plots safely
 plots_list <- lapply(cols_to_plot, function(col_name) {
@@ -1194,7 +1279,7 @@ rm(plots_list, indicators_num, cols_to_plot, col_name, file_name, file_path, out
 
 #--- Map + hist + summary -----
 
-map_index_plots(df = indicators, version = "div_indices_v1.0", output_directory = "./figures/Div_indices/Map_Hist", cols_to_plot = colnames(indicators[4:13]))
+map_index_plots(df = indicators, version = "div_indices_sel_v1.1", output_directory = "./figures/Div_indices/Map_Hist", cols_to_plot = colnames(indicators[4:13]))
 
 
 
