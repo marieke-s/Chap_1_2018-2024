@@ -201,11 +201,37 @@ for (d in dates_to_do) {
   man_grid$date <- as.Date(d)
   man_grid$depth_sampling_surface <- 1
   man_grid$depth_sampling_40m <- 40
-
   
+  # Reproject in 4326
+  man_grid <- sf::st_transform(man_grid, crs = 4326)
+
   # file name
   fname <- paste0("./data/processed_data/prediction_extent/grid_v1.0_", d, ".gpkg")
   
   # Write file
   st_write(man_grid, fname, delete_dsn = TRUE)
 }
+
+
+#------------ Check extraction ----------------
+# Read all .geojson in the folder 
+grid_files <- list.files("./data/processed_data/predictors/Prediction_grid_v1.0/", pattern = "*\\.geojson$", full.names = TRUE)
+all_grids <- lapply(grid_files, st_read, quiet = TRUE)
+t <- all_grids[[1]]
+colnames(all_grids[[1]])
+unique(t$date)
+# Print a summary of each grid
+for (i in seq_along(all_grids)) {
+  cat("Summary of grid file:", grid_files[i], "\n")
+  # make all cols numeric 
+  all_grids[[i]] <- all_grids[[i]] %>%
+    mutate(across(everything(), as.numeric)) %>%
+    st_drop_geometry() %>%
+    dplyr::select(-c("id",            "value",        "date",           "depth_sampling_surface", "depth_sampling_40m" ))
+  print(summary(all_grids[[i]]))
+  cat("\n")
+}
+
+names()
+
+

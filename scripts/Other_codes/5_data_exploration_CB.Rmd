@@ -1,0 +1,1483 @@
+---
+title: "data_exploration"
+output: html_document
+date: "2025-11-10"
+---
+
+
+
+
+# Work to insure data format
+```{r }
+# charger les library
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(lubridate)
+
+# charger les données
+load("~/Bureau/CHAPT_1/raw_predictors.RData")
+med_covariates <- pred_tr
+
+# Load occurrences (sites × species)
+occ_pooled_v1.1 <- readr::read_csv("~/Bureau/marieke/occ_pooled_v1.1.csv")
+
+# S'assurer que la colonne date est bien convertie en format Date
+Sys.setlocale("LC_TIME", "C")
+med_covariates <- med_covariates %>%
+  mutate(date = as.Date(date)) %>%  # convertit les dates de type texte en Date
+  mutate(month = month(date, label = TRUE, abbr = FALSE),
+         year = case_when(
+           year(date) == 2024 ~ "2024",
+      year(date) == 2023 ~ "2023",
+      year(date) %in% 2018:2022 ~ "2018–2022",
+      TRUE ~ NA_character_)
+         )  # extrait le nom du mois en anglais
+
+
+med_covariates_region_combined <- med_covariates %>%
+  mutate(region = dplyr::recode(region,
+                                "Occitanie" = "PACA-Occitanie",
+                                "PACA" = "PACA-Occitanie"))
+
+
+```
+
+# Check correlation and select covariables #########################################
+```{r}
+# select and scale data ##############################################################################################################
+load("~/Bureau/CHAPT_1/scale_predictors.RData")
+
+data_quantitative <- final_pred %>%
+  select(where(is.numeric))
+
+# data_quantitative <- sf::st_drop_geometry(data_quantitative)
+# data_quantitative <- scale(data_quantitative)
+
+# Keep only mean values for multi-stat variables
+data_quantitative_filtered <- data_quantitative %>%
+  as.data.frame() %>%
+  select(
+    # keep all basic ones + "mean" metrics, ignore min/max/range/weight
+    matches("mean$|_mean_|bathy_mean|temp_mean|sal_mean|cop_|area_km2|duration_total|estimated_volume_total|depth_sampling|depth_seafloor|dist_seabed_depthsampling|gravity_mean|nb_habitat_per_km2"),
+    -matches("min|max|range|weight")
+  )
+
+# Remove the column entirely
+data_quantitative_filtered <- data_quantitative_filtered %>%
+  select(-any_of("depth_seafloor"))
+```
+
+
+```{r}
+# plot groups of highly correlated factors: alone nods are not correlated to anything #############################################################
+# help visualize correlated factors
+
+library(igraph)
+
+cm <- cor(data_quantitative_filtered, method = "spearman", use = "pairwise.complete.obs")
+cm[upper.tri(cm, diag = TRUE)] <- 0                 # keep lower triangle zeros above diagonal
+th <- 0.6                                           # threshold
+A <- (abs(cm) >= th) * 1
+diag(A) <- 0
+g <- graph_from_adjacency_matrix(A, mode = "undirected", diag = FALSE, weighted = NULL)
+
+# optional: edge weights for widths 
+E(g)$weight <- abs(cm)[which(abs(cm) >= th)]
+
+plot(g,
+     vertex.size = 6,
+     vertex.label.cex = 0.6,
+     edge.width = 2 * E(g)$weight,     # thicker = stronger
+     layout = layout_with_fr(g))
+```
+
+
+```{r}
+# For selected factors plot PCA
+# want to focus on monthly mean and no methods factors ############################################################
+final_predictors <- c(
+  # "area_km2",  
+  "depth_sampling",  # very important to keep
+  # "depth_seafloor",
+  # "dist_seabed_depthsampling",
+  # "duration_total",
+  # "estimated_volume_total", 
+  # "lockdown",  
+  "shore_dist_m_mean",  
+  "canyon_dist_m_mean",  
+  "mpa_dist_m_mean",
+  "port_dist_m_mean",
+  "bathy_mean",
+  "gravity_mean",
+  "grouped_nb_habitat_per_km2",
+  # "nb_habitat_per_km2",
+  "cop_analysed_sst_month_mean",
+  "cop_chl_month_mean",
+  "sal_mean_1m",
+  "temp_mean_1m",
+  "vel_mean_1m",
+  "wind_mean_1m"
+)
+
+# Subset only final predictors
+data_quantitative_final <- data_quantitative_filtered %>%
+  dplyr::select(any_of(final_predictors))
+
+
+# Check multicollinearity: VIF avec package usdm ##########################################################################################
+vif_results <- usdm::vifcor(data_quantitative_final, th = 0.9, keep = NULL, method = 'spearman') # pearson
+
+# The function returns names of variables kept
+selected_vars <- vif_results@results$Variables
+data_quantitative_final <- data_quantitative_filtered[, selected_vars, drop = FALSE]
+
+# Plot PCA
+pca <- FactoMineR::PCA(data_quantitative_final, scale.unit = TRUE, ncp = 5, graph = FALSE)
+
+# Variable contributions to axes ##############################################################################################################
+factoextra::fviz_pca_var(
+  pca,
+  col.var = "contrib",
+  gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07")
+)
+```
+
+
+```{r}
+# For selected factors plot correlation plot 
+# Plot correlation matrix ######
+cor_matrix <- cor(data_quantitative_final, method = "spearman")
+# cor_matrix <- cor(data_quantitative_final, method = "pearson")
+
+high_cor <- caret::findCorrelation(cor_matrix, cutoff = 0.6, names = TRUE)
+
+# Create the correlation matrix plot ##############################################################################################################
+library(ggplot2)
+correlation_plot <- ggcorrplot::ggcorrplot(
+  cor_matrix,
+  hc.order = TRUE,                 # Hierarchical clustering
+  type = "lower",                  # Display lower triangle
+  lab = TRUE,                      # Add numerical values
+  lab_size = 6,                    # Larger label size for readability
+  method = "circle",               # Visualization method
+  colors = c("#2166AC", "white", "#B2182B"), # Improved color palette for contrast
+  title = "Correlation Matrix of Selected Quantitative Predictors", # Descriptive title
+  ggtheme = ggplot2::theme_minimal(base_size = 14) + # Increase base font size
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(hjust = 0.5, face = "bold", size = 16), # Center and bold title
+      axis.text.x = ggplot2::element_text(angle = 45, hjust = 1, size = 12),     # Rotate and enlarge x-axis labels
+      axis.text.y = ggplot2::element_text(size = 12),                            # Enlarge y-axis labels
+      panel.grid.major = ggplot2::element_line(color = "grey90"),                # Add light grid lines
+      legend.position = "right",                                                # Keep legend on the right side
+      legend.text = ggplot2::element_text(size = 10),                            # Adjust legend text size
+      legend.title = ggplot2::element_blank()                                   # Remove legend title
+    )
+) +
+  scale_fill_gradientn(                                                         # Customize the legend
+    colors = c("#2166AC", "white", "#B2182B"),                                  # Same colors for consistency
+    limits = c(-1, 1),                                                          # Force legend range from -1 to 1
+    breaks = c(-1, 0, 1),                                                       # Display only -1, 0, 1 in legend
+    labels = c("-1", "0", "1")                                                  # Set labels for breaks
+  )
+
+correlation_plot  # la j'ai encore un soucis avec depth_sampling bathy_mean et temp_mean / dist port et gravity
+
+# Save the plot as PNG
+ggsave(
+  filename = "correlation_matrix_final_spearman.png",   # File name
+  plot = correlation_plot,               # Plot object
+  width = 12,                            # Width in inches
+  height = 12,                            # Height in inches
+  dpi = 300,                             # Resolution
+  units = "in"                           # Units in inches
+)
+
+
+
+```
+
+## Look at factors distribution #####################################################
+```{r}
+## show factors distribution ###########################################################################################
+
+all_vars <- c("area_km2", "canyon_dist_m_min", "canyon_dist_m_max", "canyon_dist_m_mean",
+              "canyon_dist_m_range", "canyon_dist_m_weight", "port_dist_m_min", "port_dist_m_max",
+              "port_dist_m_mean", "port_dist_m_range", "port_dist_m_weight", "mpa_dist_m_min",
+              "mpa_dist_m_max", "mpa_dist_m_mean", "mpa_dist_m_range", "mpa_dist_m_weight",
+              "shore_dist_m_min", "shore_dist_m_max", "shore_dist_m_mean", "shore_dist_m_range",
+              "shore_dist_m_weight", "gravity_mean", "gravity_min", "gravity_max", "gravity_range",
+              "nb_habitat_per_km2", "grouped_nb_habitat_per_km2", "bathy_mean", "bathy_range",
+              "bathy_min", "bathy_max", "depth_sampling", "depth_seafloor", "lockdown",
+              "estimated_volume_total", "duration_total", "dist_seabed_depthsampling",
+              "wind_min_24h", "wind_max_24h", "wind_mean_24h", "vel_min_24h", "vel_max_24h",
+              "vel_mean_24h", "wind_max_7j", "wind_min_7j", "wind_mean_7j", "vel_max_7j",
+              "vel_min_7j", "vel_mean_7j", "wind_max_1m", "wind_min_1m", "wind_mean_1m",
+              "vel_max_1m", "vel_min_1m", "vel_mean_1m", "ws_max_1y", "ws_min_1y", "ws_mean_1y",
+              "vel_max_1y", "vel_min_1y", "vel_mean_1y", "temp_min_24h", "temp_max_24h",
+              "temp_mean_24h", "sal_min_24h", "sal_max_24h", "sal_mean_24h", "temp_max_7j",
+              "temp_min_7j", "temp_mean_7j", "sal_max_7j", "sal_min_7j", "sal_mean_7j",
+              "temp_max_1m", "temp_min_1m", "temp_mean_1m", "sal_max_1m", "sal_min_1m",
+              "sal_mean_1m", "temp_max_1y", "temp_min_1y", "temp_mean_1y", "sal_max_1y",
+              "sal_min_1y", "sal_mean_1y", "cop_chl_day_mean", "cop_chl_day_min",
+              "cop_chl_day_max", "cop_chl_week_mean", "cop_chl_week_min", "cop_chl_week_max",
+              "cop_chl_month_mean", "cop_chl_month_min", "cop_chl_month_max",
+              "cop_chl_year_mean", "cop_chl_year_min", "cop_chl_year_max",
+              "cop_chl_5years_mean", "cop_chl_5years_min", "cop_chl_5years_max",
+              "cop_analysed_sst_day_mean", "cop_analysed_sst_day_min", "cop_analysed_sst_day_max",
+              "cop_analysed_sst_week_mean", "cop_analysed_sst_week_min", "cop_analysed_sst_week_max",
+              "cop_analysed_sst_month_mean", "cop_analysed_sst_month_min",
+              "cop_analysed_sst_month_max", "cop_analysed_sst_year_mean",
+              "cop_analysed_sst_year_min", "cop_analysed_sst_year_max",
+              "cop_analysed_sst_5years_mean", "cop_analysed_sst_5years_min",
+              "cop_analysed_sst_5years_max")
+
+
+final_predictors <- c(
+  "shore_dist_m_mean",  
+  "canyon_dist_m_mean",  
+  "mpa_dist_m_mean",
+  "port_dist_m_mean",
+  "bathy_mean",
+  "gravity_mean",
+  "grouped_nb_habitat_per_km2",
+  "cop_chl_month_mean",
+  "sal_mean_1m",
+  "temp_mean_1m",
+  "vel_mean_1m",
+  "wind_mean_1m",
+  "depth_sampling"   # very important to keep !!!! 
+)
+
+
+
+# Define variable names with units
+variable_labels <- c(
+  "bathy_mean" = "Bathymetry (m)",
+  "grouped_nb_habitat_per_km2" = "Number of Differents Habitats",
+  # "fishing_activity" = "Fishing Activity (hours)",
+  "sal_mean_1m" = "Salinity (PSU)",
+  "temp_mean_1m" = "Temperature (°C)",
+  "wind_mean_1m"= "Wind",
+  "vel_mean_1m"= "Vel",
+  "cop_chl_month_mean" = "Chlorophyll (mg/m³)",
+  "mpa_dist_m_mean" = "Distance to Fully Protected MPA (m)",
+  "shore_dist_m_mean" = "Distance to Shore (m)",
+  "port_dist_m_mean" = "Distance to harbour (m)",
+  "canyon_dist_m_mean" = "Distance to Canyon (m)",
+  "gravity_mean" = "Gravity"
+)
+
+# Function to create histograms with labeled units
+plot_hist <- function(var) {
+  ggplot(med_covariates, aes_string(x = var)) +
+    geom_histogram(aes(y = ..density..), bins = 30, fill = "gray70", color = "black", alpha = 0.8) +
+    geom_density(color = "#377eb8", size = 1.2) +  # Density curve in blue
+    labs(title = variable_labels[[var]], x = variable_labels[[var]], y = "Density") +
+    theme_classic(base_size = 18) +  # Bigger font for readability
+    coord_cartesian(expand = TRUE) +  # Avoid cutoff
+    theme(
+      plot.title = element_text(size = 13, face = "bold"),
+      axis.title = element_text(size = 10),
+      axis.text = element_text(size = 10),
+      legend.position = "none",
+      plot.margin = margin(10, 10, 10, 10)  # Increase margins
+    )
+}
+
+# Generate individual plots
+plots <- lapply(names(variable_labels), plot_hist)
+
+# Arrange plots in a grid with a title
+figure <- ggpubr::ggarrange(plotlist = plots, ncol = 4, nrow = 3, align = "hv")
+
+# Add main title
+figure <- ggpubr::annotate_figure(
+  figure,
+  top = ggpubr::text_grob("Distribution of Environmental and Anthropogenic Factors", 
+                  face = "bold", size = 20)
+)
+
+figure 
+
+# Save as high-resolution PNG
+ggsave("factor_distributions.png", figure, width = 18, height = 12, dpi = 300)
+
+```
+
+# Plot factors distribution with 3 month breaks with colors indicating region
+```{r echo=TRUE}
+# Load necessary libraries
+library(lubridate)  # For handling dates
+library(ggplot2)
+library(dplyr)
+library(ggpubr)
+
+## show interannual seasonal variation of temperature ############################################################################################
+# This plot is not the best representation see the one just after 
+# temp <- ggplot(med_covariates, aes(x = date, y = temp_mean_1m, color = region)) +
+#   geom_line(aes(group = interaction(region, year)), alpha = 0.6, size = 1) +  # lignes colorées par région
+#   geom_point(size = 2, alpha = 0.7) +  # points colorés par région
+#   geom_smooth(
+#     aes(group = year),
+#     method = "loess",
+#     se = FALSE,
+#     color = "black",
+#     size = 1.2,
+#     linetype = "dashed"
+#   ) +  # tendance LOESS indépendante pour chaque année
+#   labs(
+#     title = "Interannual Variation of Temperature by Region",
+#     x = "Date",
+#     y = "Temperature (°C)",
+#     color = "Region"
+#   ) +
+#   theme_minimal() +
+#   theme(
+#     axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+#     axis.text.y = element_text(size = 12),
+#     axis.title = element_text(size = 14, face = "bold"),
+#     plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+#     legend.text = element_text(size = 12),
+#     legend.title = element_text(size = 14, face = "bold")
+#   ) +
+#   scale_x_date(date_labels = "%b %Y", date_breaks = "3 months") +
+#   scale_color_viridis_d()
+# 
+# temp
+# 
+# # Save as high-resolution PNG
+# ggsave("interannual_variation_temp.png", temp, width = 12, height = 10, dpi = 300)
+
+
+
+## show interannual seasonal variation of chl-a ############################################################################################
+chl <- ggplot(med_covariates, aes(x = date, y = cop_chl_month_mean, group = year, color = as.factor(year))) +
+  geom_line(alpha = 0.5, size = 1) +  # Transparent lines for trends
+  geom_point(size = 2, alpha = 0.7) +  # Smaller points with transparency
+  geom_smooth(method = "loess", se = FALSE, color = "black", size = 1.2, linetype = "dashed") +  # Smooth trend line
+  labs(
+    title = "Interannual Variation of Chlorophyll-a",
+    x = "Date",
+    y = "Chlorophyll-a (mg/l³)",
+    color = "Year"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(size = 14, face = "bold"),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    legend.text = element_text(size = 12),
+    legend.title = element_text(size = 14, face = "bold")
+  ) +
+  scale_x_date(date_labels = "%b %Y", date_breaks = "3 months") +  # Better x-axis readability
+  scale_color_viridis_d()  # Use colorblind-friendly colors
+
+chl
+
+# Save as high-resolution PNG
+ggsave("interannual_variation_chl.png", chl, width = 12, height = 10, dpi = 300)
+
+
+## show interannual seasonal variation of salinity ############################################################################################
+
+sal <- ggplot(med_covariates, aes(x = date, y = sal_mean_1m, group = year, color = as.factor(year))) +
+  geom_line(alpha = 0.5, size = 1) +  # Transparent lines for trends
+  geom_point(size = 2, alpha = 0.7) +  # Smaller points with transparency
+  geom_smooth(method = "loess", se = FALSE, color = "black", size = 1.2, linetype = "dashed") +  # Smooth trend line
+  labs(
+    title = "Interannual Variation of Salinity",
+    x = "Date",
+    y = "Salinity (PSU)",
+    color = "Year"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(size = 14, face = "bold"),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    legend.text = element_text(size = 12),
+    legend.title = element_text(size = 14, face = "bold")
+  ) +
+  scale_x_date(date_labels = "%b %Y", date_breaks = "3 months") +  # Better x-axis readability
+  scale_color_viridis_d()  # Use colorblind-friendly colors
+
+sal
+# all outliers with very low values are from Rhone estuary (not an error)
+
+# Save as high-resolution PNG
+ggsave("interannual_variation_sal.png", sal, width = 12, height = 10, dpi = 300)
+
+
+
+```
+
+# Plot factors distribution seperated by year and region 
+```{r}
+# sampling over time by region
+library(ggplot2)
+library(viridis)
+
+temp_V2 <- ggplot(med_covariates, aes(x = month, y = temp_mean_1m, color = region)) +
+  geom_jitter(width = 0.2, height = 0, alpha = 0.5, size = 2) +
+  stat_summary(fun = mean, geom = "line", aes(group = region), linewidth = 1.2) +
+  stat_summary(fun = mean, geom = "point", shape = 21, fill = "white", size = 2.5, stroke = 0.8) +
+  facet_wrap(~ year, ncol = 3) +
+  scale_color_viridis_d(option = "D", end = 0.85) +
+  labs(
+    title = "Seasonal variation of sea temperature by region and year group",
+    x = "Month",
+    y = "Sea temperature (°C)",
+    color = "Region"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "top",
+    plot.title = element_text(face = "bold", size = 16, hjust = 0.5)
+  )
+
+temp_V2
+
+ggsave("interannual_variation_temp_V2.png", temp_V2, width = 12, height = 10, dpi = 300)
+
+
+```
+
+
+# Sampling effort by region and season ############################################
+```{r}
+library(dplyr)
+library(ggplot2)
+
+counts <- med_covariates %>%
+  mutate(
+    month = factor(month),
+    year  = factor(year, levels = sort(unique(year))),
+    region = factor(region)
+  ) %>%
+  count(region, year, month, name = "n")
+
+year_totals <- counts %>%
+  group_by(year) %>%
+  summarise(total_samples = sum(n, na.rm = TRUE)) %>%
+  mutate(label = paste0(year, " (n=", total_samples, ")"))
+
+# Match year labels to use them in the plot
+year_label_map <- setNames(year_totals$label, year_totals$year)
+
+# Plot with totals in facet labels
+heatmap <- ggplot(counts, aes(x = month, y = region, fill = n)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "C", direction = -1, name = "Number of samples") +
+  facet_wrap(~ year, ncol = 1, labeller = as_labeller(year_label_map)) +
+  labs(
+    title = "Sampling effort heatmap by month, region, and year",
+    x = "Month of sampling",
+    y = "Region"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text = element_text(face = "bold"),
+    legend.position = "right"
+  )
+
+heatmap 
+
+ggsave("sampling_effort_heatmap_month_region_year.png", heatmap, width = 12, height = 10, dpi = 300)
+
+```
+
+# Number of samples by year, region and sampling method ###########################
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Plot number of samples by year and method
+meth <- ggplot(med_covariates, aes(x = year, fill = method)) +
+  geom_bar(position = "dodge", color = "white") +
+  scale_fill_viridis_d(option = "C", name = "Sampling method") +
+  labs(
+    title = "Number of samples by year and sampling method",
+    x = "Year",
+    y = "Number of samples"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    axis.text.x = element_text(angle = 0, size = 12),
+    legend.position = "right",
+    legend.title = element_text(face = "bold")
+  )
+
+meth
+
+ggsave("sampling_effort_method.png", meth, width = 12, height = 10, dpi = 300)
+
+# add region info (too complex) not the best representation :
+# use Marieke plot for a better understanding of sampling method spatial distribution across the studied area
+meth_region <- ggplot(med_covariates, aes(x = year, fill = method)) +
+  geom_bar(position = "dodge", color = "white") +
+  facet_wrap(~ region) +
+  scale_fill_viridis_d(option = "C", name = "Sampling method") +
+  labs(
+    title = "Sampling effort by year, method, and region",
+    x = "Year",
+    y = "Number of samples"
+  ) +
+  theme_minimal(base_size = 14)
+
+meth_region
+
+ggsave("sampling_effort_method_region.png", meth_region, width = 12, height = 10, dpi = 300)
+
+```
+
+
+# Try Marieke map of method and sampling effort 
+```{r}
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+
+```
+
+# Show that in Corsica temperature is also linked to the sampling method and season
+```{r}
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+
+
+med_2023_corse <- med_covariates %>%
+  mutate(
+    date = as.Date(date),
+    month = month(date, label = TRUE, abbr = TRUE),
+    year = year(date)
+  ) %>%
+  filter(year == 2023, region == "Corse")
+
+site_counts <- med_2023_corse %>%
+  group_by(month) %>%
+  summarise(n_sites = n(), .groups = "drop")
+
+ggplot(med_2023_corse, aes(x = month, y = temp_mean_1m, color = method)) +
+  geom_jitter(width = 0.2, alpha = 0.5, size = 2) +
+  stat_summary(fun = mean, geom = "line", aes(group = method), linewidth = 1.2) +
+  stat_summary(fun = mean, geom = "point", shape = 21, fill = "white", size = 2.5, stroke = 0.8) +
+  geom_text(
+    data = site_counts,
+    aes(x = month, y = max(med_2023_corse$temperature) + 1, label = paste0("n=", n_sites)),
+    inherit.aes = FALSE,
+    size = 4
+  ) +
+  labs(
+    title = "Température mensuelle en Corse (2023) selon la méthode",
+    subtitle = "Nombre de sites indiqué au-dessus de chaque mois",
+    x = "Mois",
+    y = "Température (°C)",
+    color = "Méthode"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(face = "bold", hjust = 0.5)
+  )
+
+
+
+```
+
+
+# Work with occurences : METHODS
+# methods with different number of detection ?
+```{r}
+occ_pooled_v1_0 <- readr::read_csv("~/Bureau/marieke/occ_pooled_v1.1.csv")
+
+# Sélection des colonnes numériques (espèces) uniquement
+occ_numeric <- occ_pooled_v1_0 %>%
+  dplyr::select(where(is.numeric))
+
+# Calculer la somme des détections par ligne
+row_sums <- rowSums(occ_numeric, na.rm = TRUE)
+
+# Table with site key + total
+detections_per_site <- occ_pooled_v1_0 %>%
+  dplyr::select(replicates) %>%
+  dplyr::mutate(total_detections = row_sums)
+
+# Join to covariates
+# to do that we need to change covariates replicate column (25 samples with no detection were remove from occurrence and names don't match
+
+biodiv_with_detections <- med_covariates %>%
+  dplyr::left_join(detections_per_site, by = "replicates")
+
+biodiv_with_detections %>%
+  summarise(
+    moyenne_detections = mean(total_detections, na.rm = TRUE),
+    ecart_type_detections = sd(total_detections, na.rm = TRUE)
+  )
+
+library(ggplot2)
+library(forcats)
+
+df_plot <- biodiv_with_detections %>%
+  filter(!is.na(method), !is.na(total_detections)) %>%
+  mutate(method = fct_reorder(method, total_detections, .fun = median, na.rm = TRUE))
+
+p <- ggplot(df_plot, aes(x = method, y = total_detections)) +
+  geom_violin(fill = "grey90", color = "grey60", width = 0.9, alpha = 0.8, trim = FALSE) +
+  geom_boxplot(width = 0.25, outlier.shape = NA, fill = "steelblue", alpha = 0.6) +
+  geom_jitter(width = 0.15, alpha = 0.25, size = 1) +
+  stat_summary(fun = median, geom = "point", size = 2.2, color = "black") +
+  labs(
+    title = "Total eDNA detections by sampling method",
+    x = "Sampling method",
+    y = "Number of detections (species × positive replicates)"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    axis.text.x = element_text(angle = 35, hjust = 1)
+  )
+p
+
+```
+
+# Look at where, when and how elamsobranchs where detected
+```{r }
+# Bathymetry by Detected Elasmobranch Species for surface sampling method
+
+# Vector of elasmobranch species column names # "Tetronarce_nobiliana"
+elasmobranchs <- c(
+  "Aetomylaeus_bovinus", "Alopias_vulpinus", "Dasyatis_pastinaca", 
+  "Dasyatis_tortonesei", "Dipturus_oxyrinchus", "Etmopterus_spinax", 
+  "Galeus_melastomus", "Isurus_oxyrinchus", "Mobula_mobular", 
+  "Mustelus_mustelus", "Myliobatis_aquila", "Prionace_glauca", 
+  "Pteroplatytrygon_violacea", "Raja_brachyura", "Raja_miraletus", 
+  "Raja_undulata", "Rostroraja_alba", "Scyliorhinus_canicula", 
+  "Scyliorhinus_stellaris", "Squalus_blainville", "Squatina_squatina", "Torpedo_marmorata"
+)
+
+# Subset the data to keep id_spygen + elasmobranch columns
+selected_columns <- c("replicates", elasmobranchs)
+elasmobranch_data <- occ_pooled_v1_0[, selected_columns]
+
+# Filter rows where any of the elasmobranchs are present (>0)
+elasmobranch_present <- elasmobranch_data[rowSums(elasmobranch_data[ , -1]) > 0, ]
+
+# View the result
+merged_data <- merge(elasmobranch_present, med_covariates, by = "replicates")
+table(merged_data$region)
+
+table(merged_data$method)
+
+library(dplyr)
+
+# Summary stats grouped by region
+merged_data %>%
+  group_by(region) %>%
+  summarise(
+    n_sites = n(),
+    mean_depth = mean(depth_sampling, na.rm = TRUE),
+    mean_bathymetry = mean(bathy_mean, na.rm = TRUE)
+  )
+
+
+library(ggplot2)
+
+# Depth distribution
+ggplot(merged_data, aes(x = depth_sampling)) +
+  geom_histogram(binwidth = 10) +
+  facet_wrap(~ region) +
+  theme_minimal() +
+  labs(title = "Depths at which Elasmobranchs Were Detected")
+
+# Method by region
+ggplot(merged_data, aes(x = method, fill = region)) +
+  geom_bar(position = "dodge") +
+  theme_minimal() +
+  labs(title = "Sampling Methods Where Elasmobranchs Were Detected")
+  
+```
+
+```{r}
+surface_data <- merged_data[merged_data$method == "surface_transect", ]
+
+boxplot(bathy_mean ~ region,
+        data = surface_data,
+        main = "Bathymetry by Region (Surface Transects)",
+        xlab = "Region",
+        ylab = "Bathymetry (m)",
+        col = "lightgreen",
+        las = 2)
+
+
+high_bathy_sites <- surface_data[surface_data$bathy_mean > 50, ]
+
+# Keep only the species columns
+species_columns <- elasmobranchs
+
+# Sum presence for each species in high bathymetry sites
+species_presence_high_bathy <- colSums(high_bathy_sites[, species_columns] > 0)
+
+# Filter only species that were detected
+species_detected <- species_presence_high_bathy[species_presence_high_bathy > 0]
+
+# only Mobula_mobular Pteroplatytrygon_violacea two pelagic species detected when bathy increase
+```
+
+```{r}
+library(tidyr)
+library(dplyr)
+
+# First, filter surface transect sites where at least one elasmobranch was detected
+surface_detected <- surface_data %>%
+  filter(rowSums(select(., all_of(elasmobranchs))) > 0)
+
+# Pivot to long format: one row per detection
+long_species <- surface_detected %>%
+  pivot_longer(cols = all_of(elasmobranchs),
+               names_to = "species",
+               values_to = "presence") %>%
+  filter(presence > 0)  # keep only detected species
+
+library(ggplot2)
+
+ggplot(long_species, aes(x = species, y = bathy_mean)) +
+  geom_boxplot(fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "Bathymetry by Detected Elasmobranch Species for surface sampling method",
+       x = "Species",
+       y = "Bathymetry (m)") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+
+```{r}
+# Cumulative Elasmobranch Species Detections (Bathymetry -100 to 0m)
+library(ggplot2)
+library(patchwork)
+
+surface_data <- merged_data %>%
+  filter(method == "surface_transect", !is.na(bathy_mean)) %>%
+  arrange(bathy_mean)
+
+# Create a presence flag for any elasmobranch
+surface_data <- surface_data %>%
+  mutate(any_species_present = if_else(rowSums(select(., all_of(elasmobranchs))) > 0, 1, 0),
+         cumulative_species = cumsum(any_species_present))
+
+# Histogram of sample count per bathymetry bin
+p1 <- ggplot(surface_data, aes(x = bathy_mean)) +
+  geom_histogram(binwidth = 5, fill = "gray70", color = "black") +
+  labs(title = "Number of Surface Transect Samples per Bathymetry",
+       x = "Bathymetry (m)", y = "Number of Samples") +
+  xlim(100, 0) +
+  theme_minimal()
+
+# Cumulative detection curve
+p2 <- ggplot(surface_data, aes(x = bathy_mean, y = cumulative_species)) +
+  geom_line(color = "blue") +
+  geom_point(color = "red") +
+  labs(title = "Cumulative Elasmobranch Detections (Surface Transects)",
+       x = "Bathymetry (m)", y = "Cumulative Detections") +
+  xlim(100, 0) +
+  theme_minimal()
+
+# Combine vertically
+p1 / p2
+
+
+```
+
+
+
+```{r}
+#######################   Elasmo Component & Method    ##########################
+# for the whole dataset investigate where elasmo species are and what method/component seems to be more apropriate to detect them
+
+# components
+occ_elasmo <- occ_pooled_v1_0 |>
+  dplyr::select(replicates, one_of(elasmobranchs))
+
+# occ_elasmo$col_sums <- colSums(occ_elasmo, na.rm = TRUE)
+# species_above_10 <- names(col_sums[col_sums >= 10])
+
+occ_elasmo$row_sum <- rowSums(occ_elasmo[, -which(names(occ_elasmo) == "replicates")])
+
+empty <- occ_elasmo$replicates[occ_elasmo$row_sum == 0] # 633
+sites_elasmo <- occ_elasmo$replicates[occ_elasmo$row_sum > 0] # 497
+  
+# retreive metadata for the sites with elasmo and compute stats
+sites_metadata <- med_covariates |>
+  dplyr::filter(replicates %in% sites_elasmo)
+
+# methods
+stats_elasmo <- sites_metadata |>
+  dplyr::group_by(method) |>
+  dplyr::summarise(count = dplyr::n()) |>
+  dplyr::mutate(percent = count / sum(count) * 100)
+
+# add an extra column to have real info on the distribution 
+all <- occ_pooled_v1_0$replicates
+metadata <- med_covariates |>
+  dplyr::filter(replicates %in% all)
+
+stat_all <- metadata |>
+  dplyr::group_by(method) |>
+  dplyr::summarise(count_all = dplyr::n())
+
+stats_elasmo <- stats_elasmo |>          ################### save table with with final data !
+  dplyr::left_join(stat_all, by = "method") |>
+  dplyr::mutate(mean_method = count / count_all * 100)
+
+# plotting 
+library(ggplot2)
+# Plotting with manual color scale
+# Get unique components in the order of mean_component
+unique_components <- unique(stats_elasmo[order(stats_elasmo$mean_method), ]$method)
+
+# Plotting with manual color scale
+ggplot(stats_elasmo, aes(x = reorder(method, mean_method), y = mean_method, fill = method)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Contribution of Methods to Elasmobranch Species Detection",
+       x = "Method",
+       y = "Mean Method (%)") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +  # Display y-axis labels as percentages
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(size = 12)) +
+  scale_fill_manual(values = viridis::viridis(length(unique_components), direction = -1),
+                    breaks = unique_components)  # Specify the order of breaks
+
+
+
+
+```
+
+
+
+# Work with occurences :  check if all species detected in all region 
+```{r}
+library(dplyr)
+library(tidyr)
+
+# Drop geometry and select only relevant columns
+cov_df <- sf::st_drop_geometry(med_covariates) %>%
+  select(replicates, region)
+
+# Join region information to occurrence data
+occ_with_region <- occ_pooled_v1_0 %>%
+  left_join(cov_df, by = "replicates")%>%
+  filter(!is.na(region))
+
+
+# ️Identify numeric columns = species
+species_cols <- occ_with_region %>%
+  select(where(is.numeric)) %>%
+  colnames()
+
+# Convert to long format
+occ_long <- occ_with_region %>%
+  select(region, all_of(species_cols)) %>%
+  pivot_longer(cols = all_of(species_cols),
+               names_to = "species",
+               values_to = "value") %>%
+  mutate(pres = as.integer(value > 0)) %>%
+  group_by(region, species) %>%
+  summarise(pres = as.integer(any(pres == 1)), .groups = "drop")
+
+# Summarize regional occurrence patterns
+regions_vec <- sort(unique(occ_long$region))
+n_regions   <- length(regions_vec)
+
+species_in_all_regions <- occ_long %>%
+  group_by(species) %>%
+  summarise(n_regions_detected = sum(pres), .groups = "drop") %>%
+  filter(n_regions_detected == n_regions)
+
+species_restricted <- occ_long %>%
+  group_by(species) %>%
+  filter(sum(pres) == 1, pres == 1) %>%
+  select(species, region) %>%
+  arrange(species, region)
+
+cat("✅ Species found in ALL regions:", nrow(species_in_all_regions), "\n")
+cat("✅ Species restricted to ONE region:", nrow(species_restricted), "\n\n")
+print(species_restricted, n = 20)
+
+
+```
+
+# Plot Eule: what proportion of species are shared or unique between region 
+```{r}
+library(dplyr)
+library(tidyr)
+library(eulerr)
+library(ggplot2)
+
+# 1) Join region info (use your original regions – no merging)
+cov_df <- sf::st_drop_geometry(med_covariates) %>%
+  select(replicates, region)
+
+occ_with_region <- occ_pooled_v1_0 %>%
+  left_join(cov_df, by = "replicates")
+
+# 2) Identify species columns (numeric)
+species_cols <- occ_with_region %>%
+  select(where(is.numeric)) %>%
+  colnames()
+
+# 3) Presence (0/1) per region × species
+pres_tbl <- occ_with_region %>%
+  select(region, all_of(species_cols)) %>%
+  pivot_longer(
+    cols = all_of(species_cols),
+    names_to = "species", values_to = "value"
+  ) %>%
+  mutate(pres = as.integer(value > 0)) %>%
+  group_by(region, species) %>%
+  summarise(pres = as.integer(any(pres == 1)), .groups = "drop")
+
+# 4) Choose the 3 regions to visualize
+#    (Edit this vector to the 3 you want; fallback = first 3 regions found)
+all_regions <- unique(pres_tbl$region)
+selected_regions <- c("PACA", "Occitanie", "Corse")
+if (!all(selected_regions %in% all_regions)) {
+  selected_regions <- head(all_regions, 3)
+  message("Using regions: ", paste(selected_regions, collapse = ", "))
+}
+
+pres3 <- pres_tbl %>% filter(region %in% selected_regions)
+
+# 5) Build sets: species present in each region
+sets3 <- lapply(selected_regions, function(r) {
+  pres3 %>% filter(region == r, pres == 1) %>% pull(species) %>% unique()
+})
+names(sets3) <- selected_regions
+
+# 6) Plot Euler (area-proportional Venn with counts)
+fit <- eulerr::euler(sets3)   # will compute the overlaps
+p <- plot(
+  fit,
+  quantities = list(type = "counts", fontsize = 12),  # numbers inside
+  labels = list(col = "black", fontsize = 12),
+  fills = list(fill = c("#6baed6", "#74c476", "#fd8d3c"), alpha = 0.35),
+  edges = list(col = c("#3182bd", "#31a354", "#e6550d"), lwd = 1.5)
+)
+p
+
+# 7) (Optional) Save high-res image
+ggplot2::ggsave("species_overlap_euler.png", p, width = 7, height = 6, dpi = 300)
+
+# 8) (Optional) Quick overlap summary for verification
+A <- sets3[[1]]; B <- sets3[[2]]; C <- sets3[[3]]
+overlap_summary <- tibble::tibble(
+  region_A = names(sets3)[1],
+  region_B = names(sets3)[2],
+  region_C = names(sets3)[3],
+  unique_A = length(setdiff(A, union(B, C))),
+  unique_B = length(setdiff(B, union(A, C))),
+  unique_C = length(setdiff(C, union(A, B))),
+  A_and_B_only = length(setdiff(intersect(A, B), C)),
+  A_and_C_only = length(setdiff(intersect(A, C), B)),
+  B_and_C_only = length(setdiff(intersect(B, C), A)),
+  all_three = length(Reduce(intersect, list(A, B, C)))
+)
+print(overlap_summary)
+
+
+```
+
+# check if some methods associated with specific species 
+```{r}
+library(ComplexUpset)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(vegan)
+
+# Associer les méthodes d’échantillonnage aux données d’occurrences
+method_df <- sf::st_drop_geometry(med_covariates) %>%
+  select(replicates, method)
+
+occ_with_method <- occ_pooled_v1_0 %>%
+  left_join(method_df, by = "replicates")
+
+occ_with_method <- occ_pooled_v1_0 %>%
+  left_join(method_df, by = "replicates") %>%
+  filter(!is.na(method))
+
+
+# Table de présence/absence par méthode et espèce
+pres_matrix <- occ_with_method %>%
+  select(method, all_of(species_cols)) %>%
+  pivot_longer(cols = all_of(species_cols),
+               names_to = "species", values_to = "value") %>%
+  mutate(pres = as.integer(value > 0)) %>%
+  group_by(method, species) %>%
+  summarise(pres = as.integer(any(pres == 1)), .groups = "drop")
+
+
+# Convertir la table en format wide
+pres_wide <- pres_matrix %>%
+  pivot_wider(names_from = method, values_from = pres, values_fill = 0)
+
+# Plot
+ComplexUpset::upset(
+  pres_wide,
+  intersect = colnames(pres_wide)[-1],  # toutes les méthodes
+  name = "Number of shared species",
+  width_ratio = 0.25
+)
+```
+
+# Check NMDS sur distances Jaccard
+```{r}
+library(dplyr)
+library(tidyr)
+library(vegan)
+library(ggplot2)
+library(ggrepel)
+
+# Select species columns
+species_cols <- occ_pooled_v1_0 %>%
+  select(where(is.numeric)) %>%
+  colnames()
+
+# Presence-absence matrix
+site_matrix <- occ_pooled_v1_0 %>%
+  select(replicates, all_of(species_cols)) %>%
+  mutate(across(all_of(species_cols), ~ ifelse(. > 0, 1, 0)))
+
+site_matrix <- site_matrix %>%
+  left_join(med_covariates %>% st_drop_geometry() %>% select(replicates, method),
+            by = "replicates")
+
+site_matrix <- site_matrix %>%
+  filter(!is.na(method))
+
+# Compute Jaccard distance between sites
+dist_site <- vegdist(site_matrix %>% select(all_of(species_cols)),
+                     method = "jaccard")
+
+# NMDS on sites
+nmds_sites <- metaMDS(dist_site, k = 2, trymax = 50)
+
+nmds_df <- as.data.frame(nmds_sites$points) %>%
+  mutate(method = site_matrix$method)
+
+ggplot(nmds_df, aes(MDS1, MDS2, color = method)) +
+  geom_point(size = 3, alpha = 0.7) +
+  stat_ellipse(type = "t", linewidth = 1.1) +
+  theme_minimal(base_size = 15) +
+  labs(
+    title = "NMDS of Sites Colored by Sampling Method",
+    color = "Method"
+  )
+
+```
+
+# Accumulation curve 
+```{r}
+## ─────────────────────────────────────────────
+## 1) Load packages and data
+## ─────────────────────────────────────────────
+
+library(dplyr)
+library(sf)
+library(readr)
+library(vegan)
+library(tidyr)
+library(ggplot2)
+
+# Load predictors (if not already loaded)
+load("~/Bureau/CHAPT_1/raw_predictors.RData")   # contains pred_tr
+med_covariates <- pred_tr                       # rename for clarity
+
+# Load occurrences (sites × species)
+occ <- readr::read_csv("~/Bureau/marieke/occ_pooled_v1.1.csv")
+
+## ─────────────────────────────────────────────
+## 2) Attach region info to occurrence table
+## ─────────────────────────────────────────────
+
+# Drop geometry and keep region + replicate ID
+region_info <- med_covariates %>% 
+  st_drop_geometry() %>%
+  select(replicates, region)
+
+# Join region to occurrence table
+occ_reg <- occ %>%
+  left_join(region_info, by = "replicates") %>%
+  filter(!is.na(region))   # keep only sites with known region
+
+## ─────────────────────────────────────────────
+## 3) Identify species columns (numeric)
+## ─────────────────────────────────────────────
+
+species_cols <- occ_reg %>%
+  select(where(is.numeric)) %>%
+  colnames()
+
+# Check (optional)
+# length(species_cols)
+# head(species_cols)
+
+## ─────────────────────────────────────────────
+## 4) Compute accumulation curves per region
+## ─────────────────────────────────────────────
+
+region_names <- occ_reg %>% 
+  pull(region) %>% 
+  unique()
+
+acc_list <- lapply(region_names, function(reg) {
+  
+  # Subset to one region and keep only species
+  df <- occ_reg %>%
+    filter(region == reg) %>%
+    select(all_of(species_cols))
+  
+  # Presence–absence matrix
+  df_pa <- (df > 0) * 1
+  df_pa <- as.matrix(df_pa)
+  
+  # Remove empty sites (no species detected at all)
+  df_pa <- df_pa[rowSums(df_pa) > 0, , drop = FALSE]
+  
+  # If no non-empty sites, skip this region
+  if (nrow(df_pa) < 1) {
+    message("Region ", reg, " has no non-empty sites; skipping.")
+    return(NULL)
+  }
+  
+  # Species accumulation curve with random permutations
+  specaccum(df_pa, method = "random", permutations = 999)
+})
+
+names(acc_list) <- region_names
+
+# Remove NULL regions (if some had no valid data)
+acc_list <- acc_list[!vapply(acc_list, is.null, logical(1))]
+
+## ─────────────────────────────────────────────
+## 5) Convert accumulation curves to a data.frame
+## ─────────────────────────────────────────────
+
+acc_df <- lapply(names(acc_list), function(reg) {
+  acc <- acc_list[[reg]]
+  data.frame(
+    sites    = acc$sites,
+    richness = acc$richness,
+    sd = acc$sd,
+    # lower    = acc$lower,
+    # upper    = acc$upper,
+    region   = reg
+  )
+}) %>%
+  bind_rows()
+
+## ─────────────────────────────────────────────
+## 6) Plot accumulation curves with ggplot2
+## ─────────────────────────────────────────────
+
+p_acc <- ggplot(acc_df, aes(x = sites, y = richness, color = region, fill = region)) +
+  geom_line(size = 1.2) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Species accumulation curves per region",
+    x = "Number of sites",
+    y = "Accumulated species richness"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    legend.position = "right"
+  )
+
+print(p_acc)
+
+# Optional: save high-res figure
+ggsave("species_accumulation_by_region.png", p_acc,
+       width = 8, height = 6, dpi = 300)
+
+
+```
+
+
+```{r}
+# area impact on richness
+library(dplyr)
+
+# Identify species columns (numeric)
+species_cols <- occ_pooled_v1.1 %>%
+  select(where(is.numeric)) %>%
+  colnames()
+
+# Compute richness
+richness_df <- occ_pooled_v1.1 %>%
+  mutate(richness = rowSums(select(., all_of(species_cols)) > 0)) %>%
+  select(replicates, richness)
+
+data_richness <- pred_tr %>%
+  sf::st_drop_geometry() %>%
+  left_join(richness_df, by = "replicates") %>%
+  filter(!is.na(richness), !is.na(area_km2))
+
+#Explore relationship (scatter plot + smooth)
+library(ggplot2)
+
+ggplot(data_richness, aes(x = area_km2, y = richness)) +
+  geom_point(alpha = 0.7, color = "steelblue") +
+  geom_smooth(method = "lm", color = "red", se = TRUE) +
+  labs(
+    title = "Relationship between Sampling Area (km²) and Species Richness",
+    x = "Area (km²)",
+    y = "Species richness"
+  ) +
+  theme_minimal(base_size = 14)
+
+# Statistical test: simple linear regression
+lm_res <- lm(richness ~ area_km2, data = data_richness)
+summary(lm_res)
+
+cor.test(data_richness$area_km2, data_richness$richness, method = "spearman")
+
+library(mgcv)
+
+gam_res <- gam(richness ~ s(area_km2), data = data_richness)
+summary(gam_res)
+
+plot(gam_res, shade = TRUE)
+
+
+```
+
+
+
+```{r}
+# check if lockdown specific species 
+
+library(dplyr)
+library(vegan)
+library(indicspecies)
+
+# Join lockdown info
+df <- occ_pooled_v1.1 %>%
+  left_join(med_covariates %>% sf::st_drop_geometry() %>% select(replicates, lockdown),
+            by = "replicates")%>%
+  filter(!is.na(lockdown))   # keep only sites with known region
+
+# Keepocc_pooled_v1.1# Keep only numeric species
+species_cols <- df %>% select(where(is.numeric)) %>% colnames()
+
+# PA matrix or abundance
+comm <- df %>% select(all_of(species_cols))
+comm_pa <- (comm > 0) * 1   # use presence–absence (often more robust)
+
+# Lockdown group
+group <- as.factor(df$lockdown)
+
+dist_mat <- vegdist(comm_pa, method = "jaccard")
+
+set.seed(123)
+adonis_res <- adonis2(dist_mat ~ group, permutations = 99)
+
+adonis_res
+
+disp <- betadisper(dist_mat, group)
+anova(disp)
+
+plot(disp)
+# Although PERMANOVA indicated a significant effect of lockdown on species composition (R² = 0.011, p = 0.01), the multivariate dispersion test revealed strongly unequal variances between groups (betadisper F = 27.5, p < 0.001). Therefore, this result should not be interpreted as a true compositional difference, but rather as a difference in beta diversity dispersion.
+
+```
+
+
+
+
+
+# OLD CODE ######
+# ```{r}
+# 
+# #This is for the map of just the Med 
+# world <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
+# 
+# # combine occurences and metadata
+# occ_fitting_with_metadata <- occ_fitting |>
+#   dplyr::left_join(biodivmed_fitting |> dplyr::select(id_spygen, mid_latitude, mid_longitude), by = "id_spygen")
+# 
+# # Melt the dataset to long format for easier plotting
+# melted_data <- reshape2::melt(occ_fitting_with_metadata, id.vars = c("id_spygen", "mid_latitude", "mid_longitude"))   # for all species
+# 
+# # erased rows when column value = 0 (if you just want to see where species occurs)
+# data <- melted_data |>
+#   dplyr::filter(value != 0)
+# 
+# # transform as factor column value
+# data$value <- factor(data$value)
+# 
+# 
+# # # Separate elamsobranchs species to create 2 specific melted dataset for teleosts and elasmobranchs
+# species_name <- setdiff(names(occ_fitting), "id_spygen")
+# 
+# melted_elasmo <- data |>
+#   dplyr::filter(variable %in% elasmo_names)
+# 
+# elasmo <- unique(melted_elasmo$variable) # 18
+# elasmo <- c("Mobula_mobular", "Torpedo_marmorata", "Prionace_glauca", "Dasyatis_pastinaca", "Aetomylaeus_bovinus", "Myliobatis_aquila", "Tetronarce_nobiliana", "Scyliorhinus_canicula", "Pteroplatytrygon_violacea", "Raja_undulata", "Raja_miraletus", "Squatina_squatina", "Scyliorhinus_stellaris", "Mustelus_mustelus", "Raja_brachyura", "Rostroraja_alba", "Dasyatis_tortonesei", "Raja_asterias_Raja_clavata_Raja_polystigma")
+# 
+#  # Plot for ALL ELASMOBRANCHS
+# neutral_color <- "grey"
+# elasmo_highlight <- "pink"
+# 
+# # Specify an absolute path
+# save_directory <- "/Users/celia/Desktop/Final Project/figures/elasmobranchs_occurrences"
+# plots_list <- list()  # Initialize an empty list to store plots
+# plots_per_grid <- 9  # Set the number of plots per grid
+# 
+# for (i in seq_along(elasmo)) {
+#   species <- elasmo[i]
+#   
+#   # Filter melted_elasmo for the current species
+#   subset_data <- melted_elasmo[melted_elasmo$variable == species, ]
+#   data <- subset(melted_elasmo, variable != species)
+#   
+#   world <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
+#   
+#   # Generate the plot
+#   plot <- ggplot(data = world) +
+#     geom_sf(color = "black", fill = "light grey") +
+#     xlab("Longitude") + ylab("Latitude") +
+#     coord_sf(xlim = c(2.79123253648454, 10.647334299871368), ylim = c(41.1906737866009, 44.44029498045467), expand = FALSE) +
+#     ggtitle(paste("Occurrences of", species)) +
+#     theme(panel.grid.major = element_line(color = gray(.25), linetype = "blank", size = 0.2),
+#           panel.background = element_rect(fill = "light blue")) +
+#     geom_point(data = data, aes(x = mid_longitude, y = mid_latitude, color = "grey", fill = "grey"), size = 1, alpha = 0.7) +
+#     geom_point(data = subset_data, aes(x = mid_longitude, y = mid_latitude, color = "pink", fill = "pink"), size = 3, alpha = 0.7) +
+#     scale_color_manual(values = c(neutral_color, elasmo_highlight), labels = c("Other Elasmobranchs", species)) +
+#     scale_fill_manual(values = c(neutral_color, elasmo_highlight), labels = c("Other Elasmobranchs", species)) +
+#     labs(title = paste("Occurrences of", species),
+#          x = "Longitude",
+#          y = "Latitude",
+#          color = "Presence",
+#          fill = "Presence") +
+#     guides(shape = guide_legend(title = "Legend Title", override.aes = list(size = 4)))
+#   # Add the plot to the list
+#   plots_list[[length(plots_list) + 1]] <- plot
+#   
+#   # Check if we've reached the desired number of plots per grid or it's the last species
+#   if (length(plots_list) %% plots_per_grid == 0 || i == length(elasmo)) {
+#     # Arrange and display the plots in a grid
+#     grid_arrange <- gridExtra::grid.arrange(grobs = plots_list, ncol = 3)
+#     
+#     # Save the grid to a file
+#     save_filename <- paste0(save_directory, "grid_", (i - 1) %/% plots_per_grid + 1, ".svg")
+#     ggsave(save_filename, grid_arrange, device = "svg", width = 15, height = 10)  # Adjust width and height as needed
+#     
+#     # Clear the plots_list for the next grid
+#     plots_list <- list()
+#   }
+# }
+# 
+# ```
+# 
+# 
+# 
+# 
+# 
+# # Check for links between covariables
+# ```{r }
+# # ploter les variables entre elles
+# plot(-med_covariates$depth_sampling ~ med_covariates$temperature)
+# 
+# boxplot(med_covariates$depth_sampling~ med_covariates$region)
+# 
+# boxplot(med_covariates$month ~ med_covariates$region)
+# 
+# boxplot(-med_covariates$depth_sampling ~ med_covariates$month)
+# ggplot(med_covariates, aes(x = month, y = -depth_sampling)) +
+#   geom_boxplot(fill = "lightblue", color = "black", outlier.shape = 1) +
+#   xlab("Month") +
+#   ylab("Depth sampling (m)") +
+#   ggtitle("Monthly variation in depth of sampling") +
+#   theme_minimal() +
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# 
+# ggplot(df, aes(x = month, fill = region)) +
+#   geom_bar(position = "dodge") +
+#   xlab("Month") +
+#   ylab("Number of samples") +
+#   ggtitle("Sample count per month and region") +
+#   theme_minimal() +
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# 
+# ggplot(df, aes(x = month)) +
+#   geom_bar(fill = "lightblue") +
+#   facet_wrap(~ region) +
+#   theme_minimal() +
+#   ggtitle("Sample distribution by month in each region") +
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# 
+# ggplot(df, aes(x = month, y = -depth_sampling)) +
+#   geom_boxplot(fill = "skyblue") +
+#   facet_wrap(~ region, ncol = 1) +
+#   xlab("Month") +
+#   ylab("Depth sampling (m)") +
+#   ggtitle("Depth of sampling by month, split by region") +
+#   theme_minimal() +
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# 
+# 
+# 
+# plot(med_covariates$bathymetry ~ med_covariates$depth_sampling)
+# 
+# ```
+# 
+# 
+# ```{r}
+# # Plot data
+# ggplot(med_covariates, aes(x=temperature, y=-depth_sampling, shape=region, colour=region, fill=region)) +
+#   geom_smooth(method="lm",se=FALSE,fullrange=TRUE) +
+#   geom_point() +
+#   xlab("temperature") +
+#   ylab("depth_sampling") +
+#   ggtitle("Une regression par region couleur") 
+# 
+# ggplot(med_covariates, aes(x=month, y=temperature, shape=region, colour=region, fill=region)) +
+#   geom_smooth(method="lm",se=FALSE,fullrange=TRUE) +
+#   geom_point() +
+#   xlab("month") +
+#   ylab("temperature") +
+#   ggtitle("Monthly temperature trends by region")
+# 
+# ggplot(med_covariates, aes(x=month, y=chlorophyll, shape=region, colour=region, fill=region)) +
+#   geom_smooth(method="lm",se=FALSE,fullrange=TRUE) +
+#   geom_point() +
+#   xlab("month") +
+#   ylab("chlorophyll") +
+#   ggtitle("Monthly chl-a trends by region")
+# 
+# 
+# 
+# ```
+# 
+# 
+# 
+# 
+
+
+
+
+
+
