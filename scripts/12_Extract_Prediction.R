@@ -282,7 +282,7 @@ rast_grouped <- terra::rast("./data/processed_data/predictors/Habitat/grouped_ha
 
 
 
-# Main habitat and Number of habitat / km² 
+#--- Main habitat and Number of habitat / km² ----
 # Important methodological considerations : "Zone bathyale" and "Cymodocees" are not considered as a habitat in this analysis, thus they are ignored when tehy appear to be the main habitat (we take the next more important habitat) and when counting the number of habitats per km².
 
 
@@ -327,56 +327,134 @@ rm(buff1, extra_cols)
 
 
 
-# export temp file
-st_write(buff, "./data/processed_data/prediction_extent/grid_v1.0_20230701_with_predictors_temp.gpkg", delete_dsn = TRUE)
+#==========================
+#===== export temp file -----
+st_write(buff, "./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_20230701_with_predictors_temp.gpkg", delete_dsn = TRUE)
+
+#===== load temp file -----
+buff <- st_read("./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_20230701_with_predictors_temp.gpkg")
 
 # check NA
 sapply(buff, function(x) sum(is.na(x))) # 15 NA in main_habitat but not in nb of habitat ?? 
 
+#==========================
+#--- Surface proportion of each grouped habitat ----
+# Handle habitats proportions (grouped only) -----
+# From 2a_Prep_Predictors.R:
 
+## 2. Compute weighted means of each habitat within buffers
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# Surface proportion of each grouped habitat ----
-
-# Make buff a spatial object
 buff <- sf::st_as_sf(buff)
+df   <- buff
 
-# Initialize df
-df <- buff
-
-for (layer in names(rast_grouped)) {
-  
+# Extract weighted means per habitat
+for (h in names(rast_grouped)) {
   temp <- spatial_extraction(
-    var   = layer,
-    rast  = rast_grouped[[layer]],
-    poly  = df,               
-    stats = c("mean")
+    var   = h,
+    rast  = rast_grouped[[h]],
+    poly  = df,
+    stats = "mean"
   )
   
-  # Find newly created column names
+  # The new column should be like "<h>_mean"
   new_cols <- setdiff(names(temp), names(df))
   
   if (length(new_cols) > 0) {
-    # Drop geometry from temp and bind only the new attribute columns
-    df <- bind_cols(df, sf::st_drop_geometry(temp)[, new_cols, drop = FALSE])
+    df <- dplyr::bind_cols(df, sf::st_drop_geometry(temp)[, new_cols, drop = FALSE])
   } else {
-    message(sprintf("No new columns returned for layer '%'", layer))
+    message(sprintf("No new columns returned for layer '%s'", h))
   }
 }
+
+names(df)
+sum(is.na(df$"Habitats artificiels_mean")) # 5 NA
+
+# Determine which polygons overlapped the raster
+habitats <- paste0(names(rast_grouped), "_mean")
+df$overlap <- apply(df[, habitats], 1, function(x) any(is.na(x)))
+
+
+
+## 3. For polygons with NO overlap → compute proportions using the 3 nearest pixels
+
+# Convert raster to points
+rast_df <- terra::as.data.frame(rast_grouped, xy = TRUE, na.rm = TRUE)
+rast_pts <- sf::st_as_sf(rast_df, coords = c("x", "y"), crs = st_crs(df))
+
+
+# Compute nearest-pixel sums per habitat
+
+no_overlap_ids <- which(df$overlap == TRUE)
+
+for (i in no_overlap_ids) {
+  
+  # find nearest 3 raster points
+  nn  <- nngeo::st_nn(df[i, ], rast_pts, k = 3)
+  idx <- unlist(nn)
+  
+  if (length(idx) == 0) {
+    # nothing found – keep NA for this polygon
+    next
+  }
+  
+  # for each habitat, sum the values of the 3 nearest pixels
+  for (h in names(rast_grouped)) {
+    col_mean <- paste0(h, "_mean")
+    
+    # make sure the column exists and is numeric
+    if (!col_mean %in% names(df)) {
+      df[[col_mean]] <- NA_real_
+    }
+    
+    vals <- rast_df[idx, h]
+    new_val <- if (all(is.na(vals))) NA_real_ else sum(vals, na.rm = TRUE)
+    
+    # this is the crucial line: assign as a scalar into sf/tibble
+    df[i, col_mean] <- new_val
+  }
+}
+
+# Check results
+df %>% filter(overlap == TRUE) %>% dplyr::select(c(habitats)) %>% print()
+
+
+
+
+
+
+## 4. Convert these habitat means into TRUE PROPORTIONS
+
+mean_cols <- paste0(names(rast_grouped), "_mean")
+
+total_means <- rowSums(df[, mean_cols] %>% st_drop_geometry(), na.rm = TRUE)
+
+
+for (col in mean_cols) {
+  df[[col]] <- ifelse(
+    total_means > 0,
+    df[[col]] / total_means,
+    NA_real_
+  )
+}
+
+# Check 
+summary(rowSums(df[, mean_cols] %>% st_drop_geometry(), na.rm = TRUE)) # All 1 = good
+
+
+## 5. Merge back to buff 
+buff <- df %>% dplyr::select(-overlap)
+
+
+## Summary of what we did : 
+
+# | Case                              | Habitat value source                       | Final proportions      |
+#   | --------------------------------- | ------------------------------------------ | ---------------------- |
+#   | **Polygon overlaps raster**       | Weighted means from `spatial_extraction()` | mean_i / sum(mean_all) |
+#   | **Polygon outside raster extent** | Sum of 3 nearest pixels per habitat        | sum_i / sum(sum_all)   |
+#   
+
+
+
 
 
 # Merge -----
@@ -388,8 +466,8 @@ buff <- buff %>%
   left_join(
     df %>% 
       st_drop_geometry() %>% 
-      dplyr::select(replicates, dplyr::all_of(extra_cols)),
-    by = "replicates"
+      dplyr::select(id, dplyr::all_of(extra_cols)),
+    by = "id"
   )
 
 rm(df, extra_cols)
@@ -399,6 +477,81 @@ rm(df, extra_cols)
 
 
 
+
+
+
+
+#=======================================================================================================================
+#======================================================= TO DO ===========================================================================================
+#=======================================================================================================================
+#------------- VECTOR DATA ----------------
+###### Distance between seabed and depth sampling ############
+# Explanation : bathy_max - depth_sampling
+
+dsamp <- st_read("./data/processed_data/Mtdt/mtdt_5.gpkg") %>% # Load depth_sampling
+  st_drop_geometry() %>% 
+  dplyr::left_join(buff %>% st_drop_geometry(), by = "replicates") %>% # merge to buff 
+  mutate(dist_seabed_depthsampling = bathy_max - depth_sampling)  # compute distance
+#dplyr::select(replicates, dist_seabed_depthsampling, depth_sampling, bathy_min, bathy_max, bathy_mean) # keep only necessary columns
+
+
+# Merge -----
+# Detect columns in dist that are not in buff
+extra_cols <- setdiff(names(dsamp), names(buff))
+
+# left_join keeps all rows in buff and brings matching columns from dist by 'replicates'
+buff <- buff %>%
+  left_join(
+    dsamp %>% 
+      st_drop_geometry() %>% 
+      dplyr::select(replicates, dplyr::all_of(extra_cols)),
+    by = "replicates"
+  )
+
+rm(dsamp, extra_cols)
+
+
+
+
+
+
+
+
+
+##### Centroid coordinates ####
+# Prep coords from buff centroids
+# modif v1.1 : Convert to decimal degree
+buff <- sf::st_read("./data/processed_data/predictors/predictors_raw_v1_0.gpkg")
+
+cent <- sf::st_centroid(buff) %>%
+  st_transform(crs = 4326) # 
+
+xy <- st_coordinates(cent)
+
+coords <- buff %>%
+  mutate(x = xy[, 1],
+         y = xy[, 2])
+
+
+# v1.1 modif 
+buff <- buff %>%
+  mutate(x = xy[, 1],
+         y = xy[, 2])
+
+
+# Merge ----
+extra_cols <- setdiff(names(coords), names(buff))
+
+# left_join keeps all rows in buff and brings matching columns from dist by 'replicates'
+buff <- buff %>%
+  left_join(
+    coords %>% 
+      st_drop_geometry() %>% 
+      dplyr::select(replicates, dplyr::all_of(extra_cols)),
+    by = "replicates"
+  )
+
+rm(coords, extra_cols, cent, xy)
 
 
 
