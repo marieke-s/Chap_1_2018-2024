@@ -213,13 +213,62 @@ for (d in dates_to_do) {
 }
 
 
+#------------ Convert grids to .geojson ---------------
+# install.packages("sf")   # run once if you don't have sf installed
+library(sf)
+
+# 1. Set this to your repo path (or use getwd() if you're already in it)
+repo_dir <- "./data/processed_data/prediction_extent/"   # <-- change this
+
+# 2. Find all .gpkg files recursively
+gpkg_files <- list.files(
+  path       = repo_dir,
+  pattern = "^grid_v1\\.0_.*\\.gpkg$",
+  recursive  = TRUE,
+  full.names = TRUE
+)
+
+# Safety check
+if (length(gpkg_files) == 0) {
+  message("No .gpkg files found in: ", repo_dir)
+} else {
+  message("Found ", length(gpkg_files), " .gpkg file(s).")
+}
+
+# 3. Loop over each .gpkg and convert to .geojson
+for (gpkg_path in gpkg_files) {
+  message("Processing: ", gpkg_path)
+  
+  # Read the GeoPackage
+  g <- st_read(gpkg_path, quiet = TRUE)
+  
+  # Build output path: same directory, same basename, .geojson extension
+  geojson_path <- sub("\\.gpkg$", ".geojson", gpkg_path)
+  
+  # Write GeoJSON
+  st_write(
+    g,
+    geojson_path,
+    driver   = "GeoJSON",
+    delete_dsn = TRUE  # overwrite if file already exists
+  )
+  
+  message("  -> Saved: ", geojson_path)
+}
+
+message("Done.")
+
 #------------ Check extraction ----------------
 # Read all .geojson in the folder 
-grid_files <- list.files("./data/processed_data/predictors/Prediction_grid_v1.0/", pattern = "*\\.geojson$", full.names = TRUE)
+# grid_files <- list.files("./data/processed_data/predictors/Prediction_grid_v1.0/CUR-WIND/", pattern = "*\\.geojson$", full.names = TRUE)
+grid_files <- list.files("/run/user/1000/gvfs/sftp:host=marbec-data.ird.fr/BiodivMed/output/Extraction_MARS3D_2018-2024/grid_v1.0/CUR-WIND", pattern = "*\\.geojson$", full.names = TRUE)
+
 all_grids <- lapply(grid_files, st_read, quiet = TRUE)
+
 t <- all_grids[[1]]
 colnames(all_grids[[1]])
 unique(t$date)
+
 # Print a summary of each grid
 for (i in seq_along(all_grids)) {
   cat("Summary of grid file:", grid_files[i], "\n")
@@ -232,6 +281,62 @@ for (i in seq_along(all_grids)) {
   cat("\n")
 }
 
-names()
+# Check for NAs in each grid and print counts per column
+for (i in seq_along(all_grids)) {
+  if (anyNA(all_grids[[i]])) {
+    print(paste("------------------- NA in :",  grid_files[i], "---------------"))
+    cat("NA counts per column:\n")
+    print(colSums(is.na(all_grids[[i]])))
+  }
+}
+
+# FOR CSV (CHL)
+library(dplyr)
+
+# Lister les fichiers CSV
+csv_files <- list.files(
+  "/run/user/1000/gvfs/sftp:host=marbec-data.ird.fr/BiodivMed/output/Extraction_SST_2018-2024/grid_v1.0",
+  pattern = "\\.csv$", 
+  full.names = TRUE
+)
+
+# Lire tous les CSV
+all_tables <- lapply(csv_files, read.csv)
+
+# Check first
+t <- all_tables[[1]]
+colnames(t)
+if ("date" %in% colnames(t)) unique(t$date)
+
+# Résumé de chaque CSV
+for (i in seq_along(all_tables)) {
+  cat("Summary of CSV file:", csv_files[i], "\n")
+  
+  # Colonnes à retirer si elles existent
+  cols_to_drop <- c("id", "value", "date", 
+                    "depth_sampling_surface", "depth_sampling_40m")
+  cols_to_drop <- intersect(cols_to_drop, colnames(all_tables[[i]]))
+  
+  # Rendre toutes les colonnes numériques puis enlever les colonnes indésirables
+  all_tables[[i]] <- all_tables[[i]] %>%
+    mutate(across(everything(), as.numeric)) %>%
+    dplyr::select(-all_of(cols_to_drop))
+  
+  print(summary(all_tables[[i]]))
+  cat("\n")
+}
+
+# Vérifier les NA dans chaque CSV
+for (i in seq_along(all_tables)) {
+  if (anyNA(all_tables[[i]])) {
+    cat("------------------- NA in :",  csv_files[i], "---------------\n")
+    cat("NA counts per column:\n")
+    print(colSums(is.na(all_tables[[i]])))
+  }
+}
+
+
+# bind to geom and export to check 
+
 
 

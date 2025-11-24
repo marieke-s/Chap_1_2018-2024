@@ -109,6 +109,7 @@ spatial_extraction <- function(var, rast, poly, stats = c("mean", "min", "max", 
   
   if (!identical(poly_crs, raster_crs)) {
     poly <- sf::st_transform(poly, crs = raster_crs)
+    
   }
   
   # Initialize vectors to store the statistics
@@ -156,6 +157,70 @@ spatial_extraction <- function(var, rast, poly, stats = c("mean", "min", "max", 
   if ("range" %in% stats) poly[[paste0(var, "_range")]] <- rast_ranges
   
   return(poly)
+}
+
+#---------------------------------- Function : extract nearest neighbors --------------------
+
+# computes mean, min and max and k nearest raster cell values to each polygon centroid
+nearest_value <- function(var, rast, df, poly, k){ 
+  require(raster)
+  require(nngeo)
+  require(sf)
+  require(dplyr)
+  
+  # Use the raster's own CRS for the points
+  rast_pts <- rasterToPoints(rast) %>%
+    data.frame() %>%
+    sf::st_as_sf(coords = c("x", "y"),
+                 remove = FALSE,
+                 crs = raster::crs(rast))   # <-- key change (no hard-coded longlat)
+  
+  print("conversion done")
+  
+  # Make sure polygons are in the same CRS as rast_pts
+  poly <- sf::st_transform(poly, sf::st_crs(rast_pts))
+  
+  # Initialize vectors to store summary values
+  rast_mean <- numeric(nrow(poly))
+  rast_min  <- numeric(nrow(poly))
+  rast_max  <- numeric(nrow(poly))
+  
+  for (i in seq_len(nrow(poly))) {
+    
+    print(paste("Polygon", i))
+    
+    # Find the k nearest raster points
+    nn_cells <- nngeo::st_nn(poly[i, ], rast_pts, k = k)
+    
+    # Convert the list to a numeric vector
+    nn_cell_idx <- unlist(nn_cells)
+    
+    # Extract the raster values of the k nearest cells
+    val <- raster::extract(rast, rast_pts[nn_cell_idx, ])
+    
+    # Compute mean, min, and max (ignore NAs)
+    mean_val <- mean(val, na.rm = TRUE)
+    min_val  <- min(val,  na.rm = TRUE)
+    max_val  <- max(val,  na.rm = TRUE)
+    
+    # Store results
+    rast_mean[i] <- mean_val
+    rast_min[i]  <- min_val
+    rast_max[i]  <- max_val
+    
+    print(paste("Polygon", i, 
+                "Values:", paste(val, collapse = ", "),
+                "Mean:", mean_val,
+                "Min:", min_val,
+                "Max:", max_val))
+  }
+  
+  # Add columns to df
+  df[[paste0(var, "_mean")]] <- rast_mean
+  df[[paste0(var, "_min")]]  <- rast_min
+  df[[paste0(var, "_max")]]  <- rast_max
+  
+  return(df)
 }
 
 

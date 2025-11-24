@@ -485,6 +485,8 @@ rast <- rast[[!(names(rast) %in% c("Zone bathyale", "Herbiers Cymodocess"))]]
 
 
 
+# Export 
+terra::writeRaster(rast_grouped, "./data/processed_data/predictors/Habitat/habitat_raster.tif")
 
 
 

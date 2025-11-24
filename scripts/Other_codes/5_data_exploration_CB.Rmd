@@ -15,12 +15,15 @@ library(readr)
 library(ggplot2)
 library(lubridate)
 
+setwd('/media/marieke/Shared/Chap-1/Model/Scripts/Chap_1_2018-2024')
+
 # charger les données
-load("~/Bureau/CHAPT_1/raw_predictors.RData")
+load("./scripts/Other_codes/raw_predictors_CB.RData")
 med_covariates <- pred_tr
+rm(pred_tr)
 
 # Load occurrences (sites × species)
-occ_pooled_v1.1 <- readr::read_csv("~/Bureau/marieke/occ_pooled_v1.1.csv")
+occ_pooled_v1.1 <- readr::read_csv("./data/processed_data/eDNA/occ_pooled_v1.1.csv")
 
 # S'assurer que la colonne date est bien convertie en format Date
 Sys.setlocale("LC_TIME", "C")
@@ -46,10 +49,10 @@ med_covariates_region_combined <- med_covariates %>%
 # Check correlation and select covariables #########################################
 ```{r}
 # select and scale data ##############################################################################################################
-load("~/Bureau/CHAPT_1/scale_predictors.RData")
+load("./scripts/Other_codes/scale_predictors_CB.RData")
 
 data_quantitative <- final_pred %>%
-  select(where(is.numeric))
+  dplyr::select(where(is.numeric))
 
 # data_quantitative <- sf::st_drop_geometry(data_quantitative)
 # data_quantitative <- scale(data_quantitative)
@@ -57,7 +60,7 @@ data_quantitative <- final_pred %>%
 # Keep only mean values for multi-stat variables
 data_quantitative_filtered <- data_quantitative %>%
   as.data.frame() %>%
-  select(
+  dplyr::select(
     # keep all basic ones + "mean" metrics, ignore min/max/range/weight
     matches("mean$|_mean_|bathy_mean|temp_mean|sal_mean|cop_|area_km2|duration_total|estimated_volume_total|depth_sampling|depth_seafloor|dist_seabed_depthsampling|gravity_mean|nb_habitat_per_km2"),
     -matches("min|max|range|weight")
@@ -65,7 +68,7 @@ data_quantitative_filtered <- data_quantitative %>%
 
 # Remove the column entirely
 data_quantitative_filtered <- data_quantitative_filtered %>%
-  select(-any_of("depth_seafloor"))
+  dplyr::select(-any_of("depth_seafloor"))
 ```
 
 
@@ -301,7 +304,7 @@ figure <- ggpubr::annotate_figure(
 figure 
 
 # Save as high-resolution PNG
-ggsave("factor_distributions.png", figure, width = 18, height = 12, dpi = 300)
+ggsave("./figures/factor_distributions.png", figure, width = 18, height = 12, dpi = 300)
 
 ```
 
@@ -534,7 +537,7 @@ meth_region <- ggplot(med_covariates, aes(x = year, fill = method)) +
 
 meth_region
 
-ggsave("sampling_effort_method_region.png", meth_region, width = 12, height = 10, dpi = 300)
+ggsave("./figures/sampling_effort_method_region.png", meth_region, width = 12, height = 10, dpi = 300)
 
 ```
 
@@ -600,7 +603,7 @@ ggplot(med_2023_corse, aes(x = month, y = temp_mean_1m, color = method)) +
 # Work with occurences : METHODS
 # methods with different number of detection ?
 ```{r}
-occ_pooled_v1_0 <- readr::read_csv("~/Bureau/marieke/occ_pooled_v1.1.csv")
+occ_pooled_v1_0 <- readr::read_csv("./data/processed_data/eDNA/occ_pooled_v1.0.csv")
 
 # Sélection des colonnes numériques (espèces) uniquement
 occ_numeric <- occ_pooled_v1_0 %>%
@@ -741,7 +744,7 @@ library(dplyr)
 
 # First, filter surface transect sites where at least one elasmobranch was detected
 surface_detected <- surface_data %>%
-  filter(rowSums(select(., all_of(elasmobranchs))) > 0)
+  filter(rowSums(dplyr::select(., all_of(elasmobranchs))) > 0)
 
 # Pivot to long format: one row per detection
 long_species <- surface_detected %>%
@@ -774,7 +777,7 @@ surface_data <- merged_data %>%
 
 # Create a presence flag for any elasmobranch
 surface_data <- surface_data %>%
-  mutate(any_species_present = if_else(rowSums(select(., all_of(elasmobranchs))) > 0, 1, 0),
+  mutate(any_species_present = if_else(rowSums(dplyr::select(., all_of(elasmobranchs))) > 0, 1, 0),
          cumulative_species = cumsum(any_species_present))
 
 # Histogram of sample count per bathymetry bin
@@ -874,7 +877,7 @@ library(tidyr)
 
 # Drop geometry and select only relevant columns
 cov_df <- sf::st_drop_geometry(med_covariates) %>%
-  select(replicates, region)
+  dplyr::select(replicates, region)
 
 # Join region information to occurrence data
 occ_with_region <- occ_pooled_v1_0 %>%
@@ -884,12 +887,12 @@ occ_with_region <- occ_pooled_v1_0 %>%
 
 # ️Identify numeric columns = species
 species_cols <- occ_with_region %>%
-  select(where(is.numeric)) %>%
+  dplyr::select(where(is.numeric)) %>%
   colnames()
 
 # Convert to long format
 occ_long <- occ_with_region %>%
-  select(region, all_of(species_cols)) %>%
+  dplyr::select(region, all_of(species_cols)) %>%
   pivot_longer(cols = all_of(species_cols),
                names_to = "species",
                values_to = "value") %>%
@@ -909,7 +912,7 @@ species_in_all_regions <- occ_long %>%
 species_restricted <- occ_long %>%
   group_by(species) %>%
   filter(sum(pres) == 1, pres == 1) %>%
-  select(species, region) %>%
+  dplyr::select(species, region) %>%
   arrange(species, region)
 
 cat("✅ Species found in ALL regions:", nrow(species_in_all_regions), "\n")
@@ -928,19 +931,19 @@ library(ggplot2)
 
 # 1) Join region info (use your original regions – no merging)
 cov_df <- sf::st_drop_geometry(med_covariates) %>%
-  select(replicates, region)
+  dplyr::select(replicates, region)
 
 occ_with_region <- occ_pooled_v1_0 %>%
   left_join(cov_df, by = "replicates")
 
 # 2) Identify species columns (numeric)
 species_cols <- occ_with_region %>%
-  select(where(is.numeric)) %>%
+  dplyr::select(where(is.numeric)) %>%
   colnames()
 
 # 3) Presence (0/1) per region × species
 pres_tbl <- occ_with_region %>%
-  select(region, all_of(species_cols)) %>%
+  dplyr::select(region, all_of(species_cols)) %>%
   pivot_longer(
     cols = all_of(species_cols),
     names_to = "species", values_to = "value"
@@ -1009,7 +1012,7 @@ library(vegan)
 
 # Associer les méthodes d’échantillonnage aux données d’occurrences
 method_df <- sf::st_drop_geometry(med_covariates) %>%
-  select(replicates, method)
+  dplyr::select(replicates, method)
 
 occ_with_method <- occ_pooled_v1_0 %>%
   left_join(method_df, by = "replicates")
@@ -1021,7 +1024,7 @@ occ_with_method <- occ_pooled_v1_0 %>%
 
 # Table de présence/absence par méthode et espèce
 pres_matrix <- occ_with_method %>%
-  select(method, all_of(species_cols)) %>%
+  dplyr::select(method, all_of(species_cols)) %>%
   pivot_longer(cols = all_of(species_cols),
                names_to = "species", values_to = "value") %>%
   mutate(pres = as.integer(value > 0)) %>%
@@ -1052,23 +1055,23 @@ library(ggrepel)
 
 # Select species columns
 species_cols <- occ_pooled_v1_0 %>%
-  select(where(is.numeric)) %>%
+  dplyr::select(where(is.numeric)) %>%
   colnames()
 
 # Presence-absence matrix
 site_matrix <- occ_pooled_v1_0 %>%
-  select(replicates, all_of(species_cols)) %>%
+  dplyr::select(replicates, all_of(species_cols)) %>%
   mutate(across(all_of(species_cols), ~ ifelse(. > 0, 1, 0)))
 
 site_matrix <- site_matrix %>%
-  left_join(med_covariates %>% st_drop_geometry() %>% select(replicates, method),
+  left_join(med_covariates %>% st_drop_geometry() %>% dplyr::select(replicates, method),
             by = "replicates")
 
 site_matrix <- site_matrix %>%
   filter(!is.na(method))
 
 # Compute Jaccard distance between sites
-dist_site <- vegdist(site_matrix %>% select(all_of(species_cols)),
+dist_site <- vegdist(site_matrix %>% dplyr::select(all_of(species_cols)),
                      method = "jaccard")
 
 # NMDS on sites
@@ -1101,12 +1104,8 @@ library(vegan)
 library(tidyr)
 library(ggplot2)
 
-# Load predictors (if not already loaded)
-load("~/Bureau/CHAPT_1/raw_predictors.RData")   # contains pred_tr
-med_covariates <- pred_tr                       # rename for clarity
-
 # Load occurrences (sites × species)
-occ <- readr::read_csv("~/Bureau/marieke/occ_pooled_v1.1.csv")
+occ <- occ_pooled_v1_0  
 
 ## ─────────────────────────────────────────────
 ## 2) Attach region info to occurrence table
@@ -1115,7 +1114,7 @@ occ <- readr::read_csv("~/Bureau/marieke/occ_pooled_v1.1.csv")
 # Drop geometry and keep region + replicate ID
 region_info <- med_covariates %>% 
   st_drop_geometry() %>%
-  select(replicates, region)
+  dplyr::select(replicates, region)
 
 # Join region to occurrence table
 occ_reg <- occ %>%
@@ -1208,7 +1207,7 @@ p_acc <- ggplot(acc_df, aes(x = sites, y = richness, color = region, fill = regi
 print(p_acc)
 
 # Optional: save high-res figure
-ggsave("species_accumulation_by_region.png", p_acc,
+ggsave("./figures/species_accumulation_by_region.png", p_acc,
        width = 8, height = 6, dpi = 300)
 
 
