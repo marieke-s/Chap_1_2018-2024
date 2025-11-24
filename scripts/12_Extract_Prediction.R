@@ -13,6 +13,7 @@ rm(list = ls())
 setwd("/media/marieke/Shared/Chap-1/Model/Scripts/Chap_1_2018-2024")
 
 # Libraries
+library(compositions)
 library(dplyr)
 library(exactextractr)
 library(sf)
@@ -29,6 +30,9 @@ library(pMEM)
 source("./utils/Fct_Data-Prep.R")
 
 #--------------------------------------------------- PREDICTION GRID V.1.0 - ALL PREDICTORS ----------------
+# Without Laure in out reserve variable
+# Without features associated to port, canyon and MPA distance.
+# With 2 NA remaining in habitat variables
 #------------- Load and prep data ------------------
 # grid_v1.0_20230701 ----
 buff <- st_read("./data/processed_data/prediction_extent/grid_v1.0_20230701.gpkg") %>% dplyr::select(-c("value"))
@@ -669,138 +673,279 @@ buff <- buff %>%
 rm(coords, extra_cols, cent, xy)
 
 
-#==========================
-#===== export temp file -----
-st_write(buff, "./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_20230701_with_predictors_temp.gpkg", delete_dsn = TRUE)
 
-#===== load temp file -----
-buff <- st_read("./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_20230701_with_predictors_temp.gpkg")
-
-# check NA
-sapply(buff, function(x) sum(is.na(x))) # 15 NA in main_habitat but not in nb of habitat ?? 
-
-#==========================
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+#--------------------------------------------------- PREDICTION GRID V.1.0 - JUNE 2023 (2023-07-01) ----------------
 #------------- NCDF DATA ----------------
 #--- MARS3D (1.2km) -----
-# MARS3D data was extracted by Pauline using scripts "...". 
-
 # Load MARS3D and combine data
+files <- list.files("./data/processed_data/predictors/Prediction_grid_v1.0/2023-07-01_CUR-WIND-SAL-TEMP/", pattern = "*.geojson", full.names = TRUE)
+mars_list <- lapply(files, st_read, quiet = TRUE)
 
-#--- Chlorophyll (1km) ----
-# The extraction is made on the ncdf "./data/raw_data/predictors/Chl/cmems_obs-oc_med_bgc-plankton_my_l4-gapfree-multi-1km_P1D_20130101-20250101.nc" with the script 2.2_Extract_NCDF.ipynb in python.
+# Combine all dataframes into one
+mars_df <- do.call(rbind, mars_list)
+names(mars_df)
 
-# Load CHL extracted data (.geojson)
-chl <- read.csv("./data/processed_data/predictors/CHL/mtdt_5_CHL-FULL.csv")
-
-# Check chl values ----
-colnames(chl)
-
-# Hist
-for (c in colnames(chl)[-1]) {
-  hist(chl[[c]], main = paste("Histogram of", c), xlab = c, breaks = 50)
-}
-
-# NA
-for (c in colnames(chl)[-1]) {
-  na_count <- sum(is.na(chl[[c]]))
-  cat("Number of NA in", c, ":", na_count, "\n")
-}
+mars_df <- mars_df %>%
+  # Add "_month" to each column except "id" and "geometry"
+  rename_with(~ paste0(., "_month"), -c("id", "geometry"))
 
 
-# Merge buff and chl by replicates -----
-# Detect columns in dist that are not in buff
-extra_cols <- setdiff(names(chl), names(buff))
+# Merge with buff
+extra_cols <- setdiff(names(mars_df), names(buff))
+extra_cols <- extra_cols[!extra_cols %in% c("fid_month", "value_month", "date_month", "depth_sampling_surface_month", "depth_sampling_40m_month", "geometry")]
 
-# left_join 
 buff <- buff %>%
   left_join(
-    chl %>% 
+    mars_df %>% 
       st_drop_geometry() %>% 
-      dplyr::select(replicates, dplyr::all_of(extra_cols)),
-    by = "replicates"
+      dplyr::select(id, dplyr::all_of(extra_cols)),
+    by = "id"
   )
 
-rm(chl, extra_cols, c, na_count)
+# Check NA
+sapply(buff, function(x) sum(is.na(x)))
+
+# Clean up
+rm(mars_df, mars_list, files, extra_cols)
+rm(t, temp, rast_pts, rast_grouped, nn, df, buff_na, col, col_mean, cols_to_drop, csv_files, gravity_cols, h, habitat_cols, habitats, i, idx, has_match, mean_cols, na_in_buff, new_cols, new_val, no_overlap_ids, vals, total_means, rast, rast_df, all_tables)
+
+
+#--- CHL (1 km) -----
+chl <- read.csv("./data/processed_data/predictors/Prediction_grid_v1.0/2023-07-01/Cop_CHL_stats_2023-07-01_FULL.csv")
+
+# Merge with buff
+buff <- buff %>% 
+  left_join(chl, by = "id")
+
+sapply(buff, function(x) sum(is.na(x)))
+
+rm(chl)
+
+
+#--- SST (1 km) -----
+sst <- read.csv("./data/processed_data/predictors/Prediction_grid_v1.0/2023-07-01/Cop_SST_stats_2023-07-01_FULL.csv")
+sapply(sst, function(x) sum(is.na(x)))
+
+# Merge with buff
+buff <- buff %>% 
+  left_join(sst, by = "id")
+
+rm(sst)
 
 
 
 
+#--- grid_v1.0_2023-07-01_with_predictors-raw_v1.0 ----
+# predictors for grid_v1.0
+# fixed predictors : all but : 
+# Without Laure in out reserve variable
+# Without features associated to port, canyon and MPA distance.
+# With 2 NA remaining in habitat variables
+# climatic predictors : CHL, SST, WIND, VEL, SAL, TEMP for June 2023; SAL TEMP for surface and 40m depth.  
+
+buff %>% 
+  dplyr::select(-value) %>%
+  st_write("./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_2023-07-01_with_predictors-raw_v1.0.gpkg", delete_dsn = TRUE)
 
 
 
-
-
-
-
-#--- SST (1km) ----
-# SST data is extracted from Copernicus data :see script 2.2_Extract_NCDF.ipynb for more details.
-
-# Load SST extracted data (.geojson)
-sst <- read.csv("./data/processed_data/predictors/SST/mtdt_5_SST-FULL.csv")
-
-# Check sst values ----
-colnames(sst)
-
-# Hist
-for (c in colnames(sst)[-1]) {
-  hist(sst[[c]], main = paste("Histogram of", c), xlab = c, breaks = 50)
-}
-
-# NA
-for (c in colnames(sst)[-1]) {
-  na_count <- sum(is.na(sst[[c]]))
-  cat("Number of NA in", c, ":", na_count, "\n")
-}
-
-
-# Merge buff and sst by replicates -----
-# Detect columns that are not in buff
-extra_cols <- setdiff(names(sst), names(buff))
-
-# left_join 
-buff <- buff %>%
-  left_join(
-    sst %>% 
-      st_drop_geometry() %>% 
-      dplyr::select(replicates, dplyr::all_of(extra_cols)),
-    by = "replicates"
+#--- grid_v1.0_2023-07-01_with_predictors-raw_v1.1 ----
+# same as  grid_v1.0_2023-07-01_with_predictors-raw_v1.1 but filling with habitat NA with "soft_bottom" as nearest pixel value is filled by soft bottom. 
+buff_filled <- buff %>%
+  mutate(
+    main_habitat = ifelse(is.na(main_habitat), "soft_bottom", main_habitat),
+    grouped_main_habitat = ifelse(is.na(grouped_main_habitat), "soft_bottom", grouped_main_habitat),
+    nb_habitat_per_km2 = ifelse(is.na(nb_habitat_per_km2), 1, nb_habitat_per_km2),
+    matte_morte_P.oceanica_mean = ifelse(is.na(matte_morte_P.oceanica_mean), 0, matte_morte_P.oceanica_mean),
+    `Algues infralittorales_mean` = ifelse(is.na(`Algues infralittorales_mean`), 0, `Algues infralittorales_mean`),
+    coralligenous_mean = ifelse(is.na(coralligenous_mean), 0, coralligenous_mean),
+    meadow_mean = ifelse(is.na(meadow_mean), 0, meadow_mean),
+    `Habitats artificiels_mean` = ifelse(is.na(`Habitats artificiels_mean`), 0, `Habitats artificiels_mean`),
+    rock_mean = ifelse(is.na(rock_mean), 0, rock_mean),
+    soft_bottom_mean = ifelse(is.na(soft_bottom_mean), 1, soft_bottom_mean)
+    
   )
-
-rm(sst, extra_cols, c, na_count)
-
-
-
-
+sapply(buff_filled, function(x) sum(is.na(x))) # 0 NA now
+buff_filled %>% 
+  dplyr::select(-value) %>%
+  st_write("./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_2023-07-01_with_predictors-raw_v1.1.gpkg", delete_dsn = TRUE)
 
 
 
 
+#--- grid_v1.0_2023-07-01_with_predictors-tr_v1.1 ----
+pred_raw <- st_read("./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_2023-07-01_with_predictors-raw_v1.1.gpkg")
+
+
+# As in 6_Data-transformation.R : 
+
+# Remove 0 variance predictors ----
+nzv <- caret::nearZeroVar(pred_raw %>% st_drop_geometry(), saveMetrics = TRUE)
+
+# Remove ws_min_surface_month 
+pred_tr <- pred_raw %>% 
+  dplyr::select(-ws_min_surface_month )
+
+
+
+# CLT of habitat composition ----
+
+# Remove capital letters in column names
+colnames(pred_tr) <- tolower(colnames(pred_tr))
+
+# Replace space and point by "_"
+colnames(pred_tr) <- gsub("[ .]", "_", colnames(pred_tr))
+
+hab_cols <- c(
+  "habitats_artificiels_mean",
+  "matte_morte_p_oceanica_mean",
+  "algues_infralittorales_mean",
+  "soft_bottom_mean",
+  "meadow_mean",
+  "rock_mean",
+  "coralligenous_mean"
+)
+
+# Check data
+summary(pred_tr[, hab_cols])
+
+# Format data
+X <- as.data.frame(pred_tr[, hab_cols])
+X <- data.frame(lapply(X, function(col) as.numeric(as.character(col))))
+X <- as.matrix(X) + 1e-6  # pseudocount to avoid zeros
+
+# Centered log-ratio transformation
+Z <- compositions::clr(acomp(X))
+Z <- as.matrix(Z)  # ensures it's 2D even if only one row
+
+# Set column names
+Z <- Z[, colnames(Z) != "geom", drop = FALSE]
+colnames(Z) <- sub("_mean$", "_clr", hab_cols)
+
+# remove original mean columns and add CLR-transformed ones
+pred_tr <- pred_tr[, setdiff(names(pred_tr), hab_cols)]
+pred_tr <- cbind(pred_tr, as.data.frame(Z))
+
+
+# Plots new hab_cols
+for (i in colnames(Z)) {
+  hist(Z[, i], main = i, breaks = 100)
+}
+
+# Check NA  in all cols 
+sapply(pred_tr, function(col) sum(is.na(col))) # no NA --> need to handle habitat NA points (5 of them)
+
+rm(X, Z, hab_cols, i)
+dev.off()
+
+# Aspect : northness and eastness ----
+pred_tr <- pred_tr %>%
+  mutate(northness = cos(aspect_mean), 
+         eastness = sin(aspect_mean)) %>%
+  dplyr::select(-c(aspect_mean, aspect_min, aspect_max))
+
+
+# Log  ------------------
+# Log the same variables than in the training set.
+
+#--- Handle var with negative values ----
+
+
+# Set the same as for training
+var_to_fix <- c(
+  "tpi_min",
+  "tpi_mean", 
+  "tpi_max")
+
+# Function: abs → log(abs+1) → restore sign
+log_with_sign <- function(x) {
+  abs_x  <- abs(x)
+  log_x  <- log(abs_x + 1)
+  ifelse(x < 0, -log_x, log_x)
+}
+
+# Apply transformation
+for (v in var_to_fix) {
+  print('----------')
+  print(v)
+  
+  # 0. Take abs value
+  a <- abs(pred_tr[[v]])
+  
+  # 1. Check if variable needs a log (same rule: max ≥ 10 * median)
+  if (max(a, na.rm = TRUE) > 10 * median(a, na.rm = TRUE)) {
+    message(paste(v, ": log transform applied"))
+    
+    # 2. Create the log-signed variable in pred_tr
+    pred_tr[[paste0(v, "_log")]] <- log_with_sign(pred_tr[[v]])
+    
+    # 3. Remove original variable
+    pred_tr[[v]] <- NULL
+  } else {
+    message(paste(v, ": no log transform needed"))
+  }
+}
+
+
+
+
+
+# Other variables -----
+# Log the same predictors than in the training set. 
+
+# load training predictors
+p <- st_read("./data/processed_data/predictors/predictors_tr_v1.2.gpkg")
+
+# retain log cols (containing _log)
+log_cols <- colnames(p %>% st_drop_geometry() %>% dplyr::select(contains("_log")))
+# remove _log suffix to get original names
+log_cols <- sub("_log$", "", log_cols)
+
+# Keep cols in pred_tr that are in log_cols
+l <- intersect(log_cols, colnames(pred_tr))
+
+# add to l : "vel_min_surface_month"
+l <- c(l, "vel_min_surface_month" )
+
+pred_num <- pred_tr %>%
+  st_drop_geometry() %>%
+  dplyr::select(all_of(l))
+
+colnames(pred_num_log)
+
+pred_num_log <- pred_num  # Initialize new dataframe for transformed columns
+
+for (i in colnames(pred_num)) {
+  # Apply log transformation if the condition is met
+      print(paste("Transforming:", i))  # Print transformed column name
+    new_col_name <- paste0(i, "_log")  # New name with _log suffix
+    
+    # Replace original column with log-transformed version (renamed)
+    pred_num_log <- pred_num_log[, !colnames(pred_num_log) %in% i]  # Drop old column
+    pred_num_log[[new_col_name]] <- log(pred_num[[i]] + 1)  # Add new transformed column
+
+}
+
+# Check NA 
+sapply(pred_num_log, function(col) sum(is.na(col))) # no NA
+
+# Print the nb of transformed columns
+print(paste("Number of log-transformed columns:", sum(grepl("_log$", colnames(pred_num_log))))) # 19 (+2 tpi) 
+colnames(pred_num_log)
+
+# Replace original numeric columns in pred_tr with transformed ones
+pred_tr <- pred_tr %>%
+  st_drop_geometry() %>%
+  dplyr::select(-colnames(pred_num)) %>%  # Drop the original numeric columns
+  dplyr::bind_cols(pred_num_log) %>%       # Add the transformed numeric columns
+  dplyr::bind_cols(st_geometry(pred_tr)) %>% # Reattach geometry
+  st_as_sf() # Convert back to sf 
+
+pred_tr <- pred_tr %>% dplyr::select(-"...84")
+rm(pred_num, pred_num_log, i, max_val, median_val, new_col_name)
+
+
+names(pred_tr)
 
 
 
@@ -819,7 +964,53 @@ rm(sst, extra_cols, c, na_count)
 
 
 
+# Scale ----
+# Select the columns to scale
+num <- pred_tr %>% st_drop_geometry() %>%
+  dplyr::select(where(is.numeric)) %>%
+  dplyr::select(-c("x", "y"))%>%  # Do not scale coordinates
+  colnames()
+
+str(pred_tr[, num])
+
+# Replace the original columns with the scaled values
+pred_tr[, num] <- scale(pred_tr[, num] %>% st_drop_geometry())
+
+
+# Export ----
+# based on grid_v1.0_2023-07-01_with_predictors-raw_v1.1
+# same transfo as predictors_tr_v1.2
+pred_tr %>%  st_write("./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_2023-07-01_with_predictors-tr_v1.1.gpkg", delete_dsn = TRUE)
 
 
 
 
+#--- grid_v1.0_2023-07-01_with_predictors-sel_v1.3 ----
+pred_raw <- st_read("./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_2023-07-01_with_predictors-raw_v1.1.gpkg")
+# Select predictors as in predictors_sel_v1.3
+
+pred <- st_read("./data/processed_data/predictors/predictors_sel_v1.3.gpkg")
+
+gp <- st_read("./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_2023-07-01_with_predictors-tr_v1.1.gpkg")
+
+names(pred)
+names(gp)
+
+cols <- intersect(names(pred), names(gp))
+setdiff(colnames(pred), cols)
+cols <- c(cols, "ws_mean_surface_month", "vel_mean_surface_month", "temp_mean_40m_month", "temp_mean_surface_month", "sal_mean_40m_month", "sal_mean_surface_month")
+
+gp <- gp %>%
+  dplyr::select(all_of(c("id", "date", cols, "geom")))
+gp <- gp %>%  dplyr::select(-c("date"))
+gp <- gp %>%  dplyr::select(-c("date"))
+
+setdiff(names(gp), names(pred))
+setdiff(names(pred), names(gp))
+sort(names(gp))
+sort(names(pred))
+
+
+
+# Export ----
+st_write(gp, "./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_2023-07-01_with_predictors_sel_v1.3.gpkg" )
