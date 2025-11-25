@@ -290,9 +290,7 @@ for (i in seq_along(all_grids)) {
   }
 }
 
-# FOR CSV (CHL)
-library(dplyr)
-
+#----------------- FOR CSV (CHL/SST)
 # Lister les fichiers CSV
 csv_files <- list.files(
   "/run/user/1000/gvfs/sftp:host=marbec-data.ird.fr/BiodivMed/output/Extraction_SST_2018-2024/grid_v1.0",

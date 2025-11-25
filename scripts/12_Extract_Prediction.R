@@ -23,6 +23,7 @@ library(lubridate)
 library(terra)
 library(stringr)
 library(pMEM)
+library(purrr)
 
 
 
@@ -675,7 +676,6 @@ rm(coords, extra_cols, cent, xy)
 
 
 #--------------------------------------------------- PREDICTION GRID V.1.0 - JUNE 2023 (2023-07-01) ----------------
-#------------- NCDF DATA ----------------
 #--- MARS3D (1.2km) -----
 # Load MARS3D and combine data
 files <- list.files("./data/processed_data/predictors/Prediction_grid_v1.0/2023-07-01_CUR-WIND-SAL-TEMP/", pattern = "*.geojson", full.names = TRUE)
@@ -1014,3 +1014,112 @@ sort(names(pred))
 
 # Export ----
 st_write(gp, "./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_2023-07-01_with_predictors_sel_v1.3.gpkg" )
+
+#--------------------------------------------------- PREDICTION GRID V.1.0 - FIXED PREDICTORS ----------------
+# grid_v1.0_2023-07-01_with_predictors-raw_FIXED_v1.1 ----
+
+buff <- st_read("./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_2023-07-01_with_predictors-raw_v1.1.gpkg")
+names(buff)
+
+# remove cols containing 'chl' 'temp' 'sal' 'wind' 'vel' 'sst'
+keywords <- c("chl", "temp", "sal", "wind", "vel", "sst")
+
+cols_to_remove <- names(buff)[grepl(paste(keywords, collapse = "|"),
+                                    names(buff),
+                                    ignore.case = TRUE)]
+
+buff_clean <- buff %>% dplyr::select(-all_of(cols_to_remove))
+names(buff_clean)
+
+# Export 
+st_write(buff_clean, "./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_2023-07-01_with_predictors-raw_FIXED_v1.1.gpkg", delete_dsn = TRUE)
+
+
+
+#--------------------------------------------------- PREDICTION GRID V.1.0 - APRIL-SEPTEMBER 2023 ----------------
+#--- Load grid_v1.0_2023-07-01_with_predictors-raw_FIXED_v1.1 ----
+buff <- st_read("./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_2023-07-01_with_predictors-raw_FIXED_v1.1.gpkg")
+#--- MARS3D (1.2km) -----
+# CUR-WIND -----
+
+## 1. List all your GeoJSON files
+files <- list.files("/run/user/1000/gvfs/sftp:host=marbec-data.ird.fr/BiodivMed/output/Extraction_MARS3D_2018-2024/grid_v1.0/CUR-WIND", pattern = "*\\.geojson$", full.names = TRUE)
+
+## 2. Extract the date from the file name
+file_info <- tibble::tibble(
+  path = files,
+  date = str_extract(basename(files), "\\d{4}-\\d{2}-\\d{2}")
+)
+
+## 3. Group file paths by date
+paths_by_date <- split(file_info$path, file_info$date)
+
+## 4. Read + merge files so you have one sf per date
+# merged_sf_list is a named list, names = "2023-05-01", etc.
+merged_sf_list <- lapply(paths_by_date, function(paths) {
+  map_dfr(paths, ~ st_read(.x, quiet = TRUE))
+})
+
+## 5. Loop over merged files and join to buff
+# This returns a list of buff objects, one per date
+buff_by_date <- lapply(names(merged_sf_list), function(d) {
+  file <- merged_sf_list[[d]] %>% st_drop_geometry() 
+  
+  extra_cols <- setdiff(names(file), names(buff))
+  
+  buff %>%
+    left_join(
+      file %>%
+        st_drop_geometry() %>%
+        dplyr::select(id, dplyr::all_of(extra_cols)),
+      by = "id"
+    )
+})
+
+names(buff_by_date) <- names(merged_sf_list)
+
+# Check results
+names(buff_by_date$`2023-05-01`)
+
+# Clean up 
+rm(file, file_info, paths_by_date, merged_sf_list)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# SAL-TEMP -----
+# 0. List files and group by date 
+files <- list.files("/run/user/1000/gvfs/sftp:host=marbec-data.ird.fr/BiodivMed/output/Extraction_MARS3D_2018-2024/grid_v1.0/SAL-TEMP", pattern = "*\\.geojson$", full.names = TRUE)
+
+file_info <- tibble::tibble(
+  path = files,
+  date = str_extract(basename(files), "\\d{4}-\\d{2}-\\d{2}")
+)
+
+paths_by_date <- split(file_info$path, file_info$date)
+
+rm(d,t)
+
+# CHL -----
+# SST -----
+
