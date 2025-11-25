@@ -1118,7 +1118,6 @@ file_info <- tibble::tibble(
 
 paths_by_date <- split(file_info$path, file_info$date)
 
-rm(d,t)
 
 # CHL -----
 # SST -----
