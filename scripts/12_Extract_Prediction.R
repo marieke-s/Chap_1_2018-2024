@@ -1082,7 +1082,7 @@ names(buff_by_date) <- names(merged_sf_list)
 names(buff_by_date$`2023-05-01`)
 
 # Clean up 
-rm(file, file_info, paths_by_date, merged_sf_list)
+rm(file_info, paths_by_date, merged_sf_list)
 
 
 
@@ -1108,7 +1108,7 @@ rm(file, file_info, paths_by_date, merged_sf_list)
 
 
 # SAL-TEMP -----
-# 0. List files and group by date 
+## 0. List files and group by date 
 files <- list.files("/run/user/1000/gvfs/sftp:host=marbec-data.ird.fr/BiodivMed/output/Extraction_MARS3D_2018-2024/grid_v1.0/SAL-TEMP", pattern = "*\\.geojson$", full.names = TRUE)
 
 file_info <- tibble::tibble(
@@ -1117,6 +1117,119 @@ file_info <- tibble::tibble(
 )
 
 paths_by_date <- split(file_info$path, file_info$date)
+
+corse <- st_read("/run/user/1000/gvfs/sftp:host=marbec-data.ird.fr/BiodivMed/output/Extraction_MARS3D_2018-2024/grid_v1.0/SAL-TEMP/SAL-TEMP_Corse2_surf_2023-10-01.geojson" )
+ouest <- st_read("/run/user/1000/gvfs/sftp:host=marbec-data.ird.fr/BiodivMed/output/Extraction_MARS3D_2018-2024/grid_v1.0/SAL-TEMP/SAL-TEMP_Med-Ouest_surf_2023-10-01.geojson")
+est <- st_read("/run/user/1000/gvfs/sftp:host=marbec-data.ird.fr/BiodivMed/output/Extraction_MARS3D_2018-2024/grid_v1.0/SAL-TEMP/SAL-TEMP_Med-Est_surf_2023-10-01.geojson")
+
+str(corse)
+str(ouest)
+str(est)
+
+dim(corse)
+plot(corse)
+
+sapply(corse, function(x) sum(is.na(x)))
+
+dim(ouest)
+dim(est)
+
+dim(buff)
+
+dim(buff_by_date$`2023-10-01`)
+
+## 1. Helper: read one SAL–TEMP file and rename temp/sal columns
+read_saltemp_depth <- function(paths, suffix) {
+  if (length(paths) == 0) return(NULL)
+  
+  df <- paths %>%
+    map_dfr(function(p) {
+      x <- st_read(p, quiet = TRUE)
+      x %>%
+        st_drop_geometry() %>%
+        dplyr::select(id, starts_with("temp_"), starts_with("sal_"))
+    })
+  
+  # If some ids appear multiple times across regions, keep one row per id
+  df <- df %>% distinct(id, .keep_all = TRUE)
+  
+  # Suffix only env columns
+  env_cols <- setdiff(names(df), "id")
+  names(df)[names(df) %in% env_cols] <- paste0(env_cols, "_", suffix)
+  
+  df
+}
+
+
+
+
+## 2. For each date: merge all files (surf + 40m, all sub-areas) by id
+saltemp_by_date <- lapply(paths_by_date, function(paths) {
+  # Use basename to grep just on file name, not directory path
+  bnames <- basename(paths)
+  
+  paths_40m  <- paths[grepl("40m",  bnames)]
+  paths_surf <- paths[grepl("surf", bnames)]
+  
+  df_40m  <- read_saltemp_depth(paths_40m,  "40m")
+  df_surf <- read_saltemp_depth(paths_surf, "surf")
+  
+  if (!is.null(df_40m) && !is.null(df_surf)) {
+    # 2nd step: merge 40m and surf per date
+    left_join(df_40m, df_surf, by = "id")
+  } else if (!is.null(df_40m)) {
+    df_40m
+  } else {
+    df_surf
+  }
+})
+
+
+
+saltemp_by_date$`2023-05-01` %>% names()
+any(duplicated(saltemp_by_date[["2023-05-01"]]$id)) # should be FALSE
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## 3. Update EXISTING buff_by_date with SAL–TEMP columns only
+for (d in intersect(names(buff_by_date), names(saltemp_by_date))) {
+  message("Updating buff_by_date for ", d)
+  
+  file <- saltemp_by_date[[d]]
+  
+  # only add columns that are not already in buff_by_date[[d]]
+  extra_cols <- setdiff(names(file), names(buff_by_date[[d]]))
+  
+  buff_by_date[[d]] <- buff_by_date[[d]] %>%
+    left_join(
+      file %>% dplyr::select(id, all_of(extra_cols)),
+      by = "id"
+    )
+}
+
+
+
+# TEST ------------
+
+buff_by_date$`2023-09-01` %>% names()
+d <- buff_by_date$`2023-06-01`
+sapply(d, function(x) sum(is.na(x)))
+
+
+
+# rm(files, file_info, paths_by_date, saltemp_by_date, file, d, extra_cols)
+
 
 
 # CHL -----
