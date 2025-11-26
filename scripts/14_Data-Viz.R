@@ -31,6 +31,29 @@ library(ggplot2)
 #------------- Load functions ------------------------------------------------
 source("./utils/Fct_Data-Prep.R")
 
-#--------------------------------- MAP GRID CELLS x time ------------------------------
+#--------------------------------- MAP GRID CELLS x sampling x time ------------------------------
 # Load data -----
-grid <- st_read("./data/processed_data/prediction_extent/med_empty-grid_1.2km_2154_manual-sel_50m.gpkg")
+grid <- st_read("./data/processed_data/prediction_extent/grid_v1.1.gpkg")
+buff <- st_read("./data/processed_data/Mtdt/mtdt_7_sel_v1.1.gpkg")
+
+str(buff)
+str(grid)
+
+
+
+# Prep data -----
+buff <- buff %>%
+  mutate(year = year(date),
+         month = month(date))
+str(buff)
+
+
+
+
+
+
+
+
+
+
+

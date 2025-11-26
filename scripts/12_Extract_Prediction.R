@@ -1022,7 +1022,7 @@ buff <- st_read("./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0
 names(buff)
 
 # remove cols containing 'chl' 'temp' 'sal' 'wind' 'vel' 'sst'
-keywords <- c("chl", "temp", "sal", "wind", "vel", "sst")
+keywords <- c("chl", "temp", "sal", "wind", "vel", "sst", "ws")
 
 cols_to_remove <- names(buff)[grepl(paste(keywords, collapse = "|"),
                                     names(buff),
@@ -1036,14 +1036,150 @@ st_write(buff_clean, "./data/processed_data/predictors/Prediction_grid_v1.0/grid
 
 
 
-#--------------------------------------------------- PREDICTION GRID V.1.0 - APRIL-SEPTEMBER 2023 ----------------
+#--------------------------------------------------- PREDICTION GRID V.1.1 - APRIL-SEPTEMBER 2023 ----------------
 #--- Load grid_v1.0_2023-07-01_with_predictors-raw_FIXED_v1.1 ----
 buff <- st_read("./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_2023-07-01_with_predictors-raw_FIXED_v1.1.gpkg")
-#--- MARS3D (1.2km) -----
+# CHL -----
+# Lister les fichiers CSV
+chl_files <- list.files(
+  "/run/user/1000/gvfs/sftp:host=marbec-data.ird.fr/BiodivMed/output/Extraction_CHL_2018-2024/grid_v1.0",
+  pattern = "\\.csv$", 
+  full.names = TRUE
+)
+
+# Keep only files ending with "FULL.csv"
+chl_files <- chl_files[grepl("FULL\\.csv$", chl_files)]
+
+## 1. Extract the date from the file name
+chl_file_info <- tibble::tibble(
+  path = chl_files,
+  date = str_extract(basename(chl_files), "\\d{4}-\\d{2}-\\d{2}")
+)
+
+## 2. Group file paths by date
+chl_paths_by_date <- split(chl_file_info$path, chl_file_info$date)
+
+## 3. Read files per date (one df per date)
+chl_by_date <- lapply(chl_paths_by_date, function(paths) {
+  # in case there is >1 file per date in the future, bind rows
+  map_dfr(paths, ~ readr::read_csv(.x, show_col_types = FALSE))
+})
+
+## 4. Create buff_by_date by joining each CHL df to buff
+buff_by_date <- lapply(names(chl_by_date), function(d) {
+  chl_df <- chl_by_date[[d]]
+  
+  # keep only columns that are not already in buff
+  extra_cols <- setdiff(names(chl_df), names(buff))
+  
+  buff %>%
+    left_join(
+      chl_df %>%
+        dplyr::select(id, dplyr::all_of(extra_cols)),
+      by = "id"
+    ) %>%
+    # if any weird X2023 columns appear, drop them (same as CUR-WIND block)
+    dplyr::select(-starts_with("X2023"))
+})
+
+names(buff_by_date) <- names(chl_by_date)
+
+## Quick check
+names(buff_by_date$`2023-10-01`)
+dim(buff_by_date$`2023-05-01`)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# SST -----
+# Lister les fichiers CSV
+sst_files <- list.files(
+  "/run/user/1000/gvfs/sftp:host=marbec-data.ird.fr/BiodivMed/output/Extraction_SST_2018-2024/grid_v1.0",
+  pattern = "\\.csv$", 
+  full.names = TRUE
+)
+
+# Keep only files ending with "FULL.csv"
+sst_files <- sst_files[grepl("FULL\\.csv$", sst_files)]
+
+
+
+## 1. Extract date from file names
+sst_file_info <- tibble(
+  path = sst_files,
+  date = str_extract(basename(sst_files), "\\d{4}-\\d{2}-\\d{2}")
+)
+
+## 2. Group file paths by date
+sst_paths_by_date <- split(sst_file_info$path, sst_file_info$date)
+
+## 3. Read SST files per date (one df per date)
+sst_by_date <- lapply(sst_paths_by_date, function(paths) {
+  map_dfr(paths, ~ readr::read_csv(.x, show_col_types = FALSE))
+})
+
+## 4. Append SST data into EXISTING buff_by_date
+for (d in intersect(names(buff_by_date), names(sst_by_date))) {
+  message("Updating buff_by_date for ", d, " with SST data")
+  
+  sst_df <- sst_by_date[[d]]
+  
+  # only add columns that are not already present in this date's buff
+  extra_cols <- setdiff(names(sst_df), names(buff_by_date[[d]]))
+  
+  buff_by_date[[d]] <- buff_by_date[[d]] %>%
+    left_join(
+      sst_df %>%
+        dplyr::select(id, dplyr::all_of(extra_cols)),
+      by = "id"
+    ) %>%
+    # optional: same cleanup pattern as before
+    dplyr::select(-starts_with("X2023"))
+}
+
+# quick sanity check
+names(buff_by_date$`2023-05-01`)
+dim(buff_by_date$`2023-05-01`)
+
+
+
+
+
+
 # CUR-WIND -----
 
 ## 1. List all your GeoJSON files
-files <- list.files("/run/user/1000/gvfs/sftp:host=marbec-data.ird.fr/BiodivMed/output/Extraction_MARS3D_2018-2024/grid_v1.0/CUR-WIND", pattern = "*\\.geojson$", full.names = TRUE)
+files <- list.files(
+  "/run/user/1000/gvfs/sftp:host=marbec-data.ird.fr/BiodivMed/output/Extraction_MARS3D_2018-2024/grid_v1.1/CUR-WIND",
+  pattern = "*\\.geojson$",
+  full.names = TRUE
+)
 
 ## 2. Extract the date from the file name
 file_info <- tibble::tibble(
@@ -1060,23 +1196,27 @@ merged_sf_list <- lapply(paths_by_date, function(paths) {
   map_dfr(paths, ~ st_read(.x, quiet = TRUE))
 })
 
-## 5. Loop over merged files and join to buff
-# This returns a list of buff objects, one per date
-buff_by_date <- lapply(names(merged_sf_list), function(d) {
-  file <- merged_sf_list[[d]] %>% st_drop_geometry() 
+dim(merged_sf_list$`2023-05-01`) # should be 4423
+
+
+## 5. Loop over merged files and APPEND to existing buff_by_date
+for (d in intersect(names(buff_by_date), names(merged_sf_list))) {
+  message("Updating buff_by_date for ", d, " with CUR-WIND data")
   
-  extra_cols <- setdiff(names(file), names(buff))
+  file <- merged_sf_list[[d]] %>% st_drop_geometry()
   
-  buff %>%
+  # only add columns that are not already present in this date's buff
+  extra_cols <- setdiff(names(file), names(buff_by_date[[d]]))
+  
+  buff_by_date[[d]] <- buff_by_date[[d]] %>%
     left_join(
       file %>%
-        st_drop_geometry() %>%
         dplyr::select(id, dplyr::all_of(extra_cols)),
       by = "id"
-    )
-})
-
-names(buff_by_date) <- names(merged_sf_list)
+    ) %>%
+    # Remove cols starting with 'X2023' if they appear
+    dplyr::select(-starts_with("X2023"))
+}
 
 # Check results
 names(buff_by_date$`2023-05-01`)
@@ -1107,131 +1247,9 @@ rm(file_info, paths_by_date, merged_sf_list)
 
 
 
-# SAL-TEMP -----
-## 0. List files and group by date 
-files <- list.files("/run/user/1000/gvfs/sftp:host=marbec-data.ird.fr/BiodivMed/output/Extraction_MARS3D_2018-2024/grid_v1.0/SAL-TEMP", pattern = "*\\.geojson$", full.names = TRUE)
-
-file_info <- tibble::tibble(
-  path = files,
-  date = str_extract(basename(files), "\\d{4}-\\d{2}-\\d{2}")
-)
-
-paths_by_date <- split(file_info$path, file_info$date)
-
-corse <- st_read("/run/user/1000/gvfs/sftp:host=marbec-data.ird.fr/BiodivMed/output/Extraction_MARS3D_2018-2024/grid_v1.0/SAL-TEMP/SAL-TEMP_Corse2_surf_2023-10-01.geojson" )
-ouest <- st_read("/run/user/1000/gvfs/sftp:host=marbec-data.ird.fr/BiodivMed/output/Extraction_MARS3D_2018-2024/grid_v1.0/SAL-TEMP/SAL-TEMP_Med-Ouest_surf_2023-10-01.geojson")
-est <- st_read("/run/user/1000/gvfs/sftp:host=marbec-data.ird.fr/BiodivMed/output/Extraction_MARS3D_2018-2024/grid_v1.0/SAL-TEMP/SAL-TEMP_Med-Est_surf_2023-10-01.geojson")
-
-str(corse)
-str(ouest)
-str(est)
-
-dim(corse)
-plot(corse)
-
-sapply(corse, function(x) sum(is.na(x)))
-
-dim(ouest)
-dim(est)
-
-dim(buff)
-
-dim(buff_by_date$`2023-10-01`)
-
-## 1. Helper: read one SAL–TEMP file and rename temp/sal columns
-read_saltemp_depth <- function(paths, suffix) {
-  if (length(paths) == 0) return(NULL)
-  
-  df <- paths %>%
-    map_dfr(function(p) {
-      x <- st_read(p, quiet = TRUE)
-      x %>%
-        st_drop_geometry() %>%
-        dplyr::select(id, starts_with("temp_"), starts_with("sal_"))
-    })
-  
-  # If some ids appear multiple times across regions, keep one row per id
-  df <- df %>% distinct(id, .keep_all = TRUE)
-  
-  # Suffix only env columns
-  env_cols <- setdiff(names(df), "id")
-  names(df)[names(df) %in% env_cols] <- paste0(env_cols, "_", suffix)
-  
-  df
-}
+# SAL-TEMP-surf -----
+# SAL-TEMP-bottom -----
 
 
 
-
-## 2. For each date: merge all files (surf + 40m, all sub-areas) by id
-saltemp_by_date <- lapply(paths_by_date, function(paths) {
-  # Use basename to grep just on file name, not directory path
-  bnames <- basename(paths)
-  
-  paths_40m  <- paths[grepl("40m",  bnames)]
-  paths_surf <- paths[grepl("surf", bnames)]
-  
-  df_40m  <- read_saltemp_depth(paths_40m,  "40m")
-  df_surf <- read_saltemp_depth(paths_surf, "surf")
-  
-  if (!is.null(df_40m) && !is.null(df_surf)) {
-    # 2nd step: merge 40m and surf per date
-    left_join(df_40m, df_surf, by = "id")
-  } else if (!is.null(df_40m)) {
-    df_40m
-  } else {
-    df_surf
-  }
-})
-
-
-
-saltemp_by_date$`2023-05-01` %>% names()
-any(duplicated(saltemp_by_date[["2023-05-01"]]$id)) # should be FALSE
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-## 3. Update EXISTING buff_by_date with SAL–TEMP columns only
-for (d in intersect(names(buff_by_date), names(saltemp_by_date))) {
-  message("Updating buff_by_date for ", d)
-  
-  file <- saltemp_by_date[[d]]
-  
-  # only add columns that are not already in buff_by_date[[d]]
-  extra_cols <- setdiff(names(file), names(buff_by_date[[d]]))
-  
-  buff_by_date[[d]] <- buff_by_date[[d]] %>%
-    left_join(
-      file %>% dplyr::select(id, all_of(extra_cols)),
-      by = "id"
-    )
-}
-
-
-
-# TEST ------------
-
-buff_by_date$`2023-09-01` %>% names()
-d <- buff_by_date$`2023-06-01`
-sapply(d, function(x) sum(is.na(x)))
-
-
-
-# rm(files, file_info, paths_by_date, saltemp_by_date, file, d, extra_cols)
-
-
-
-# CHL -----
-# SST -----
 

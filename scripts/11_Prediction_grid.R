@@ -302,6 +302,9 @@ grid <- grid %>%
     depth_sampling_40m     = 40
   )
 
+# Reproject in 4326
+grid <- sf::st_transform(grid, crs = 4326)
+
 # Export grid 
 st_write(grid, "./data/processed_data/prediction_extent/grid_v1.1.gpkg",
   delete_dsn = TRUE)
