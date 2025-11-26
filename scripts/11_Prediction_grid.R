@@ -258,6 +258,60 @@ for (gpkg_path in gpkg_files) {
 
 message("Done.")
 
+#------------ grid_v1.1 : april to september 2023 with cols : regions, dates, surface, 40m. ---------------
+# Path to the base grid
+grid_path <- "./data/processed_data/prediction_extent/med_empty-grid_1.2km_2154_manual-sel_50m.gpkg"
+grid <- st_read(grid_path, quiet = TRUE)
+
+grid_corse <- st_read("./data/processed_data/predictors/Prediction_grid_v1.0/2023-07-01/grille_corse.geojson")
+grid_medest <- st_read("./data/processed_data/predictors/Prediction_grid_v1.0/2023-07-01/grille_med_est.geojson")
+grid_medouest <- st_read("./data/processed_data/predictors/Prediction_grid_v1.0/2023-07-01/grille_med_ouest.geojson")
+
+plot(grid_medest[1])
+plot(grid_medouest[1])
+plot(grid_corse[1])
+
+# Create region column
+grid <- grid %>%
+  mutate(
+    region = case_when(
+      id %in% grid_corse$id     ~ "corse",
+      id %in% grid_medest$id    ~ "med-est",
+      id %in% grid_medouest$id  ~ "med-ouest",
+      TRUE ~ NA_character_      # fallback (should not happen)
+    )
+  )
+
+plot(grid[4])
+
+# Create date columns 
+grid <- grid %>%
+  mutate(
+    '2023-05-01' = "2023-05-01",
+    '2023-06-01' = "2023-06-01",
+    '2023-07-01' = "2023-07-01",
+    '2023-08-01' = "2023-08-01",
+    '2023-09-01' = "2023-09-01",
+    '2023-10-01' = "2023-10-01"
+  )
+
+# Create depth_sampling columns
+grid <- grid %>%
+  mutate(
+    depth_sampling_surface = 1,
+    depth_sampling_40m     = 40
+  )
+
+# Export grid 
+st_write(grid, "./data/processed_data/prediction_extent/grid_v1.1.gpkg",
+  delete_dsn = TRUE)
+
+str(grid)
+
+
+
+
+
 #------------ Check extraction ----------------
 # Read all .geojson in the folder 
 # grid_files <- list.files("./data/processed_data/predictors/Prediction_grid_v1.0/CUR-WIND/", pattern = "*\\.geojson$", full.names = TRUE)
