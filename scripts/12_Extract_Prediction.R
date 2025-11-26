@@ -1248,8 +1248,117 @@ rm(file_info, paths_by_date, merged_sf_list)
 
 
 # SAL-TEMP-surf -----
+
+## 1. List all your GeoJSON files
+files <- list.files(
+  "/run/user/1000/gvfs/sftp:host=marbec-data.ird.fr/BiodivMed/output/Extraction_MARS3D_2018-2024/grid_v1.1/SAL-TEMP/surf",
+  pattern = "*\\.geojson$",
+  full.names = TRUE
+)
+
+## 2. Extract the date from the file name
+file_info <- tibble::tibble(
+  path = files,
+  date = str_extract(basename(files), "\\d{4}-\\d{2}-\\d{2}")
+)
+
+## 3. Group file paths by date
+paths_by_date <- split(file_info$path, file_info$date)
+
+## 4. Read + merge files so you have one sf per date
+# merged_sf_list is a named list, names = "2023-05-01", etc.
+merged_sf_list <- lapply(paths_by_date, function(paths) {
+  map_dfr(paths, ~ st_read(.x, quiet = TRUE))
+})
+
+dim(merged_sf_list$`2023-05-01`) # should be 4423
+
+
+## 5. Loop over merged files and APPEND to existing buff_by_date
+for (d in intersect(names(buff_by_date), names(merged_sf_list))) {
+  message("Updating buff_by_date for ", d, " with CUR-WIND data")
+  
+  file <- merged_sf_list[[d]] %>% st_drop_geometry()
+  
+  # only add columns that are not already present in this date's buff
+  extra_cols <- setdiff(names(file), names(buff_by_date[[d]]))
+  
+  buff_by_date[[d]] <- buff_by_date[[d]] %>%
+    left_join(
+      file %>%
+        dplyr::select(id, dplyr::all_of(extra_cols)),
+      by = "id"
+    ) %>%
+    # Remove cols starting with 'X2023' if they appear
+    dplyr::select(-starts_with("X2023")) %>%
+   # Add '_surf' suffix to SAL and TEMP columns
+    rename_with(~ paste0(., "_surf"), 
+                .cols = c(starts_with("sal_"), starts_with("temp_")))
+}
+
+# Check results
+names(buff_by_date$`2023-05-01`)
+
+# Clean up 
+rm(file_info, paths_by_date, merged_sf_list)
+
+
+
+
 # SAL-TEMP-bottom -----
 
+## 1. List all your GeoJSON files
+files <- list.files(
+  "/run/user/1000/gvfs/sftp:host=marbec-data.ird.fr/BiodivMed/output/Extraction_MARS3D_2018-2024/grid_v1.1/SAL-TEMP/bottom",
+  pattern = "*\\.geojson$",
+  full.names = TRUE
+)
+
+## 2. Extract the date from the file name
+file_info <- tibble::tibble(
+  path = files,
+  date = str_extract(basename(files), "\\d{4}-\\d{2}-\\d{2}")
+)
+
+## 3. Group file paths by date
+paths_by_date <- split(file_info$path, file_info$date)
+
+## 4. Read + merge files so you have one sf per date
+# merged_sf_list is a named list, names = "2023-05-01", etc.
+merged_sf_list <- lapply(paths_by_date, function(paths) {
+  map_dfr(paths, ~ st_read(.x, quiet = TRUE))
+})
+
+dim(merged_sf_list$`2023-05-01`) # should be 4423
+
+
+## 5. Loop over merged files and APPEND to existing buff_by_date
+for (d in intersect(names(buff_by_date), names(merged_sf_list))) {
+  message("Updating buff_by_date for ", d, " with CUR-WIND data")
+  
+  file <- merged_sf_list[[d]] %>% st_drop_geometry()
+  
+  # only add columns that are not already present in this date's buff
+  extra_cols <- setdiff(names(file), names(buff_by_date[[d]]))
+  
+  buff_by_date[[d]] <- buff_by_date[[d]] %>%
+    left_join(
+      file %>%
+        dplyr::select(id, dplyr::all_of(extra_cols)),
+      by = "id"
+    ) %>%
+    # Remove cols starting with 'X2023' if they appear
+    dplyr::select(-starts_with("X2023")) %>%
+    # Add '_surf' suffix to SAL and TEMP columns
+    rename_with(~ paste0(., "_bottom"), 
+                .cols = c(starts_with("sal_"), starts_with("temp_")))
+}
+
+# Check results
+names(buff_by_date$`2023-05-01`)
+
+# Clean up 
+rm(file_info, paths_by_date, merged_sf_list)
 
 
 
