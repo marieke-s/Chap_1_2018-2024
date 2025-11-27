@@ -888,6 +888,366 @@ buff <- df %>% dplyr::select(-overlap)
 rm(h, habitats, i, idx, mean_cols, new_cols, no_overlap, vals, df, nn, rast_df, rast_pts, temp, col, col_mean, new_val, no_overlap_ids, total_means)
 rm(rast, rast_grouped)
 
+
+######  Habitat (100m) v2 ####
+# Explanation : we retrieve 3 different variables : 
+# 1. main habitat within buffer, 
+# 2. number of habitats per km² = number of different habitats / buffer area, 
+# 3. surface proportion of each habitat within buffer 
+
+# WARNING : Important methodological considerations :
+# "la carto de la cymodocée est tres incomplete. je déconseille de l'utiliser comme predicteur" Julie Deter --> we remove it from the analysis
+# "Zone bathyale" is kept. 
+
+# We compute these variables twice : once for detailed habitats and once for the main habitats categories (ie grouped habitats).
+
+# Data :
+# A 100m resolution raster file from Andromed with 14 bands representing the surface of different habitats in m² :
+# 1	Association a rhodolithes
+# 2	Association de la matte morte de Posidonia oceanica
+# 3	Biocenose Coralligene
+# 4	Biocenose de l herbier a Posidonia oceanica
+# 5	Biocenose de la roche du large
+# 6	Biocenose des algues infralittorales
+# 7	Biocenose des galets infralittoraux
+# 8	Fonds meubles circalittoraux
+# 9	Fonds meubles infralittoraux
+# 10	Habitats artificiels
+# 11	Herbiers a Cymodocees
+# 12	Zone bathyale
+# 13	Herbier mixte a Zostera noltii, Zostera marina, Cymodocea nodosa et Ruppia cirrhosa
+# 14	Herbiers a Zostera noltei
+
+# Load & prep predictors_raw_v1.2 ----
+buff <- st_read("./data/processed_data/predictors/predictors_raw_v2.2.gpkg")
+
+# Remove habitat cols from buff 
+habitat_cols <- c("main_habitat", "nb_habitat_per_km2", 
+                  "grouped_main_habitat", "grouped_nb_habitat_per_km2", "algues_infralittorales_mean","habitats_artificiels_mean","soft_bottom_mean","meadow_mean","rock_mean","coralligenous_mean", "matte_morte_p_oceanica_mean")
+
+names(buff)
+
+buff <- buff %>%
+  dplyr::select(-any_of(habitat_cols))
+
+# Load and prep rasters ----
+rast <- terra::rast("./data/raw_data/predictors/Habitat/bioc_2023_medfr_100m_2154.tif")
+plot(rast)
+
+# Create 1 layer of presence/absence for each habitat
+rast <- rast %>% as.factor() %>% segregate()
+
+# Rename bands
+names(rast) <-  c("Association rhodolithes", "matte_morte_P.oceanica",
+                  "Coralligene","P.oceanica","Roche du large", "Algues infralittorales",
+                  "Galets infralittoraux","fonds meubles circalittoraux",
+                  "Fonds meubles infralittoraux", "Habitats artificiels",
+                  "Herbiers Cymodocess", "Zone bathyale","Herbier mixte", "Z.noltei")
+
+# Remove "Cymodocees" from raster
+rast <- rast[[!(names(rast) %in% c("Herbiers Cymodocess"))]]
+
+
+
+# Export 
+terra::writeRaster(rast, "./data/processed_data/predictors/Habitat/habitat_raster_2.tif", overwrite=TRUE)
+
+
+
+
+
+
+
+#   --- Group habitats ---
+# Here habitats are separatly named as a function of their location (infralittoral, circalittoral, large) and type (rocky, soft bottom, seagrass, algae, coralligenous) --> we group habitats to keep only types. 
+
+rast_grouped <- rast
+
+# Put "fonds meubles" together
+rast_grouped$soft_bottom <- app(rast_grouped[[names(rast_grouped) %in% c("fonds meubles circalittoraux","Fonds meubles infralittoraux")]], fun = "sum")
+rast_grouped <- rast_grouped[[!(names(rast_grouped) %in% c("fonds meubles circalittoraux","Fonds meubles infralittoraux"))]]
+
+# Put "P.oceanica" "Herbier mixte" "Z.noltei" together
+rast_grouped$meadow <- app(rast_grouped[[names(rast_grouped) %in% c("P.oceanica", "Z.noltei", "Herbier mixte" )]], fun = "sum")
+rast_grouped <- rast_grouped[[!(names(rast_grouped) %in% c("P.oceanica", "Z.noltei", "Herbier mixte"))]]
+
+# Put "Roche du large" and "Galets infralittoraux" together 
+rast_grouped$rock <- app(rast_grouped[[names(rast_grouped) %in% c("Roche du large","Galets infralittoraux")]], fun = "sum")
+rast_grouped <- rast_grouped[[!(names(rast_grouped) %in% c("Roche du large","Galets infralittoraux"))]]
+
+# Put "Association rhodolithes" and "Coralligene" together
+rast_grouped$coralligenous <- app(rast_grouped[[names(rast_grouped) %in% c("Association rhodolithes","Coralligene")]], fun = "sum")
+rast_grouped <- rast_grouped[[!(names(rast_grouped) %in% c("Association rhodolithes","Coralligene"))]]
+
+# Keep "Zone bathyale" alone 
+
+
+plot(rast_grouped)
+
+
+
+# Export 
+terra::writeRaster(rast_grouped, "./data/processed_data/predictors/Habitat/grouped_habitat_raster_v2.tif", overwrite=TRUE)
+
+
+
+# Load rasters directly ----
+rast <- terra::rast("./data/processed_data/predictors/Habitat/habitat_raster_2.tif")
+rast_grouped <- terra::rast("./data/processed_data/predictors/Habitat/grouped_habitat_raster_v2.tif")
+
+
+
+
+
+
+
+# Main habitat & Nb of habitats/km2 ----
+source("./utils/Fct_Data-Prep.R")
+
+buff1 <- calculate_habitats_nn(
+  buff           = buff,
+  rast           = rast_grouped,
+  id_column_name = "replicates",
+  buff_area      = "area_km2",
+  name           = "grouped_"      # or e.g. "hab_"
+  # k_nearest    = 3       # default is 3, can change if needed
+)
+st_write(buff1, "./data/processed_data/predictors/predictors_raw_v2.0_temp1.gpkg", delete_dsn = TRUE)
+rm(grouped_rast)
+
+buff2 <- calculate_habitats_nn(
+  buff           = buff,
+  rast           = rast,
+  id_column_name = "replicates",
+  buff_area      = "area_km2",
+  name           = ""      # or e.g. "hab_"
+  # k_nearest    = 3       # default is 3, can change if needed
+)
+st_write(buff2, "./data/processed_data/predictors/predictors_raw_v2.0_temp1.gpkg", delete_dsn = TRUE)
+rm(rast)
+
+
+
+#============= Save temp file =============
+st_write(buff2, "./data/processed_data/predictors/predictors_raw_v2.0_temp2.gpkg", delete_dsn = TRUE)
+#==========================================
+
+# Merge back NA values -----
+
+# Merge buff1 and buff 2 by replicates 
+buff12 <- buff1 %>%
+  dplyr::select(-area_km2) %>%
+  left_join(
+    buff2 %>% st_drop_geometry() %>% dplyr::select(-area_km2),
+    by = "replicates"
+  )
+
+sapply(buff12, function(x) sum(is.na(x)))
+
+# For replicates in buff12, replace the hab_cols columns in buff with those in buff12
+
+hab_cols <- colnames(buff12[, -1] %>% sf::st_drop_geometry())
+hab_cols <- intersect(hab_cols, names(buff))
+
+
+# match buff$replicates to buff12$replicates
+idx <- match(buff$replicates, buff12$replicates)
+
+# which rows in buff have a match in buff12?
+rows_to_update <- !is.na(idx)
+
+# replace values in buff[rows_to_update, hab_cols] 
+# with the corresponding rows from buff12
+buff[rows_to_update, hab_cols] <- buff12[idx[rows_to_update], hab_cols] %>% sf::st_drop_geometry()
+
+
+
+
+
+
+
+
+
+
+
+
+# Check and Clean up -----
+# Check na again and clean 
+
+habitat_cols <- c("main_habitat", "grouped_main_habitat", "grouped_main_habitat", "grouped_nb_habitat_per_km2")
+buff_na <- buff %>%
+  filter(if_any(all_of(habitat_cols), is.na)) 
+
+# if buff_na = 0 rows then clean up 
+
+if(nrow(buff_na) == 0){
+  message("No more NA in main habitat and nb hab per km2")
+  rm(buff_na, buff1, buff2, buff12, hab_cols, habitat_cols, idx, rows_to_update)
+} else {
+  message( "/!\ Remaining NA !")
+}
+
+
+# Handle habitats proportions (grouped only) -----
+
+# Habitats (base names, must match layers in rast_grouped)
+habitats <- c(
+  "algues_infralittorales",
+  "matte_morte_p_oceanica",
+  "coralligenous",
+  "rock",
+  "soft_bottom",
+  "meadow",
+  "habitats_artificiels"
+)
+
+mean_cols <- paste0(habitats, "_mean")
+
+## 1. Remove old habitat mean columns if present
+buff <- buff %>%
+  dplyr::select(-any_of(mean_cols))
+
+## 2. Compute weighted means of each habitat within buffers
+
+buff <- sf::st_as_sf(buff)
+df   <- buff
+
+# Extract weighted means per habitat
+for (h in names(rast_grouped)) {
+  temp <- spatial_extraction(
+    var   = h,
+    rast  = rast_grouped[[h]],
+    poly  = df,
+    stats = "mean"
+  )
+  
+  # The new column should be like "<h>_mean"
+  new_cols <- setdiff(names(temp), names(df))
+  
+  if (length(new_cols) > 0) {
+    df <- dplyr::bind_cols(df, sf::st_drop_geometry(temp)[, new_cols, drop = FALSE])
+  } else {
+    message(sprintf("No new columns returned for layer '%s'", h))
+  }
+}
+
+names(df)
+sum(is.na(df$"Habitats artificiels_mean")) # 5 NA
+
+# Determine which polygons overlapped the raster
+habitats <- paste0(names(rast_grouped), "_mean")
+df$overlap <- apply(df[, habitats], 1, function(x) any(is.na(x)))
+
+
+
+## 3. For polygons with NO overlap → compute proportions using the 3 nearest pixels
+
+# Convert raster to points
+rast_df <- terra::as.data.frame(rast_grouped, xy = TRUE, na.rm = TRUE)
+rast_pts <- sf::st_as_sf(rast_df, coords = c("x", "y"), crs = st_crs(df))
+
+
+# Compute nearest-pixel sums per habitat
+
+no_overlap_ids <- which(df$overlap == TRUE)
+
+for (i in no_overlap_ids) {
+  
+  # find nearest 3 raster points
+  nn  <- nngeo::st_nn(df[i, ], rast_pts, k = 3)
+  idx <- unlist(nn)
+  
+  if (length(idx) == 0) {
+    # nothing found – keep NA for this polygon
+    next
+  }
+  
+  # for each habitat, sum the values of the 3 nearest pixels
+  for (h in names(rast_grouped)) {
+    col_mean <- paste0(h, "_mean")
+    
+    # make sure the column exists and is numeric
+    if (!col_mean %in% names(df)) {
+      df[[col_mean]] <- NA_real_
+    }
+    
+    vals <- rast_df[idx, h]
+    new_val <- if (all(is.na(vals))) NA_real_ else sum(vals, na.rm = TRUE)
+    
+    # this is the crucial line: assign as a scalar into sf/tibble
+    df[i, col_mean] <- new_val
+  }
+}
+
+# Check results
+df %>% filter(overlap == TRUE) %>% dplyr::select(c(habitats)) %>% print()
+
+
+
+
+
+
+## 4. Convert these habitat means into TRUE PROPORTIONS
+
+mean_cols <- paste0(names(rast_grouped), "_mean")
+
+total_means <- rowSums(df[, mean_cols] %>% st_drop_geometry(), na.rm = TRUE)
+
+
+for (col in mean_cols) {
+  df[[col]] <- ifelse(
+    total_means > 0,
+    df[[col]] / total_means,
+    NA_real_
+  )
+}
+
+# Check 
+summary(rowSums(df[, mean_cols] %>% st_drop_geometry(), na.rm = TRUE)) # All 1 = good
+
+
+## 5. Merge back to buff 
+buff <- df %>% dplyr::select(-overlap)
+
+
+## Summary of what we did : 
+
+# | Case                              | Habitat value source                       | Final proportions      |
+#   | --------------------------------- | ------------------------------------------ | ---------------------- |
+#   | **Polygon overlaps raster**       | Weighted means from `spatial_extraction()` | mean_i / sum(mean_all) |
+#   | **Polygon outside raster extent** | Sum of 3 nearest pixels per habitat        | sum_i / sum(sum_all)   |
+#   
+
+
+
+
+# Clean up ----
+# Check na and clean up
+
+
+rm(h, habitats, i, idx, mean_cols, new_cols, no_overlap, vals, df, nn, rast_df, rast_pts, temp, col, col_mean, new_val, no_overlap_ids, total_means)
+rm(rast, rast_grouped)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #------------- VECTOR DATA ----------------
 ###### Distance between seabed and depth sampling ############
 # Explanation : bathy_max - depth_sampling
@@ -1418,3 +1778,5 @@ pred <- x # (after modifications in the habitat section and in the CLEAN UP BUFF
 
 # export
 st_write(x, "./data/processed_data/predictors/predictors_raw_v2.2.gpkg", append = FALSE)
+
+#------------- Add boat detection ----------------

@@ -1178,6 +1178,207 @@ summary_tbl <- diag_tbl %>%
 print(summary_tbl, n = Inf)
  readr::write_csv(summary_tbl, "./output/predictors_raw_v1.2_variance_outliers_norm.csv")
 
+#--- Boats detection (befor extraction) ----
+# read nc file -----
+corse <- nc_open("./data/raw_data/predictors/Boats/boats_med_2018_2024_bymonth/boats_corse_100m.nc")
+fr <- nc_open("./data/raw_data/predictors/Boats/boats_med_2018_2024_bymonth/boats_metropole_100m.nc")
+corse
+fr
+
+
+# Explore ncdf ----
+library(ncdf4)
+library(lubridate)
+
+nc <- nc_open("./data/raw_data/predictors/Boats/boats_med_2018_2024_bymonth/boats_metropole_100m.nc")
+
+lon   <- ncvar_get(nc, "lon")
+lat   <- ncvar_get(nc, "lat")
+boats <- ncvar_get(nc, "boats")  # [lon, lat, yearmonth]
+
+d <- dim(boats)
+n_months <- d[3]
+
+# Months from 2018-01 to 2024-12 (84 months)
+ym <- format(seq(as.Date("2018-01-01"), by = "1 month", length.out = n_months),
+             "%Y%m")
+
+length(ym)   # should be 84
+head(ym)
+tail(ym)
+
+# boats[lon, lat, month]
+summary_ym <- t(apply(boats, 3, function(x) {
+  x <- as.numeric(x)
+  c(
+    n    = sum(!is.na(x)),
+    mean = mean(x, na.rm = TRUE),
+    min  = min(x, na.rm = TRUE),
+    max  = max(x, na.rm = TRUE),
+    sd   = sd(x,  na.rm = TRUE)
+  )
+}))
+
+summary_ym <- as.data.frame(summary_ym)
+summary_ym$yearmonth <- ym
+
+summary_ym
+
+# Plot mean boats per month ----
+library(dplyr)
+library(ggplot2)
+
+summary_ym <- summary_ym %>%
+  mutate(
+    yearmonth = as.character(yearmonth),
+    date = as.Date(paste0(yearmonth, "01"), format = "%Y%m%d")
+  )
+
+ggplot(summary_ym, aes(x = date, y = mean)) +
+  geom_line() +
+  geom_point() +
+  labs(
+    title = "Mean Boats Detection Over Time (Corse)",
+    x = "Year-Month",
+    y = "Mean Boats Detected"
+  ) +
+  theme_minimal()
+
+
+
+library(lubridate)
+
+n_months <- dim(boats)[3]
+ym <- format(seq(ymd("2018-01-01"), by = "1 month", length.out = n_months), "%Y%m")
+lon <- ncvar_get(nc, "lon")
+lat <- ncvar_get(nc, "lat")
+
+grid_idx <- expand.grid(
+  lon = lon,
+  lat = lat
+)
+nrow(grid_idx)   # 1400 * 2747 = 3,845,800 cells
+
+
+
+
+# Map for a specific month ----
+library(ggplot2)
+library(sf)
+
+month_i <- which(ym == "201807")   # July 2018
+
+df <- grid_idx
+df$boats <- as.vector(boats[,,month_i])
+df <- df[df$boats > 0, ]   # optional: remove zero/no-detection
+
+df <- df %>% tidyr::drop_na(lon, lat)
+
+sf_month <- st_as_sf(df, coords = c("lon", "lat"), crs = 3857)
+
+ggplot(sf_month) +
+  geom_sf(aes(color = boats), size = 0.1) +
+  scale_color_viridis_c() +
+  labs(
+    title = paste("Boats – Corse –", ym[month_i]),
+    color = "boats"
+  ) +
+  theme_minimal()
+
+
+
+# Loop through all months and save maps ----
+out_dir <- "./figures/Predictors/boats/boats_fr_monthly/"
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+for (i in seq_along(ym)) {
+  message("Mapping month: ", ym[i])
+  
+  # Base grid + values for this month
+  df <- grid_idx
+  df$boats <- as.vector(boats[,,i])
+  
+  # Remove rows with NA coords or NA boats
+  df <- df %>%
+    filter(!is.na(lon), !is.na(lat), !is.na(boats))
+  
+  # Optional: remove zero detections for performance
+  df <- df %>% filter(boats > 0)
+  
+  if (nrow(df) == 0) {
+    message("  No non-zero boats for ", ym[i], " — skipping.")
+    next
+  }
+  
+  sf_month <- st_as_sf(df, coords = c("lon", "lat"), crs = 3857)
+  
+  g <- ggplot(sf_month) +
+    geom_sf(aes(color = boats), size = 0.15) +
+    scale_color_viridis_c() +
+    labs(
+      title = paste("Boats – Corse –", ym[i]),
+      color = "boats"
+    ) +
+    theme_minimal()
+  
+  ggsave(
+    file.path(out_dir, paste0("boats_", ym[i], ".png")),
+    g,
+    width = 7, height = 5, dpi = 300
+  )
+}
+
+
+
+
+# Export specific month as raster ----
+library(raster)
+
+# Example: August 2023
+target_ym <- "202308"
+k <- which(ym == target_ym)
+
+if (length(k) != 1) stop("Yearmonth not found or ambiguous.")
+
+# boats[lon, lat, month]
+m <- boats[,,k]  # matrix
+
+# If lat is ascending but raster expects top-to-bottom, you may need to flip
+# Check orientation:
+# lat[1:5]; tail(lat)
+# If lat increases from bottom to top, flip the matrix:
+if (lat[1] < lat[length(lat)]) {
+  m <- m[, ncol(m):1]   # flip in 'lat' direction
+  lat_use <- rev(lat)
+} else {
+  lat_use <- lat
+}
+
+r <- raster(
+  nrows = length(lat_use),
+  ncols = length(lon),
+  xmn   = min(lon),
+  xmx   = max(lon),
+  ymn   = min(lat_use),
+  ymx   = max(lat_use),
+  crs   = "EPSG:3857"
+)
+
+values(r) <- as.vector(m)
+
+r
+
+
+
+plot(r, main = paste("Boats – Corse –", target_ym))
+
+# write to file
+writeRaster(r,
+            filename = paste0("boats_corse_", target_ym, ".tif"),
+            overwrite = TRUE)
+
+
+
 #--- Cleanup ----
 rm(diag_tbl, fmt_flag, has_outliers_iqr, make_var_figure, num_df, safe_shapiro_p, summary_tbl, nzv_metrics, vars)
 rm(ad_res, dag_res, ind, ks_res, normality_results, plots, shapiro_res, col, cols, i, max_val, med_val, median_val, normality_status, outlier_vars, threshold)
