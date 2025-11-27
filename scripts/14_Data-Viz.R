@@ -186,11 +186,12 @@ n_states <- length(levels(grid_long_sf$month_year))
 
 anim_gif <- animate(
   anim,
-  nframes = n_states * 6,  # ~6 frames per month
-  fps     = 6,
+  nframes = length(levels(grid_long_sf$month_year)),  # 1 frame per month
+  fps = 2,
   width   = 800,
   height  = 600
 )
+
 
 anim_save("./figures/sampling_through_time.gif", animation = anim_gif)
 

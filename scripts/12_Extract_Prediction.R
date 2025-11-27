@@ -1138,6 +1138,7 @@ sst_file_info <- tibble(
 
 ## 2. Group file paths by date
 sst_paths_by_date <- split(sst_file_info$path, sst_file_info$date)
+sst_paths_by_date
 
 ## 3. Read SST files per date (one df per date)
 sst_by_date <- lapply(sst_paths_by_date, function(paths) {
@@ -1189,6 +1190,7 @@ file_info <- tibble::tibble(
 
 ## 3. Group file paths by date
 paths_by_date <- split(file_info$path, file_info$date)
+paths_by_date
 
 ## 4. Read + merge files so you have one sf per date
 # merged_sf_list is a named list, names = "2023-05-01", etc.
@@ -1264,6 +1266,7 @@ file_info <- tibble::tibble(
 
 ## 3. Group file paths by date
 paths_by_date <- split(file_info$path, file_info$date)
+paths_by_date
 
 ## 4. Read + merge files so you have one sf per date
 # merged_sf_list is a named list, names = "2023-05-01", etc.
@@ -1322,6 +1325,7 @@ file_info <- tibble::tibble(
 
 ## 3. Group file paths by date
 paths_by_date <- split(file_info$path, file_info$date)
+paths_by_date
 
 ## 4. Read + merge files so you have one sf per date
 # merged_sf_list is a named list, names = "2023-05-01", etc.
@@ -1355,10 +1359,195 @@ for (d in intersect(names(buff_by_date), names(merged_sf_list))) {
 }
 
 # Check results
-names(buff_by_date$`2023-05-01`)
+names(buff_by_date$`2023-07-01`)
 
 # Clean up 
 rm(file_info, paths_by_date, merged_sf_list)
 
 
+
+
+
+#--- Export grid_v1.0_2023-0X-01_with_predictors-raw_v1.1 -----
+saveRDS(
+  buff_by_date,
+  file = "./data/processed_data/predictors/Prediction_grid_v1.0/Export_grid_v1.0_2023-Apr-Sept_with_predictors-raw_v1.1.rds"
+)
+
+#--- Transform and select ----
+
+
+# 0. Get list of variables that are log-transformed in training set ----
+
+p <- st_read("./data/processed_data/predictors/predictors_tr_v1.2.gpkg", quiet = TRUE)
+
+log_cols <- colnames(
+  p %>%
+    st_drop_geometry() %>%
+    dplyr::select(contains("_log"))
+)
+
+# original variable names (without _log)
+base_log_vars <- sub("_log$", "", log_cols)
+base_log_vars <- sub("_month", "", base_log_vars)  # remove _month if present
+
+
+# 1. Function to apply transformation -----
+#    (this replaces pred_raw -> pred_tr workflow)
+
+transform_pred <- function(pred_raw, base_log_vars) {
+  
+  pred_tr <- pred_raw
+  
+  # Remove ws_min_surface_month if present
+  if ("ws_min_surface" %in% names(pred_tr)) {
+    pred_tr <- pred_tr %>% dplyr::select(-ws_min_surface_month)
+  }
+  
+  # Lowercase + replace space/dot with "_"
+  colnames(pred_tr) <- tolower(colnames(pred_tr))
+  colnames(pred_tr) <- gsub("[ .]", "_", colnames(pred_tr))
+  
+  # ---- CLT of habitat composition ----
+  hab_cols <- c(
+    "habitats_artificiels_mean",
+    "matte_morte_p_oceanica_mean",
+    "algues_infralittorales_mean",
+    "soft_bottom_mean",
+    "meadow_mean",
+    "rock_mean",
+    "coralligenous_mean"
+  )
+  
+  # # Safety: keep only those habitat columns that exist
+  # hab_cols <- intersect(hab_cols, colnames(pred_tr))
+  
+  if (length(hab_cols) > 0) {
+    X <- as.data.frame(pred_tr[, hab_cols])
+    X <- data.frame(lapply(X, function(col) as.numeric(as.character(col))))
+    X <- as.matrix(X) + 1e-6  # pseudocount
+    
+    Z <- compositions::clr(acomp(X))
+    Z <- as.matrix(Z)
+    colnames(Z) <- sub("_mean$", "_clr", hab_cols)
+    
+    # remove original mean columns, add CLR
+    pred_tr <- pred_tr[, setdiff(names(pred_tr), hab_cols)]
+    pred_tr <- cbind(pred_tr, as.data.frame(Z))
+  }
+  
+  # ---- Aspect -> northness, eastness ----
+  if ("aspect_mean" %in% names(pred_tr)) {
+    pred_tr <- pred_tr %>%
+      mutate(
+        northness = cos(aspect_mean),
+        eastness  = sin(aspect_mean)
+      ) %>%
+      dplyr::select(-c(aspect_mean, aspect_min, aspect_max))
+  }
+  
+  # ---- Log with sign for TPI ----
+  var_to_fix <- c("tpi_min", "tpi_mean", "tpi_max")
+  
+  log_with_sign <- function(x) {
+    abs_x <- abs(x)
+    log_x <- log(abs_x + 1)
+    ifelse(x < 0, -log_x, log_x)
+  }
+  
+  for (v in var_to_fix) {
+    if (v %in% names(pred_tr)) {
+      a <- abs(pred_tr[[v]])
+      if (max(a, na.rm = TRUE) > 10 * median(a, na.rm = TRUE)) {
+        pred_tr[[paste0(v, "_log")]] <- log_with_sign(pred_tr[[v]])
+        pred_tr[[v]] <- NULL
+      }
+    }
+  }
+  
+  # ---- Log the same numeric predictors as in training ----
+  # base_log_vars comes from training; keep only those present here
+  l <- intersect(base_log_vars, colnames(pred_tr))
+  
+  # plus vel_min_surface_month
+  if ("vel_min_surface" %in% names(pred_tr)) {
+    l <- union(l, "vel_min_surface")
+  }
+  
+  # keep only existing
+  l <- intersect(l, colnames(pred_tr))
+  
+  if (length(l) > 0) {
+    pred_num <- pred_tr %>%
+      st_drop_geometry() %>%
+      dplyr::select(all_of(l))
+    
+    pred_num_log <- pred_num
+    
+    for (i in colnames(pred_num)) {
+      message(paste("Transforming:", i))
+      new_col_name <- paste0(i, "_log")
+      pred_num_log[[new_col_name]] <- log(pred_num[[i]] + 1)
+      pred_num_log[[i]] <- NULL
+    }
+    
+    # Replace original numeric columns with transformed ones
+    pred_tr <- pred_tr %>%
+      st_drop_geometry() %>%
+      dplyr::select(-all_of(l)) %>%
+      dplyr::bind_cols(pred_num_log) %>%
+      dplyr::bind_cols(st_geometry(pred_tr)) %>%
+      st_as_sf()
+  }
+  
+  # remove weird extra column if it exists
+pred_tr <- pred_tr %>% 
+  dplyr::select(!starts_with("..."))
+
+  
+  # ---- Scale numeric variables ----
+  num <- pred_tr %>%
+    st_drop_geometry() %>%
+    dplyr::select(where(is.numeric)) %>%
+    dplyr::select(-any_of(c("x", "y"))) %>%
+    colnames()
+  
+  if (length(num) > 0) {
+    scaled_vals <- scale(st_drop_geometry(pred_tr)[, num])
+    pred_tr[, num] <- scaled_vals
+  }
+  
+  pred_tr
+}
+
+
+# 2. Loop through buff_by_date, apply transform, and write one GPKG per date -----
+
+
+out_dir <- "./data/processed_data/predictors/Prediction_grid_v1.1"
+
+if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
+
+pred_tr_list <- lapply(names(buff_by_date), function(d) {
+  message("Processing date: ", d)
+  
+  pred_raw <- buff_by_date[[d]] %>%  # one sf per date
+    # replace "ws" by "wind" in colnames
+    rename_with(~ gsub("^ws_", "wind_", .x)) %>%
+    # remove "_month" in colnames
+    rename_with(~ gsub("_month$", "", .x))
+  
+  pred_tr <- transform_pred(pred_raw, base_log_vars)
+  
+  out_file <- file.path(
+    out_dir,
+    paste0("grid_v1.0_", d, "_with_predictors-tr_v1.1.gpkg")
+  )
+  
+  st_write(pred_tr, out_file, delete_dsn = TRUE)
+  
+  pred_tr
+})
+
+names(pred_tr_list) <- names(buff_by_date)
 

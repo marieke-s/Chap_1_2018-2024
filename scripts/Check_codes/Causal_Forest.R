@@ -88,42 +88,6 @@ tot <- pred %>%
   left_join(div, by = "replicates")
 
 
-##----------------------------------------------------------
-## Optional: train / eval split and TOC / AUTOC
-##----------------------------------------------------------
-
-# Example of a simple train/eval split to see if the forest captures heterogeneity
-set.seed(123)
-n <- nrow(X_mat)
-train_idx <- sample(1:n, floor(n / 2))
-eval_idx  <- setdiff(1:n, train_idx)
-
-train_cf <- causal_forest(
-  X_mat[train_idx, , drop = FALSE],
-  Y[train_idx],
-  W[train_idx],
-  Y.hat = Y_hat[train_idx],
-  W.hat = W_hat[train_idx]
-)
-
-eval_cf <- causal_forest(
-  X_mat[eval_idx, , drop = FALSE],
-  Y[eval_idx],
-  W[eval_idx],
-  Y.hat = Y_hat[eval_idx],
-  W.hat = W_hat[eval_idx]
-)
-
-rate <- rank_average_treatment_effect(
-  eval_cf,
-  predict(train_cf, X_mat[eval_idx, , drop = FALSE])$predictions
-)
-
-cat("\nRank-based AUTOC estimate:\n")
-print(rate)
-
-plot(rate)
-title("TOC curve and AUTOC (treatment effect heterogeneity)")
 
 
 ############################################################
@@ -139,7 +103,7 @@ library(dplyr)
 ##----------------------------------------------------------
 ## 0. User inputs: where to save results
 ##----------------------------------------------------------
-results_dir <- "./output/models/causal_forest/bathy_mean/"
+results_dir <- "./output/models/causal_forest/gravity/"
 
 if (!dir.exists(results_dir)) {
   dir.create(results_dir, recursive = TRUE)
@@ -164,11 +128,10 @@ pred_nongeom <- sf::st_drop_geometry(pred)
 
 X <- pred_nongeom %>%
   dplyr::select(
-    -grouped_main_habitat,
-    -x,
-    -y,
-    -replicates
+    c('cop_chl_month_mean_log', 'shore_dist_m_weight_log', 'canyon_dist_m_weight_log', 'port_dist_m_weight', 'bathy_mean')
   )
+
+names(X)
 
 X_mat <- as.matrix(X)
 
@@ -181,7 +144,7 @@ X_mat <- as.matrix(X)
 # Example placeholder: using a dummy binary treatment from some column
 # W <- as.numeric(pred_nongeom$some_binary_column)
 names(pred_nongeom)
-W <- pred_nongeom$bathy_mean
+W <- pred_nongeom$gravity_mean
 
 if (!exists("W")) {
   stop("You must define W (numeric treatment variable) before running this script.")
@@ -196,11 +159,11 @@ if (!is.numeric(W)) stop("W must be numeric (binary or continuous).")
 set.seed(123)
 
 cat("Fitting regression forest for Y.hat...\n")
-forest_Y <- regression_forest(X_mat, Y, tune.parameters = "all")
+forest_Y <- regression_forest(X_mat, Y, tune.parameters = "all", num.trees = 200)
 Y_hat <- predict(forest_Y)$predictions
 
 cat("Fitting regression forest for W.hat...\n")
-forest_W <- regression_forest(X_mat, W, tune.parameters = "all")
+forest_W <- regression_forest(X_mat, W, tune.parameters = "all", num.trees = 200)
 W_hat <- predict(forest_W)$predictions
 
 ##----------------------------------------------------------
@@ -216,6 +179,146 @@ cf <- causal_forest(
   num.trees    = 2000,
   tune.parameters = "all"
 )
+
+
+
+
+
+
+#------------------------- With train / test ---------------------
+
+##----------------------------------------------------------
+## 1. Data: pred (sf) and div$R must already be in environment
+##----------------------------------------------------------
+# Check objects
+if (!exists("pred")) stop("Object 'pred' not found.")
+if (!exists("div"))  stop("Object 'div' not found.")
+if (!("R" %in% names(div))) stop("div$R not found.")
+
+Y <- div$R
+if (!is.numeric(Y)) stop("div$R must be numeric.")
+if (nrow(pred) != length(Y)) stop("nrow(pred) and length(div$R) differ.")
+
+##----------------------------------------------------------
+## 2. Build covariate matrix X
+##----------------------------------------------------------
+pred_nongeom <- sf::st_drop_geometry(pred)
+
+X <- pred_nongeom %>%
+  dplyr::select(
+    c(
+      "cop_chl_month_mean_log",
+      "shore_dist_m_weight_log",
+      "canyon_dist_m_weight_log",
+      "port_dist_m_weight",
+      "bathy_mean"
+    )
+  )
+
+names(X)
+
+X_mat <- as.matrix(X)
+
+##----------------------------------------------------------
+## 3. Define treatment variable W (continuous gravity_mean)
+##----------------------------------------------------------
+names(pred_nongeom)
+W <- pred_nongeom$gravity_mean
+
+if (!exists("W")) {
+  stop("You must define W (numeric treatment variable) before running this script.")
+}
+
+if (length(W) != nrow(pred)) stop("W must have same length as rows in pred.")
+if (!is.numeric(W)) stop("W must be numeric (binary or continuous).")
+
+
+## 4. Train–test split ---------------------
+
+set.seed(0)  # for reproducibility
+
+n <- nrow(X_mat)
+test_frac <- 0.2
+test_size <- floor(test_frac * n)
+
+test_idx  <- sample(1:n, size = test_size)
+train_idx <- setdiff(1:n, test_idx)
+
+X_train <- X_mat[train_idx, , drop = FALSE]
+X_test  <- X_mat[test_idx,  , drop = FALSE]
+
+Y_train <- Y[train_idx]
+Y_test  <- Y[test_idx]
+
+W_train <- W[train_idx]
+W_test  <- W[test_idx]  # not strictly needed, but kept for completeness
+
+##----------------------------------------------------------
+## 5. Nuisance models for outcome and treatment (on TRAIN only)
+##----------------------------------------------------------
+set.seed(123)
+
+cat("Fitting regression forest for Y.hat on TRAIN data...\n")
+forest_Y <- regression_forest(
+  X_train,
+  Y_train,
+  tune.parameters = "all",
+  num.trees = 200
+)
+Y_hat_train <- predict(forest_Y)$predictions
+
+cat("Fitting regression forest for W.hat on TRAIN data...\n")
+forest_W <- regression_forest(
+  X_train,
+  W_train,
+  tune.parameters = "all",
+  num.trees = 200
+)
+W_hat_train <- predict(forest_W)$predictions
+
+##----------------------------------------------------------
+## 6. Fit causal forest on TRAIN data
+##----------------------------------------------------------
+cat("Fitting causal forest on TRAIN data...\n")
+cf <- causal_forest(
+  X            = X_train,
+  Y            = Y_train,
+  W            = W_train,
+  Y.hat        = Y_hat_train,
+  W.hat        = W_hat_train,
+  num.trees    = 2000,
+  tune.parameters = "all"
+)
+
+print(cf)
+
+## Optional: ATE on train set
+ate_train <- average_treatment_effect(cf)
+cat("\nATE on training data:\n")
+print(ate_train)
+
+##----------------------------------------------------------
+## 7. Predict CATEs (treatment effects) on TEST data
+##----------------------------------------------------------
+# This is analogous to: t_effect_test = cf.effect(X_test) in Python
+t_effect_test <- predict(cf, X_test)$predictions  # vector of CATEs on test set
+
+cat("\nFirst 10 estimated treatment effects on TEST data:\n")
+print(head(t_effect_test, 10))
+
+## Optionally, inspect distribution on test set
+hist(
+  t_effect_test,
+  breaks = 30,
+  main = "Estimated treatment effects on TEST set",
+  xlab = "tau(x) on test"
+)
+
+## Optionally, compare with Y_test (purely exploratory, not causal)
+cat("\nSummary of Y_test:\n")
+print(summary(Y_test))
+
+
 
 ##----------------------------------------------------------
 ## 6. Extract ATE, tau_hat, variable importance
