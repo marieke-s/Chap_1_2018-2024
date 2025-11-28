@@ -325,6 +325,14 @@ st_write(pred_tr, "./data/processed_data/predictors/predictors_tr_v1.2.gpkg", ap
 # selected predictors : 
 
 
+
+
+
+
+
+
+
+
 #----------------- AUTRES -----------------
 #---- Visualise selected pred ----
 method = 'vifcor' # 'vifcor'
