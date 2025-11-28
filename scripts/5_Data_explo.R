@@ -75,7 +75,6 @@ mtdt <- pred_raw %>%
   left_join(mtdt, by = "replicates") %>%
   filter(replicates %in% mtdt$replicates)
 
-
 # Add coordinates to div
 div<- pred_raw %>%
   dplyr::select(c(x,y,replicates)) %>%
@@ -1178,13 +1177,7 @@ summary_tbl <- diag_tbl %>%
 print(summary_tbl, n = Inf)
  readr::write_csv(summary_tbl, "./output/predictors_raw_v1.2_variance_outliers_norm.csv")
 
-#--- Boats detection (befor extraction) ----
-# read nc file -----
-corse <- nc_open("./data/raw_data/predictors/Boats/boats_med_2018_2024_bymonth/boats_corse_100m.nc")
-fr <- nc_open("./data/raw_data/predictors/Boats/boats_med_2018_2024_bymonth/boats_metropole_100m.nc")
-corse
-fr
-
+#--- BOATS (before extraction) ----
 
 # Explore ncdf ----
 library(ncdf4)
@@ -1331,51 +1324,50 @@ for (i in seq_along(ym)) {
 
 
 
-# Export specific month as raster ----
-library(raster)
-
-# Example: August 2023
-target_ym <- "202308"
-k <- which(ym == target_ym)
-
-if (length(k) != 1) stop("Yearmonth not found or ambiguous.")
-
-# boats[lon, lat, month]
-m <- boats[,,k]  # matrix
-
-# If lat is ascending but raster expects top-to-bottom, you may need to flip
-# Check orientation:
-# lat[1:5]; tail(lat)
-# If lat increases from bottom to top, flip the matrix:
-if (lat[1] < lat[length(lat)]) {
-  m <- m[, ncol(m):1]   # flip in 'lat' direction
-  lat_use <- rev(lat)
-} else {
-  lat_use <- lat
-}
-
-r <- raster(
-  nrows = length(lat_use),
-  ncols = length(lon),
-  xmn   = min(lon),
-  xmx   = max(lon),
-  ymn   = min(lat_use),
-  ymx   = max(lat_use),
-  crs   = "EPSG:3857"
-)
-
-values(r) <- as.vector(m)
-
-r
 
 
+#--- BOATS (after extraction) ----
+boats <- st_read("./data/processed_data/predictors/Boats/mtdt_7_boats_month_ALL.gpkg")
+plot(boats)
+sf::sf_use_s2(FALSE)
+coords <- st_coordinates(st_centroid(boats))
 
-plot(r, main = paste("Boats – Corse –", target_ym))
+boats <- boats %>%
+  mutate(
+    x = coords[, 1],
+    y = coords[, 2]
+  )
 
-# write to file
-writeRaster(r,
-            filename = paste0("boats_corse_", target_ym, ".tif"),
-            overwrite = TRUE)
+
+# Map + hist + summary : boats -----
+
+
+# all together
+map_index_plots(df = boats, version = "with_mtdt7", output_directory = "./figures/Predictors/Explo_raw/Map_Hist", cols_to_plot = c("Boat_density_month"))
+
+
+# by season | month | year | yearmonth
+boats$date <- as.Date(boats$date)
+boats <- boats %>%
+  mutate(
+    year = year(date),
+    month = month(date),
+    season = case_when(
+      month %in% c(1, 2, 3) ~ "Winter",
+      month %in% c(4, 5, 6) ~ "Spring",
+      month %in% c(7, 8, 9) ~ "Summer",
+      month %in% c(10, 11, 12) ~ "Autumn",
+      TRUE ~ NA_character_),
+    yearmonth = format(date, "%Y%m"))
+
+
+
+map_index_plots(df = boats, 
+                version = "with_mtdt7_by_month", 
+                output_directory = "./figures/Predictors/Explo_raw/Map_Hist/by_season", 
+                cols_to_plot = c("Boat_density_month"),
+                factor = "month", 
+                panel_text_scale = "s")
 
 
 

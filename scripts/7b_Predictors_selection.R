@@ -31,15 +31,11 @@ library(pMEM)
 source("./utils/Fct_Data-Prep.R")
 
 #------------- Load data ------------------
-# predictors_tr_v.1.1 ----
-pred <- st_read("./data/processed_data/predictors/predictors_tr_v1.1.gpkg")
-# predictors_tr_v.1.2 ----
-pred <- st_read("./data/processed_data/predictors/predictors_tr_v1.2.gpkg")
+# predictors_tr_v.1.3 ----
+pred <- st_read("./data/processed_data/predictors/predictors_tr_v1.3.gpkg")
 
-# mtdt_7_sel_v1.0 ----
-mtdt <- st_read("./data/processed_data/Mtdt/mtdt_7_sel_v1.0.gpkg")
 # mtdt_7_sel_v1.1 ----
-mtdt <- st_read("./data/processed_data/Mtdt/mtdt_7_sel_v1.1.gpkg")
+mtdt <- st_read("./data/processed_data/Mtdt/mtdt_7_sel_v1.1.gpkg") # no lockdown, automn-winter, > 50m sites
 
 #---------------- REMOVE ROWS BASED ON SITE SELECTION -----
 
@@ -287,47 +283,47 @@ sel <- sel %>%
 # st_write(sel, "./data/processed_data/predictors/predictors_sel_v1.1.gpkg", delete_dsn = TRUE)
 # 
 
+# based on predictors_raw_v2.2
+# transformations : Remove 0 variance predictors, Replace negative distance values by 0, CLT of habitat composition, Log when max value >/= to 10*median, Standard scale all --> same as predictors_tr_v1.1 BUT x and y are not scales nor log --> raw. + takes into account for negative values in log transformation
+st_write(pred_tr, "./data/processed_data/predictors/predictors_tr_v1.2.gpkg", append = FALSE)
+
+
+# # Export predictors_raw_sel_v1.3.gpkg ----
+# # based on predictors_raw_v2.2 and predictors_sel_v1.3 
+# # selects the same predictors and rows but from RAW predictors (for data explo)
+# 
+# pred_raw <- st_read("./data/processed_data/predictors/predictors_raw_v2.2.gpkg")
+# predictors_sel_v1.3 <- st_read("./data/processed_data/predictors/predictors_sel_v1.3.gpkg")
+# 
+# sel_raw <- pred_raw %>%
+#   dplyr::filter(replicates %in% predictors_sel_v1.3$replicates) %>% 
+#   dplyr::select(c("replicates",
+#                   "grouped_main_habitat",
+#                   "x",
+#                   "y",
+#                   "aspect_mean",
+#                   "tpi_mean",
+#                   "port_dist_m_weight",
+#                   "grouped_nb_habitat_per_km2",
+#                   "bathy_mean",
+#                   "wind_mean_1m",
+#                   "vel_mean_1m",
+#                   "temp_mean_1m",
+#                   "sal_mean_1m",
+#                   "canyon_dist_m_weight",
+#                   "mpa_dist_m_weight",
+#                   "shore_dist_m_weight",
+#                   "gravity_mean",
+#                   "cop_chl_month_mean",
+#                   "geom"))
+# 
+# st_write(sel_raw, "./data/processed_data/predictors/predictors_raw_sel_v1.3.gpkg", delete_dsn = TRUE)
+
 # Export predictors_sel_v1.3.gpkg ----
-# based on mtdt_7_sel_v1.1.gpkg (637 obs) and predictors_tr_v1.2.gpkg (142 var + replicates) 
-# selected predictors (16 + + x, y, replicates, geom):
-# [1] "grouped_main_habitat"       "x"                          "y"                         
-# [4] "replicates"                 "northness"                  "eastness"                  
-# [7] "tpi_mean_log"               "port_dist_m_weight"         "grouped_nb_habitat_per_km2"
-# [10] "bathy_mean"                 "wind_mean_1m"               "vel_mean_1m"               
-# [13] "temp_mean_1m"               "sal_mean_1m"                "canyon_dist_m_weight_log"  
-# [16] "mpa_dist_m_weight_log"      "shore_dist_m_weight_log"    "gravity_mean_log"          
-# [19] "cop_chl_month_mean_log"    "geom" 
-st_write(sel, "./data/processed_data/predictors/predictors_sel_v1.3.gpkg", delete_dsn = TRUE)
-# Export predictors_raw_sel_v1.3.gpkg ----
-# based on predictors_raw_v2.2 and predictors_sel_v1.3 
-# selects the same predictors and rows but from RAW predictors (for data explo)
+# Export predictors_sel_v1.4.gpkg ----
+# based on predictors_tr_v1.3 (from predictors_raw_3.0 - with boats and habitat 2) 
+# selected predictors : 
 
-pred_raw <- st_read("./data/processed_data/predictors/predictors_raw_v2.2.gpkg")
-predictors_sel_v1.3 <- st_read("./data/processed_data/predictors/predictors_sel_v1.3.gpkg")
-
-sel_raw <- pred_raw %>%
-  dplyr::filter(replicates %in% predictors_sel_v1.3$replicates) %>% 
-  dplyr::select(c("replicates",
-                  "grouped_main_habitat",
-                  "x",
-                  "y",
-                  "aspect_mean",
-                  "tpi_mean",
-                  "port_dist_m_weight",
-                  "grouped_nb_habitat_per_km2",
-                  "bathy_mean",
-                  "wind_mean_1m",
-                  "vel_mean_1m",
-                  "temp_mean_1m",
-                  "sal_mean_1m",
-                  "canyon_dist_m_weight",
-                  "mpa_dist_m_weight",
-                  "shore_dist_m_weight",
-                  "gravity_mean",
-                  "cop_chl_month_mean",
-                  "geom"))
-
-st_write(sel_raw, "./data/processed_data/predictors/predictors_raw_sel_v1.3.gpkg", delete_dsn = TRUE)
 
 #----------------- AUTRES -----------------
 #---- Visualise selected pred ----

@@ -429,35 +429,13 @@ pred_tr[, num] <- scale(pred_tr[, num] %>% st_drop_geometry())
 # st_write(pred_tr, "./data/processed_data/predictors/predictors_tr_v1.1.gpkg", append = FALSE)
 
 
-# predictors_tr_v1.2 ----
 # based on predictors_raw_v2.2
 # transformations : Remove 0 variance predictors, Replace negative distance values by 0, CLT of habitat composition, Log when max value >/= to 10*median, Standard scale all --> same as predictors_tr_v1.1 BUT x and y are not scales nor log --> raw. + takes into account for negative values in log transformation
 st_write(pred_tr, "./data/processed_data/predictors/predictors_tr_v1.2.gpkg", append = FALSE)
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+# predictors_tr_v1.3 -----
+# based on predictors_raw_v3.0
+# transformations : Remove 0 variance predictors, Replace negative distance values by 0, CLT of habitat composition, Log when max value >/= to 10*median, Standard scale all --> same as predictors_tr_v1.1 BUT x and y are not scales nor log --> raw. + takes into account for negative values in log transformation
+st_write(pred_tr, "./data/processed_data/predictors/predictors_tr_v1.3.gpkg", append = FALSE)
 

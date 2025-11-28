@@ -200,11 +200,15 @@ sapply(buff, function(x) sum(is.na(x)))
 
 
 
-####### [[ TODO Vessel presence (Luka|Pauline) ]] ############
+####### Boats (Luka) ############
+# Load csv file
+boats <- read.csv("./data/processed_data/predictors/Boats/mtdt_7_boats_month_ALL.csv")
 
+# Merge to buff 
 
-
-
+buff <- buff %>% left_join(boats, by = "replicates")
+  
+names(buff)
 
 
 
@@ -918,7 +922,7 @@ rm(rast, rast_grouped)
 # 13	Herbier mixte a Zostera noltii, Zostera marina, Cymodocea nodosa et Ruppia cirrhosa
 # 14	Herbiers a Zostera noltei
 
-# Load & prep predictors_raw_v1.2 ----
+# Load & prep predictors_raw_v2.2 ----
 buff <- st_read("./data/processed_data/predictors/predictors_raw_v2.2.gpkg")
 
 # Remove habitat cols from buff 
@@ -1012,8 +1016,9 @@ buff1 <- calculate_habitats_nn(
   name           = "grouped_"      # or e.g. "hab_"
   # k_nearest    = 3       # default is 3, can change if needed
 )
-st_write(buff1, "./data/processed_data/predictors/predictors_raw_v2.0_temp1.gpkg", delete_dsn = TRUE)
+st_write(buff1, "./data/processed_data/predictors/predictors_raw_v2.0_temp-buff1.gpkg", delete_dsn = TRUE)
 rm(grouped_rast)
+buff1 <- st_read("./data/processed_data/predictors/predictors_raw_v2.0_temp-buff1.gpkg")
 
 buff2 <- calculate_habitats_nn(
   buff           = buff,
@@ -1025,89 +1030,37 @@ buff2 <- calculate_habitats_nn(
 )
 st_write(buff2, "./data/processed_data/predictors/predictors_raw_v2.0_temp1.gpkg", delete_dsn = TRUE)
 rm(rast)
+buff2 <- st_read("./data/processed_data/predictors/predictors_raw_v2.0_temp1.gpkg")
 
+names(buff2)
 
+# Merge ----
+extra_cols <- setdiff(names(buff1), names(buff))
+extra_cols2 <- setdiff(names(buff2), names(buff))
 
-#============= Save temp file =============
-st_write(buff2, "./data/processed_data/predictors/predictors_raw_v2.0_temp2.gpkg", delete_dsn = TRUE)
-#==========================================
-
-# Merge back NA values -----
-
-# Merge buff1 and buff 2 by replicates 
-buff12 <- buff1 %>%
-  dplyr::select(-area_km2) %>%
+# left_join keeps all rows in buff and brings matching columns from dist by 'replicates'
+buff <- buff %>%
   left_join(
-    buff2 %>% st_drop_geometry() %>% dplyr::select(-area_km2),
+    buff1 %>% 
+      st_drop_geometry() %>% 
+      dplyr::select(replicates, dplyr::all_of(extra_cols)),
+    by = "replicates"
+  ) %>%
+  left_join(
+    buff2 %>% 
+      st_drop_geometry() %>% 
+      dplyr::select(replicates, dplyr::all_of(extra_cols2)),
     by = "replicates"
   )
 
-sapply(buff12, function(x) sum(is.na(x)))
-
-# For replicates in buff12, replace the hab_cols columns in buff with those in buff12
-
-hab_cols <- colnames(buff12[, -1] %>% sf::st_drop_geometry())
-hab_cols <- intersect(hab_cols, names(buff))
+names(buff)
+rm(buff1, buff2, extra_cols, extra_cols2)
 
 
-# match buff$replicates to buff12$replicates
-idx <- match(buff$replicates, buff12$replicates)
-
-# which rows in buff have a match in buff12?
-rows_to_update <- !is.na(idx)
-
-# replace values in buff[rows_to_update, hab_cols] 
-# with the corresponding rows from buff12
-buff[rows_to_update, hab_cols] <- buff12[idx[rows_to_update], hab_cols] %>% sf::st_drop_geometry()
-
-
-
-
-
-
-
-
-
-
-
-
-# Check and Clean up -----
-# Check na again and clean 
-
-habitat_cols <- c("main_habitat", "grouped_main_habitat", "grouped_main_habitat", "grouped_nb_habitat_per_km2")
-buff_na <- buff %>%
-  filter(if_any(all_of(habitat_cols), is.na)) 
-
-# if buff_na = 0 rows then clean up 
-
-if(nrow(buff_na) == 0){
-  message("No more NA in main habitat and nb hab per km2")
-  rm(buff_na, buff1, buff2, buff12, hab_cols, habitat_cols, idx, rows_to_update)
-} else {
-  message( "/!\ Remaining NA !")
-}
-
-
-# Handle habitats proportions (grouped only) -----
+# Habitats proportions (grouped only) -----
 
 # Habitats (base names, must match layers in rast_grouped)
-habitats <- c(
-  "algues_infralittorales",
-  "matte_morte_p_oceanica",
-  "coralligenous",
-  "rock",
-  "soft_bottom",
-  "meadow",
-  "habitats_artificiels"
-)
-
-mean_cols <- paste0(habitats, "_mean")
-
-## 1. Remove old habitat mean columns if present
-buff <- buff %>%
-  dplyr::select(-any_of(mean_cols))
-
-## 2. Compute weighted means of each habitat within buffers
+## 1. Compute weighted means of each habitat within buffers
 
 buff <- sf::st_as_sf(buff)
 df   <- buff
@@ -1212,11 +1165,11 @@ buff <- df %>% dplyr::select(-overlap)
 
 ## Summary of what we did : 
 
-# | Case                              | Habitat value source                       | Final proportions      |
+#   | Case                              | Habitat value source                       | Final proportions      |
 #   | --------------------------------- | ------------------------------------------ | ---------------------- |
 #   | **Polygon overlaps raster**       | Weighted means from `spatial_extraction()` | mean_i / sum(mean_all) |
 #   | **Polygon outside raster extent** | Sum of 3 nearest pixels per habitat        | sum_i / sum(sum_all)   |
-#   
+
 
 
 
@@ -1681,7 +1634,6 @@ st_write(pred, "./data/processed_data/predictors/predictors_raw_v1.2.gpkg", appe
 
 
 # Export predictors_raw_v2.0 ----
-# predictors_raw_v2.0
 # 11/11/2025. 
 # ROWS
 # Based on mtdt_7.gpkg 
@@ -1746,7 +1698,6 @@ st_write(pred, "./data/processed_data/predictors/predictors_raw_v2.0.gpkg", appe
 
 
 # Export predictors_raw_v2.1 ----
-# predictors_raw_v2.0
 # 12/11/2025. 
 # ROWS
 # Based on mtdt_7.gpkg, same as predictors_raw_v2.0
@@ -1763,7 +1714,6 @@ pred <- st_read("./data/processed_data/predictors/predictors_raw_v2.0.gpkg") %>%
 st_write(pred, "./data/processed_data/predictors/predictors_raw_v2.1.gpkg", append = FALSE)
 
 # Export predictors_raw_v2.2 ----
-# predictors_raw_v2.0
 # 12/11/2025. 
 # ROWS
 # Based on mtdt_7.gpkg, same as predictors_raw_v2.1
@@ -1779,4 +1729,16 @@ pred <- x # (after modifications in the habitat section and in the CLEAN UP BUFF
 # export
 st_write(x, "./data/processed_data/predictors/predictors_raw_v2.2.gpkg", append = FALSE)
 
-#------------- Add boat detection ----------------
+# Export predictors_raw_v3.0 ---
+# 28/11/2025. 
+# ROWS
+# Based on mtdt_7.gpkg, same as predictors_raw_v2 : accounting for no detection samples 
+# PREDICTORS :  
+#  --- Key changes ---
+# Boat detection added 
+# Habitat including "Zone bathyale"
+
+st_write(x, "./data/processed_data/predictors/predictors_raw_v3.0.gpkg", append = FALSE)
+
+
+
