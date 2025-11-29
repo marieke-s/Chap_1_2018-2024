@@ -95,14 +95,7 @@ mtdt <- mtdt %>%
       TRUE ~ NA_character_
     ))
 
-# Add area_km2 and dist_seabed_depthsampling, bathy_mean, bathy_max to mtdt
-mtdt <- mtdt %>%
-  left_join(
-    pred_raw %>%
-      st_drop_geometry() %>%
-      dplyr::select(replicates, area_km2, dist_seabed_depthsampling)
-    , by = "replicates"
-  )
+
 
 # Replace month number by month name
 mtdt <- mtdt %>%
@@ -112,6 +105,18 @@ mtdt <- mtdt %>%
 
 mtdt$season <- factor(mtdt$season,
                       levels = c("Winter", "Spring", "Summer", "Autumn"))
+
+
+# Add area_km2 and dist_seabed_depthsampling, bathy_mean, bathy_max to mtdt
+mtdt <- mtdt %>%
+  left_join(
+    pred_raw %>%
+      st_drop_geometry() %>%
+      dplyr::select(replicates, area_km2, dist_seabed_depthsampling)
+    , by = "replicates"
+  )
+
+
 
 # Add bathy_mean and bathy_max to mtdt
 mtdt <- mtdt %>%

@@ -1729,7 +1729,7 @@ pred <- x # (after modifications in the habitat section and in the CLEAN UP BUFF
 # export
 st_write(x, "./data/processed_data/predictors/predictors_raw_v2.2.gpkg", append = FALSE)
 
-# Export predictors_raw_v3.0 ---
+# Export predictors_raw_v3.0 -----
 # 28/11/2025. 
 # ROWS
 # Based on mtdt_7.gpkg, same as predictors_raw_v2 : accounting for no detection samples 

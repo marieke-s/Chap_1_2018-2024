@@ -1428,3 +1428,63 @@ plot_distributions <- function(data,
     }
   }
 }
+
+#---------------------------------- Function : temporal variation plots --------------------
+library(ggplot2)
+library(rlang)
+
+plot_temporal_var <- function(data, x, y, output_file = NULL) {
+  # tidy-eval of column names
+  xq <- enquo(x)
+  yq <- enquo(y)
+  
+  if (!"year" %in% names(data)) {
+    stop("Column 'year' must be present in 'data' (use mutate(year = lubridate::year(date)) etc.)")
+  }
+  
+  x_name <- quo_name(xq)
+  y_name <- quo_name(yq)
+  
+  # default labels from column names
+  title_txt <- paste("Temporal variation of", y_name)
+  ylab_txt  <- y_name
+  
+  p <- ggplot(data, aes(x = !!xq,
+                        y = !!yq,
+                        group = year,
+                        color = as.factor(year))) +
+    geom_line(alpha = 0.5, size = 1) +
+    geom_point(size = 2, alpha = 0.7) +
+    geom_smooth(method = "loess",
+                se = FALSE,
+                color = "black",
+                size = 1.2,
+                linetype = "dashed") +
+    labs(
+      title = title_txt,
+      x = x_name,
+      y = ylab_txt,
+      color = "Year"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x  = element_text(angle = 45, hjust = 1, size = 12),
+      axis.text.y  = element_text(size = 12),
+      axis.title   = element_text(size = 14, face = "bold"),
+      plot.title   = element_text(size = 16, face = "bold", hjust = 0.5),
+      legend.text  = element_text(size = 12),
+      legend.title = element_text(size = 14, face = "bold")
+    ) +
+    scale_color_viridis_d()
+  
+  # use date scale if x is a Date/POSIXct
+  if (inherits(data[[x_name]], c("Date", "POSIXct", "POSIXt"))) {
+    p <- p + scale_x_date(date_labels = "%b %Y", date_breaks = "3 months")
+  }
+  
+  if (!is.null(output_file)) {
+    ggsave(output_file, p, width = 12, height = 10, dpi = 300)
+  }
+  
+  p
+}
