@@ -323,7 +323,7 @@ st_write(pred_tr, "./data/processed_data/predictors/predictors_tr_v1.2.gpkg", ap
 # Export predictors_sel_v1.4.gpkg ----
 # based on predictors_tr_v1.3 (from predictors_raw_3.0 - with boats and habitat 2) 
 # selected predictors : 
-
+st_write(sel, "./data/processed_data/predictors/predictors_sel_v1.4.gpkg", delete_dsn = TRUE)
 
 
 

@@ -574,3 +574,8 @@ min(dist_values/1000) # 0
 
 
 
+
+
+
+
+#------------- Spatial cross-validation for xgboost ------------------
