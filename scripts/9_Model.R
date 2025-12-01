@@ -232,16 +232,69 @@ extract_fold_df <- function(cv_object, fold_id, keep_geometry = FALSE) {
 }
 
 for (X in 1:10) {
+  
+  # Build the fold df + convert back to sf
   f <- extract_fold_df(bloo50, fold_id = X) %>% 
     st_as_sf(coords = c("x", "y"), crs = 4326, remove = FALSE)
+  
+  # Build plot
   p <- ggplot() +
     geom_sf(data = f, aes(color = set), size = 1) +
     scale_color_manual(values = c("train" = "blue", "test" = "red")) +
-    labs(title = "BLOO CV Fold 3: Train (blue) vs Test (red)") +
+    labs(title = paste("BLOO CV", X, ": Train (blue) vs Test (red)")) +
     theme_minimal()
+  
+  # Print to RStudio plotting window
   print(p)
+  
+  # Save plot
+  filename <- sprintf("./figures/Cross-val/Map_Bloo50_fold%d_T0.0.png", X)
+  ggsave(filename, plot = p, width = 7, height = 6, dpi = 300)
 }
 
+
+
+# Panel plot of 12 randomly selected folds
+set.seed(123)  # for reproducibility
+
+# 1) Randomly select 12 distinct folds from BLOO CV
+n_folds_total <- length(bloo50)
+n_sample      <- 12
+
+fold_ids_sample <- sample(seq_len(n_folds_total), size = n_sample)
+
+# 2) Build combined sf object for these folds
+panel_data <- map_dfr(fold_ids_sample, function(fid) {
+  df <- extract_fold_df(bloo50, fold_id = fid)
+  df$panel_fold <- paste0("Fold ", fid)  # label for facet
+  df
+})
+
+panel_data_sf <- panel_data %>%
+  st_as_sf(coords = c("x", "y"), crs = 4326, remove = FALSE)
+
+# 3) Build 4 x 3 panel plot
+p_panel <- ggplot(panel_data_sf) +
+  geom_sf(aes(color = set), size = 0.8) +
+  scale_color_manual(values = c(train = "blue", test = "red")) +
+  facet_wrap(~ panel_fold, ncol = 4) +
+  labs(
+    title    = "BLOO CV (50 km) – Sample of 12 Folds",
+    subtitle = "Train (blue) vs Test (red)",
+    color    = "Set"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    strip.text = element_text(size = 11, face = "bold"),
+    legend.position = "bottom"
+  )
+
+# 4) Print to device
+print(p_panel)
+
+# 5) Save single figure
+outfile <- "./figures/Cross-val/Map_Bloo50_12folds_T0.0.png"
+ggsave(outfile, plot = p_panel, width = 10, height = 8, dpi = 300)
 
 
 # --- Check distances ---
@@ -692,69 +745,75 @@ if (st_crs(tot_sf_4326)$epsg != 4326) {
 }
 stopifnot(nrow(predictors) == nrow(tot_sf_4326))
 
-
-
-
-
-# --- Random CV: 20% test / 80% train ---
+# --- Random K-fold CV: 5 folds (~20% each) ---
 set.seed(123)  # for reproducibility
 
-n        <- nrow(tot_sf_4326)
-test_prop <- 0.2
-n_test    <- floor(test_prop * n)
-n_folds   <- 5  # number of random splits / repeats (change if you wish)
+n      <- nrow(tot_sf_4326)
+K      <- 5   # number of folds
 
-rand_cv <- vector("list", length = n_folds)
+# Random fold assignment: each point gets exactly one fold_id
+fold_id <- sample(rep(1:K, length.out = n))
 
-for (i in seq_len(n_folds)) {
-  test_idx  <- sample(seq_len(n), size = n_test, replace = FALSE)
-  train_idx <- setdiff(seq_len(n), test_idx)
+# Attach fold_id to sf (for mapping etc.)
+tot_sf_4326$fold_id <- factor(fold_id)
+
+# Build CV object: for fold k, test = fold k, train = all other folds
+rand_cv <- vector("list", length = K)
+
+for (k in seq_len(K)) {
+  test_idx  <- which(fold_id == k)
+  train_idx <- which(fold_id != k)
   
-  rand_cv[[i]] <- list(
+  rand_cv[[k]] <- list(
     train = tot_sf_4326[train_idx, ],
     test  = tot_sf_4326[test_idx, ]
   )
 }
 
-names(rand_cv) <- paste0("fold_", seq_len(n_folds))
+names(rand_cv) <- paste0("fold_", seq_len(K))
 
 # Optional: check fold sizes
 total_points <- nrow(tot_sf_4326)
-for (i in seq_along(rand_cv)) {
-  fold_points      <- nrow(rand_cv[[i]]$test)
+for (k in seq_along(rand_cv)) {
+  fold_points      <- nrow(rand_cv[[k]]$test)
   remaining_points <- total_points - fold_points
-  cat("Random CV - Fold ", i, ": test : ", fold_points,
+  cat("Random K-fold - Fold ", k, ": test : ", fold_points,
       ", train : ", remaining_points, "\n", sep = "")
 }
 
-# Random CV - Fold 1: test : 127, train : 510
-# Random CV - Fold 2: test : 127, train : 510
-# Random CV - Fold 3: test : 127, train : 510
-# Random CV - Fold 4: test : 127, train : 510
-# Random CV - Fold 5: test : 127, train : 510
+
+# Random K-fold - Fold 1: test : 128, train : 509
+# Random K-fold - Fold 2: test : 128, train : 509
+# Random K-fold - Fold 3: test : 127, train : 510
+# Random K-fold - Fold 4: test : 127, train : 510
+# Random K-fold - Fold 5: test : 127, train : 510
+
 
 
 # CV configs object for this run (only random CV)
 cv_configs <- list(rand20 = rand_cv)
 
-
-
 ## Check and map cv config ----
-# Map of folds (points colored by fold_id)
-ggplot(tot_sf_4326) +
-  geom_sf(aes(color = fold_id), size = 2, alpha = 0.8) +
-  labs(
-    title = "Random 5-fold CV (20% test each fold)",
-    color = "Fold"
+# ensure fold_id is a factor
+tot_sf_4326$fold_id <- factor(tot_sf_4326$fold_id)
+
+fold_levels <- levels(tot_sf_4326$fold_id)
+
+ggplot(panel_data) +
+  geom_sf(aes(color = set), size = 1) +
+  facet_wrap(~ panel_fold, ncol = 3) +
+  scale_color_manual(
+    values = c(train = "grey80", test = "red")
   ) +
-  theme_minimal()
-
-
-# Clean up
-rm(tot_sf_4326, n, n_test, test_prop, n_folds, rand_cv, fold_points, remaining_points, i)
-
-
-
+  labs(
+    title = "Random 5-fold CV",
+    subtitle = "Each panel: test fold in red, others as training (grey)",
+    color = "Set"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    strip.text = element_text(size = 14, face = "bold")
+  )
 
 
 
@@ -794,7 +853,7 @@ saveRDS(models_list, "./output/models/xgboost/T0.2.rds") # Response var = R
 
 ##  Evaluate performance ----
 perf <- evaluate_models(models_list)
-perf
+perf # 0.6446923
 
 # Per fold performance
 perf_folds <- evaluate_models(
@@ -802,6 +861,441 @@ perf_folds <- evaluate_models(
   cv_splits = cv_configs,
   output    = "fold"
 )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#-------------------------- T0.3 : XGBOOST : SPATIAL-CV-50km ---------------------
+## Description ----
+#--- Model : XGBOOST
+
+#--- Response var : 
+# from div_indices_v1.0_sel_v1.1.csv
+# R                                                                   
+
+
+#---- Predictors : 
+# from predictors_sel_v.1.3
+# [1] "northness"                  "eastness"                   "tpi_mean_log"               "port_dist_m_weight"        
+# [5] "grouped_nb_habitat_per_km2" "bathy_mean"                 "wind_mean_1m"               "vel_mean_1m"               
+# [9] "temp_mean_1m"               "sal_mean_1m"                "canyon_dist_m_weight_log"   "mpa_dist_m_weight_log"     
+# [13] "shore_dist_m_weight_log"    "gravity_mean_log"           "cop_chl_month_mean_log" 
+
+
+#--- CV config :                                                      <== CHANGE
+# spatial CV using blockCV::cv_spatial with spatial block sizes = 50 km, 100 km, 200 km
+
+
+#--- Perf :
+# R2 Pearson_Corr Spearman_Corr      MAE     RMSE AIC Response_Var Model    CV Train_Size
+# 1 0.2856066    0.5344218     0.5291810 11.65594 14.61688  NA            R   XGB  sp50         NA
+# 2 0.2068828    0.4548438     0.4501214 12.37006 15.33875  NA            R   XGB sp100         NA
+# 3 0.1839316    0.4288725     0.4002176 12.57053 15.69570  NA            R   XGB sp200         NA
+
+
+
+
+
+## Prep data for model ----
+# Extract predictors
+predictors <- pred %>% dplyr::select(-c("x", "y", "replicates", grouped_main_habitat)) %>%
+  st_drop_geometry()
+
+# Extract response variables
+ind <- div  %>% dplyr::select(("R"))
+
+
+
+
+## CV config -----
+# Convert tot to sf object
+tot_sf_4326 <- st_as_sf(tot, coords = c("x", "y"), crs = 4326, remove = FALSE) # make sure you keep "x" and "y" columns with remove = FALSE (the coordinates columns will be needed for spaMM)
+if (st_crs(tot_sf_4326)$epsg != 4326) {            
+  stop("Error: tot_sf_4326 is not in EPSG:4326 coordinate reference system.")
+}
+stopifnot(nrow(predictors) == nrow(tot_sf_4326))
+
+
+# Reproject to a metric CRS for correct km units (e.g. EPSG:3035)
+tot_sf_3035 <- st_transform(tot_sf_4326, 3035)
+
+library(blockCV)
+## Helper: build cv_config from cv_spatial() ---
+build_spatial_cv <- function(sf_3035,
+                             sf_4326,
+                             block_km,
+                             k_folds = 5,
+                             n_iter  = 100,
+                             seed    = 123) {
+  
+  message("\n--- Building spatial CV with block size = ", block_km, " km ---")
+  
+  block_size_m <- block_km * 1000
+  
+  spat_cv_obj <- cv_spatial(
+    x         = sf_3035,
+    column    = NULL,           # no response column used to balance classes
+    size      = block_size_m,   # metres, since CRS is metric
+    k         = k_folds,
+    hexagon   = TRUE,
+    selection = "random",
+    iteration = n_iter,
+    biomod2   = FALSE,
+    plot      = FALSE,          # <- avoid cv_plot / species argument issue
+    progress  = TRUE,
+    report    = TRUE,
+    seed      = seed
+  )
+  
+  # Summary table (same as what is printed)
+  print(spat_cv_obj$records)
+  
+  # Convert folds_list (indices) into your standard list(list(train=sf, test=sf))
+  folds_list <- spat_cv_obj$folds_list   # <--- THIS is the correct element
+  
+  this_cv <- lapply(seq_along(folds_list), function(i) {
+    idx_train <- folds_list[[i]][[1]]
+    idx_test  <- folds_list[[i]][[2]]
+    
+    list(
+      train = sf_4326[idx_train, ],
+      test  = sf_4326[idx_test, ]
+    )
+  })
+  
+  names(this_cv) <- paste0("fold_", seq_along(this_cv))
+  
+  return(this_cv)
+}
+
+## Build the three spatial CV configs ---
+sp50  <- build_spatial_cv(tot_sf_3035, tot_sf_4326, block_km = 50)
+sp100 <- build_spatial_cv(tot_sf_3035, tot_sf_4326, block_km = 100)
+sp200 <- build_spatial_cv(tot_sf_3035, tot_sf_4326, block_km = 200)
+
+# Fold sizes for a quick sanity check
+fold_sizes_sp50 <- purrr::map_dfr(
+  seq_along(sp50),
+  ~ tibble(
+    Fold    = .x,
+    n_test  = nrow(sp50[[.x]]$test),
+    n_train = nrow(sp50[[.x]]$train)
+  )
+)
+print(fold_sizes_sp50)
+
+#     Fold n_test n_train
+# 1     1    117     520
+# 2     2    125     512
+# 3     3    125     512
+# 4     4    117     520
+# 5     5    153     484
+
+
+
+
+
+fold_sizes_sp100 <- purrr::map_dfr(
+  seq_along(sp100),
+  ~ tibble(
+    Fold    = .x,
+    n_test  = nrow(sp100[[.x]]$test),
+    n_train = nrow(sp100[[.x]]$train)
+  )
+)
+
+print(fold_sizes_sp100)
+
+
+# Fold n_test n_train
+# 1     1    133     504
+# 2     2    121     516
+# 3     3    146     491
+# 4     4    108     529
+# 5     5    129     508
+
+
+
+
+
+fold_sizes_sp200 <- purrr::map_dfr(
+  seq_along(sp200),
+  ~ tibble(
+    Fold    = .x,
+    n_test  = nrow(sp200[[.x]]$test),
+    n_train = nrow(sp200[[.x]]$train)
+  )
+)
+print(fold_sizes_sp200)
+
+# Fold n_test n_train
+# 1     1     65     572
+# 2     2    214     423
+# 3     3    187     450
+# 4     4     33     604
+# 5     5    138     499
+
+
+
+
+
+## Combine into cv_configs for T0.3 ---
+cv_configs <- list(
+  sp50  = sp50,
+  sp100 = sp100,
+  sp200 = sp200
+)
+
+## Map  CV (e.g. 50 km, fold 1) ----
+# Combine test/train into one sf for a given fold
+extract_spatial_fold_df <- function(cv_object, fold_id) {
+  train_sf <- cv_object[[fold_id]]$train
+  test_sf  <- cv_object[[fold_id]]$test
+  
+  train_sf$set <- "train"
+  test_sf$set  <- "test"
+  
+  dplyr::bind_rows(train_sf, test_sf)
+}
+
+fold_id_example <- 2
+fold_sf <- extract_spatial_fold_df(sp50, fold_id_example)
+
+ggplot(fold_sf) +
+  geom_sf(aes(color = set), size = 1) +
+  scale_color_manual(values = c(train = "blue", test = "red")) +
+  labs(
+    title = paste0("Spatial CV (50 km) – Fold ", fold_id_example),
+    subtitle = "Train (blue) vs Test (red)"
+  ) +
+  theme_minimal()
+
+
+# Panel plot
+make_spatial_panel <- function(cv_obj, outfile, title_prefix) {
+  panel_sf <- purrr::map_dfr(seq_along(cv_obj), function(fid) {
+    sf_fold <- extract_spatial_fold_df(cv_obj, fold_id = fid)
+    sf_fold$fold_lab <- paste0("Fold ", fid)
+    sf_fold
+  })
+  
+  p <- ggplot(panel_sf) +
+    geom_sf(aes(color = set), size = 0.8) +
+    scale_color_manual(values = c(train = "blue", test = "red")) +
+    facet_wrap(~ fold_lab, ncol = 3) +
+    labs(
+      title    = paste0(title_prefix, " – 5-fold"),
+      subtitle = "Train (blue) vs Test (red)",
+      color    = "Set"
+    ) +
+    theme_minimal(base_size = 13) +
+    theme(
+      strip.text = element_text(size = 11, face = "bold"),
+      legend.position = "bottom"
+    )
+  
+  print(p)
+  ggsave(outfile, plot = p, width = 10, height = 8, dpi = 300)
+}
+
+make_spatial_panel(sp50,  "./figures/Cross-val/Map_spatialCV_50km_5folds_T0.3.png", "Spatial CV (50 km)")
+make_spatial_panel(sp100, "./figures/Cross-val/Map_spatialCV_100km_5folds_T0.3.png", "Spatial CV (100 km)")
+make_spatial_panel(sp200, "./figures/Cross-val/Map_spatialCV_200km_5folds_T0.3.png", "Spatial CV (200 km)")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Plots folds -----
+build_spatial_cv <- function(sf_3035,
+                             sf_4326,
+                             block_km,
+                             k_folds = 5,
+                             n_iter  = 100,
+                             seed    = 123) {
+  
+  message("\n--- Building spatial CV with block size = ", block_km, " km ---")
+  
+  block_size_m <- block_km * 1000
+  
+  spat_cv_obj <- cv_spatial(
+    x         = sf_3035,
+    column    = NULL,
+    size      = block_size_m,
+    k         = k_folds,
+    hexagon   = TRUE,
+    selection = "random",
+    iteration = n_iter,
+    biomod2   = FALSE,
+    plot      = FALSE,
+    progress  = TRUE,
+    report    = TRUE,
+    seed      = seed
+  )
+  
+  folds_list <- spat_cv_obj$folds_list
+  
+  this_cv <- lapply(seq_along(folds_list), function(i) {
+    idx_train <- folds_list[[i]][[1]]
+    idx_test  <- folds_list[[i]][[2]]
+    list(
+      train = sf_4326[idx_train, ],
+      test  = sf_4326[idx_test, ]
+    )
+  })
+  
+  names(this_cv) <- paste0("fold_", seq_along(this_cv))
+  
+  # return both items
+  return(list(
+    folds = this_cv,
+    obj   = spat_cv_obj
+  ))
+}
+
+
+
+sp50_full  <- build_spatial_cv(tot_sf_3035, tot_sf_4326, block_km = 50)
+sp100_full <- build_spatial_cv(tot_sf_3035, tot_sf_4326, block_km = 100)
+sp200_full <- build_spatial_cv(tot_sf_3035, tot_sf_4326, block_km = 200)
+
+sp50  <- sp50_full$folds
+sp100 <- sp100_full$folds
+sp200 <- sp200_full$folds
+
+sp50_obj  <- sp50_full$obj
+sp100_obj <- sp100_full$obj
+sp200_obj <- sp200_full$obj
+
+
+blocks50_sf <- st_as_sf(sp50_obj$blocks)
+
+ggplot() +
+  geom_sf(data = blocks50_sf, fill = NA, color = "black") +
+  geom_sf(data = tot_sf_4326, aes(color = "Points"), size = 0.8, alpha = 0.7) +
+  scale_color_manual(values = c("Points" = "blue")) +
+  labs(
+    title = "Spatial Blocks (50 km)",
+    subtitle = "Underlying hexagonal blocks generated by cv_spatial()"
+  ) +
+  theme_minimal()
+
+
+# add fold ID to each point
+fold_id_vec <- rep(NA, nrow(tot_sf_4326))
+
+for (k in seq_along(sp50)) {
+  idx_test <- rownames(sp50[[k]]$test)
+  idx_test <- as.numeric(idx_test)
+  fold_id_vec[idx_test] <- k
+}
+
+tot_sf_4326$fold_id <- factor(fold_id_vec)
+
+ggplot() +
+  geom_sf(data = blocks50_sf, fill = NA, color = "grey50") +
+  geom_sf(data = tot_sf_4326, aes(color = fold_id), size = 1) +
+  scale_color_viridis_d(na.value = "lightgrey") +
+  labs(
+    title = "Spatial CV (50 km) – Blocks + Fold Assignment",
+    color = "Fold"
+  ) +
+  theme_minimal()
+
+
+## Fit model ----------
+# Initialize list to store models
+models_list_T0.3 <- list()
+
+for (response_var in colnames(ind)) {
+  model <- fit_models(
+    dataset    = tot,
+    response_var = response_var,
+    predictors = colnames(predictors),
+    cv_configs = cv_configs,       # sp50, sp100, sp200
+    models     = c("XGB"),
+    distribution = NULL
+  )
+  models_list_T0.3[[response_var]] <- model
+}
+
+
+
+
+## Save model -----
+saveRDS(models_list_T0.3, "./output/models/xgboost/T0.3.rds") # Response var = R
+models_list <- models_list_T0.3
+rm(models_list_T0.3)
+
+
+
+##  Evaluate performance ----
+perf <- evaluate_models(models_list)
+perf 
+
+# 1 0.2856066    0.5344218     0.5291810 11.65594 14.61688  NA            R   XGB  sp50         NA
+# 2 0.2068828    0.4548438     0.4501214 12.37006 15.33875  NA            R   XGB sp100         NA
+# 3 0.1839316    0.4288725     0.4002176 12.57053 15.69570  NA            R   XGB sp200         NA
+
+# Per fold performance
+perf_folds <- evaluate_models(
+  models_list,
+  cv_splits = cv_configs,
+  output    = "fold"
+)
+
+
+
+
+
+
+
+
+
+
 
 
 
