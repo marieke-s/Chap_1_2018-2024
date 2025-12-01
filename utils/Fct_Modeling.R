@@ -406,18 +406,40 @@ tune_xgb <- function(dataset, response_var,
 
 
 #----------- 3. Evaluate Models ----------------
-evaluate_models <- function(models_list, response_var = NULL, models = NULL, cv_configs = NULL) {
+evaluate_models <- function(models_list,
+                            response_var = NULL,
+                            models       = NULL,
+                            cv_names     = NULL,   # names of CV methods to use (e.g. "env_k6", "bloo50")
+                            cv_splits    = NULL,   # optional: list of CV splits to compute train sizes
+                            output       = c("summary", "fold", "plot", "all")) {
   
+  output <- match.arg(output)
   cat("\n🔹 Starting Model Evaluation\n")
   
-  # Initialize performance results storage
-  performance_metrics <- data.frame()
+  #-----------------------------------------
+  # Helper to compute metrics
+  #-----------------------------------------
+  compute_metrics <- function(observed, predicted, aic_values = NULL) {
+    data.frame(
+      R2            = cor(observed, predicted, use = "complete.obs")^2,
+      Pearson_Corr  = cor(observed, predicted, method = "pearson",  use = "complete.obs"),
+      Spearman_Corr = cor(observed, predicted, method = "spearman", use = "complete.obs"),
+      MAE           = mean(abs(observed - predicted), na.rm = TRUE),
+      RMSE          = sqrt(mean((observed - predicted)^2, na.rm = TRUE)),
+      AIC           = if (!is.null(aic_values)) mean(aic_values, na.rm = TRUE) else NA_real_
+    )
+  }
   
-  # Filter by response variable (if provided)
+  # Storage
+  performance_summary  <- data.frame()
+  performance_per_fold <- data.frame()
+  plot_list            <- list()
+  
+  # Filter response variables
   response_vars <- if (!is.null(response_var)) {
     intersect(response_var, names(models_list))
   } else {
-    names(models_list)  # Use all response variables
+    names(models_list)
   }
   
   for (resp_var in response_vars) {
@@ -427,7 +449,7 @@ evaluate_models <- function(models_list, response_var = NULL, models = NULL, cv_
     model_types <- if (!is.null(models)) {
       intersect(models, available_models)
     } else {
-      available_models  # Use all models
+      available_models
     }
     
     for (model_name in model_types) {
@@ -436,10 +458,10 @@ evaluate_models <- function(models_list, response_var = NULL, models = NULL, cv_
       
       available_cvs <- names(models_list[[resp_var]][[model_name]])
       
-      cv_methods <- if (!is.null(cv_configs)) {
-        intersect(cv_configs, available_cvs)
+      cv_methods <- if (!is.null(cv_names)) {
+        intersect(cv_names, available_cvs)
       } else {
-        available_cvs  # Use all CV configurations
+        available_cvs
       }
       
       for (cv_name in cv_methods) {
@@ -447,52 +469,54 @@ evaluate_models <- function(models_list, response_var = NULL, models = NULL, cv_
         cat("\n🔹 Processing CV Method:", cv_name, "\n")
         
         model_folds <- models_list[[resp_var]][[model_name]][[cv_name]]
-        cv_config <- cv_configs[[cv_name]]  # Get CV splits
+        # Optional CV splits to get train sizes
+        this_cv_split <- if (!is.null(cv_splits)) cv_splits[[cv_name]] else NULL
         
-        all_observed <- c()
-        predictions <- c()
-        aic_values <- c()
-        train_size_list <- c()
+        all_observed    <- c()
+        all_predictions <- c()
+        aic_values      <- c()
+        train_sizes     <- c()
         
         for (i in seq_along(model_folds)) {
           
           cat("   ➡️ Fold:", i, "/", length(model_folds), "\n")
           
-          fold_data <- model_folds[[paste0("Fold_", i)]]
+          fold_name <- paste0("Fold_", i)
+          fold_data <- model_folds[[fold_name]]
           
           if (is.null(fold_data)) {
-            cat("\n⚠️ Warning: Model missing for fold", i, "- Skipping.\n")
+            cat("      ⚠️ Model missing for", fold_name, "- Skipping.\n")
             next
           }
           
-          model <- fold_data$model
           test_set <- fold_data$test_set
           
-          if (is.null(test_set) || nrow(test_set) != 1) {
-            cat("\n⚠️ Warning: Test set missing or incorrect for fold", i, "- Skipping.\n")
+          # Allow multi-row test sets; skip only if empty
+          if (is.null(test_set) || nrow(test_set) == 0) {
+            cat("      ⚠️ Test set missing or empty for", fold_name, "- Skipping.\n")
             next
           }
           
           test_df <- as.data.frame(st_drop_geometry(test_set))
           
           if (!(resp_var %in% colnames(test_df))) {
-            stop(paste("❌ Fold", i, "- Response variable missing in test set!"))
+            stop(paste("❌", fold_name, "- Response variable missing in test set!"))
           }
           
-          all_observed <- c(all_observed, test_df[[resp_var]])
+          fold_observed <- test_df[[resp_var]]
           
-          # --- Prediction handling
-          pred <- tryCatch({
+          #-----------------------------
+          # Predictions
+          #-----------------------------
+          fold_pred <- tryCatch({
             if (model_name == "XGB") {
-              test_df <- test_df %>% mutate(across(where(is.character), as.factor))
+              test_df <- test_df %>% dplyr::mutate(across(where(is.character), as.factor))
               
-              # Retrieve training feature names
-              xgb_features <- model$feature_names
+              xgb_features   <- fold_data$model$feature_names
               available_cols <- intersect(colnames(test_df), xgb_features)
               
               test_x_raw <- test_df[, available_cols, drop = FALSE]
               
-              # Drop constant columns
               valid_cols <- sapply(test_x_raw, function(col) {
                 if (is.factor(col)) {
                   nlevels(col) > 1
@@ -505,69 +529,141 @@ evaluate_models <- function(models_list, response_var = NULL, models = NULL, cv_
               
               test_x_clean <- test_x_raw[, valid_cols, drop = FALSE]
               
-              # If empty, create a zero matrix
               if (ncol(test_x_clean) == 0) {
-                test_matrix <- matrix(0, nrow = 1, ncol = length(xgb_features))
+                test_matrix <- matrix(0, nrow = nrow(test_df), ncol = length(xgb_features))
                 colnames(test_matrix) <- xgb_features
               } else {
                 test_matrix <- model.matrix(~ . - 1, data = test_x_clean)
                 
-                # Add missing columns as 0
                 missing_cols <- setdiff(xgb_features, colnames(test_matrix))
                 for (col in missing_cols) {
                   test_matrix <- cbind(test_matrix, setNames(data.frame(0), col))
                 }
                 
-                # Reorder
                 test_matrix <- test_matrix[, xgb_features, drop = FALSE]
               }
               
               test_matrix <- xgb.DMatrix(data = test_matrix)
-              predict(model, newdata = test_matrix)
+              predict(fold_data$model, newdata = test_matrix)
               
             } else if (model_name == "RF") {
-              predict(model, newdata = test_df)
+              predict(fold_data$model, newdata = test_df)
               
             } else {
-              predict(model, newdata = test_df, type = "response")
+              predict(fold_data$model, newdata = test_df, type = "response")
             }
           }, error = function(e) {
-            cat("\n❌ Prediction failed for", model_name, "on fold", i, ": ", e$message, "\n")
-            return(NA)
+            cat("      ❌ Prediction failed for", model_name, "on", fold_name, ":", e$message, "\n")
+            return(rep(NA_real_, length(fold_observed)))
           })
           
-          predictions <- c(predictions, pred)
+          # Append to global vectors
+          all_observed    <- c(all_observed,    fold_observed)
+          all_predictions <- c(all_predictions, fold_pred)
           
+          # AIC per fold if relevant
           if (model_name %in% c("GLM", "GAM", "GLM.nb", "spaMM")) {
-            aic_values <- c(aic_values, AIC(model))
+            aic_values <- c(aic_values, AIC(fold_data$model))
           }
           
-          train_size_list <- c(train_size_list, nrow(cv_config[[i]]$train))
+          # Train size (if we have cv_splits)
+          this_train_size <- NA_real_
+          if (!is.null(this_cv_split) && length(this_cv_split) >= i && !is.null(this_cv_split[[i]]$train)) {
+            this_train_size <- nrow(this_cv_split[[i]]$train)
+            train_sizes     <- c(train_sizes, this_train_size)
+          }
+          
+          #-----------------------------
+          # Per-fold metrics
+          #-----------------------------
+          if (!all(is.na(fold_pred))) {
+            fold_metrics <- compute_metrics(fold_observed, fold_pred,
+                                            if (model_name %in% c("GLM", "GAM", "GLM.nb", "spaMM"))
+                                              AIC(fold_data$model) else NULL)
+            
+            fold_metrics$Response_Var <- resp_var
+            fold_metrics$Model        <- model_name
+            fold_metrics$CV           <- cv_name
+            fold_metrics$Fold         <- i
+            fold_metrics$Train_Size   <- this_train_size
+            
+            performance_per_fold <- rbind(performance_per_fold, fold_metrics)
+            
+            cat(sprintf(
+              "      Fold %d metrics: R2 = %.3f | RMSE = %.3f | MAE = %.3f | Pearson = %.3f | Spearman = %.3f\n",
+              i,
+              fold_metrics$R2,
+              fold_metrics$RMSE,
+              fold_metrics$MAE,
+              fold_metrics$Pearson_Corr,
+              fold_metrics$Spearman_Corr
+            ))
+          } else {
+            cat("      ⚠️ All predictions NA for", fold_name, "- no fold metrics.\n")
+          }
+        } # end folds
+        
+        #-----------------------------
+        # Global (across folds) metrics
+        #-----------------------------
+        if (length(all_observed) == 0 || length(all_predictions) == 0) {
+          cat("\n⚠️ No valid predictions for model", model_name, "and CV", cv_name, "- skipping global metrics.\n")
+        } else {
+          global_metrics <- compute_metrics(all_observed, all_predictions, aic_values)
+          global_metrics$Response_Var <- resp_var
+          global_metrics$Model        <- model_name
+          global_metrics$CV           <- cv_name
+          global_metrics$Train_Size   <- if (length(train_sizes) > 0) mean(train_sizes) else NA_real_
+          
+          performance_summary <- rbind(performance_summary, global_metrics)
+          
+          #-----------------------------
+          # Plot observed vs predicted
+          #-----------------------------
+          if (output %in% c("plot", "all")) {
+            if (!requireNamespace("ggplot2", quietly = TRUE)) {
+              warning("ggplot2 not available; plots will not be created.")
+            } else {
+              df_plot <- data.frame(
+                Observed  = all_observed,
+                Predicted = all_predictions
+              )
+              
+              p <- ggplot2::ggplot(df_plot, ggplot2::aes(x = Observed, y = Predicted)) +
+                ggplot2::geom_point(alpha = 0.6) +
+                ggplot2::geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+                ggplot2::labs(
+                  title = paste("Observed vs Predicted -", resp_var, "-", model_name, "-", cv_name),
+                  x = "Observed",
+                  y = "Predicted"
+                ) +
+                ggplot2::theme_minimal()
+              
+              plot_name <- paste(resp_var, model_name, cv_name, sep = "_")
+              plot_list[[plot_name]] <- p
+            }
+          }
         }
-        
-        compute_metrics <- function(observed, predicted, aic_values) {
-          data.frame(
-            R2 = cor(observed, predicted, use = "complete.obs")^2,
-            Pearson_Corr = cor(observed, predicted, method = "pearson", use = "complete.obs"),
-            Spearman_Corr = cor(observed, predicted, method = "spearman", use = "complete.obs"),
-            MAE = mean(abs(observed - predicted), na.rm = TRUE),
-            RMSE = sqrt(mean((observed - predicted)^2, na.rm = TRUE)),
-            AIC = if (!is.null(aic_values)) mean(aic_values, na.rm = TRUE) else NA
-          )
-        }
-        
-        model_metrics <- compute_metrics(all_observed, predictions, aic_values)
-        model_metrics$Response_Var <- resp_var
-        model_metrics$Model <- model_name
-        model_metrics$CV <- cv_name
-        model_metrics$Train_Size <- if (length(train_size_list) > 0) mean(train_size_list) else NA
-        
-        performance_metrics <- rbind(performance_metrics, model_metrics)
       }
     }
   }
   
-  return(performance_metrics)
+  #-----------------------------
+  # Return according to 'output'
+  #-----------------------------
+  if (output == "summary") {
+    return(performance_summary)
+  } else if (output == "fold") {
+    return(performance_per_fold)
+  } else if (output == "plot") {
+    return(plot_list)
+  } else {  # "all"
+    return(list(
+      summary  = performance_summary,
+      per_fold = performance_per_fold,
+      plots    = plot_list
+    ))
+  }
 }
 
 
@@ -801,3 +897,128 @@ plot_performance_metrics <- function(performance_metrics) {
   print(p3)
 }
 
+
+#----------- spBlock_cv : env_xgb_modified ----------------
+# source : https://github.com/Disha0903/spBlock_cv/tree/main
+
+env_xgb <- function(hyperparams_xgb, cluster_data, cluster_count, in_time_data, out_of_time_data, model_name) {
+  
+  results <- data.frame()
+  results_past <- data.frame()
+  results_past_lf <- data.frame()
+  
+  feature_names <- colnames(in_time_data)[-ncol(in_time_data)]
+  
+  for (j in 1:nrow(hyperparams_xgb)) {
+    print(paste0("Iteration: ", j))
+    fold_ROC_AUC <- c()
+    
+    for (test_cluster in 1:cluster_count) {
+      train_clusters <- setdiff(1:cluster_count, test_cluster)
+      
+      for (fold in train_clusters) {
+        train <- cluster_data[[fold]]
+        test  <- cluster_data[[test_cluster]]
+        
+        X_train <- as.matrix(train[, -ncol(train)])
+        colnames(X_train) <- feature_names
+        
+        xgb_model <- xgboost(
+          data = X_train,
+          label = train$occurrenceStatus,
+          nrounds = hyperparams_xgb$nrounds[j],
+          max_depth = hyperparams_xgb$max_depth[j],
+          eta = hyperparams_xgb$eta[j],
+          subsample = hyperparams_xgb$subsample[j],
+          min_child_weight = hyperparams_xgb$min_child_weight[j],
+          gamma = hyperparams_xgb$gamma[j],
+          colsample_bylevel = hyperparams_xgb$colsample_bylevel[j],
+          objective = "binary:logistic",
+          eval_metric = "auc",
+          verbose = 0
+        )
+        
+        X_test <- as.matrix(test[, -ncol(test)])
+        colnames(X_test) <- feature_names
+        
+        prob_predictions <- predict(xgb_model, newdata = X_test)
+        ROC_AUC <- pROC::auc(test$occurrenceStatus, prob_predictions)
+        fold_ROC_AUC <- c(fold_ROC_AUC, ROC_AUC)
+        
+        if (fold == tail(train_clusters, 1)) {
+          last_fold_model <- xgb_model
+        }
+      }
+    }
+    
+    # Save cross-validation results
+    results <- rbind(results, data.frame(
+      iteration = j,
+      nrounds = hyperparams_xgb$nrounds[j],
+      max_depth = hyperparams_xgb$max_depth[j],
+      eta = hyperparams_xgb$eta[j],
+      subsample = hyperparams_xgb$subsample[j],
+      min_child_weight = hyperparams_xgb$min_child_weight[j],
+      gamma = hyperparams_xgb$gamma[j],
+      colsample_bylevel = hyperparams_xgb$colsample_bylevel[j],
+      mean_ROC_AUC = mean(fold_ROC_AUC),
+      fold_ROC_AUC = toString(round(fold_ROC_AUC, 4))
+    ))
+    
+    # Retrain on all in_time_data
+    X_full_train <- as.matrix(in_time_data[, -ncol(in_time_data)])
+    colnames(X_full_train) <- feature_names
+    
+    xgb_model_full <- xgboost(
+      data = X_full_train,
+      label = in_time_data$occurrenceStatus,
+      nrounds = hyperparams_xgb$nrounds[j],
+      max_depth = hyperparams_xgb$max_depth[j],
+      eta = hyperparams_xgb$eta[j],
+      subsample = hyperparams_xgb$subsample[j],
+      min_child_weight = hyperparams_xgb$min_child_weight[j],
+      gamma = hyperparams_xgb$gamma[j],
+      colsample_bylevel = hyperparams_xgb$colsample_bylevel[j],
+      objective = "binary:logistic",
+      eval_metric = "auc",
+      verbose = 0
+    )
+    
+    X_valid <- as.matrix(out_of_time_data[, -ncol(out_of_time_data)])
+    colnames(X_valid) <- feature_names
+    
+    valid_predictions <- predict(xgb_model_full, newdata = X_valid)
+    ROC_AUC_valid <- pROC::auc(out_of_time_data$occurrenceStatus, valid_predictions)
+    
+    results_past <- rbind(results_past, data.frame(
+      iteration = j,
+      nrounds = hyperparams_xgb$nrounds[j],
+      max_depth = hyperparams_xgb$max_depth[j],
+      eta = hyperparams_xgb$eta[j],
+      subsample = hyperparams_xgb$subsample[j],
+      min_child_weight = hyperparams_xgb$min_child_weight[j],
+      gamma = hyperparams_xgb$gamma[j],
+      colsample_bylevel = hyperparams_xgb$colsample_bylevel[j],
+      ROC_AUC_valid = ROC_AUC_valid
+    ))
+    
+    valid_predictions_lf <- predict(last_fold_model, newdata = X_valid)
+    ROC_AUC_valid_lf <- pROC::auc(out_of_time_data$occurrenceStatus, valid_predictions_lf)
+    
+    results_past_lf <- rbind(results_past_lf, data.frame(
+      iteration = j,
+      nrounds = hyperparams_xgb$nrounds[j],
+      max_depth = hyperparams_xgb$max_depth[j],
+      eta = hyperparams_xgb$eta[j],
+      subsample = hyperparams_xgb$subsample[j],
+      min_child_weight = hyperparams_xgb$min_child_weight[j],
+      gamma = hyperparams_xgb$gamma[j],
+      colsample_bylevel = hyperparams_xgb$colsample_bylevel[j],
+      ROC_AUC_valid_lf = ROC_AUC_valid_lf  
+    ))
+  }
+  
+  write.csv(results,        paste0('C:/Users/User/Downloads/Downloads/phd_project/results/hpm/', model_name, '_xgb_env_results.csv'), row.names = FALSE)
+  write.csv(results_past,   paste0('C:/Users/User/Downloads/Downloads/phd_project/results/hpm/', model_name, '_xgb_env_results_past.csv'), row.names = FALSE)
+  write.csv(results_past_lf,paste0('C:/Users/User/Downloads/Downloads/phd_project/results/hpm/', model_name, '_xgb_env_results_past_lf.csv'), row.names = FALSE)
+}
