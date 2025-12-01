@@ -44,6 +44,7 @@ library(virtualspecies)
 
 # Load functions
 source("./utils/Fct_Data-Prep.R")
+source("./utils/Fct_Modeling.R")
 
 #------------- Load and prep data ------------------
 # predictors_sel_v.1.1 ----
@@ -578,4 +579,320 @@ min(dist_values/1000) # 0
 
 
 
-#------------- Spatial cross-validation for xgboost ------------------
+#-------------  Environmental CV (spBlock_cv) ------------------
+# --- Load data  (same as T.0.0) ----
+# predictors_sel_v.1.3 ----
+pred <- st_read("./data/processed_data/predictors/predictors_sel_v1.3.gpkg")
+
+# remove space and majuscule in habitat names
+pred$grouped_main_habitat <- gsub(" ", "_", pred$grouped_main_habitat)
+pred$grouped_main_habitat <- tolower(pred$grouped_main_habitat)
+
+# set character as factor
+pred$grouped_main_habitat <- as.factor(pred$grouped_main_habitat)
+
+# check levels
+levels(pred$grouped_main_habitat)
+table(pred$grouped_main_habitat)
+
+unique(pred$grouped_main_habitat)
+
+# mtdt_7_sel_v1.1 ----
+mtdt <- st_read("./data/processed_data/Mtdt/mtdt_7_sel_v1.1.gpkg")
+
+# div_indices_sel_v1.1.gpkg ----
+div <- readr::read_csv2("./data/processed_data/Traits/div_indices_v1.0_sel_v1.1.csv") %>%
+  mutate(DeBRa = as.numeric(DeBRa))
+
+# tot ----
+tot <- pred %>%
+  st_drop_geometry() %>%
+  left_join(st_drop_geometry(mtdt), by = "replicates") %>%
+  left_join(div, by = "replicates")
+
+# --- Environmental CV  ----
+# Extract only environmental features for clustering (exclude label) ---
+env_data_only <- pred %>% dplyr::select(-c("x", "y", "replicates", grouped_main_habitat)) %>%
+  st_drop_geometry()
+
+
+# --- Determine optimal number of clusters (k) using elbow method ----
+wcss <- numeric(15)
+for (i in 1:15) {
+  kmeans_result <- kmeans(env_data_only, centers = i, nstart = 15)
+  wcss[i] <- kmeans_result$tot.withinss
+}
+plot(1:15, wcss, type = 'b', xlab = 'Number of Clusters', ylab = 'Within-Cluster SS (WCSS)')
+
+
+# --- Determine optimal number of clusters (k) vizualization  ----
+# Vector of k values
+k_vals <- 4:9  
+
+# 1) PCA for visualization (on all variables)
+pca <- prcomp(env_data_only, scale. = TRUE)
+scores <- pca$x[, 1:2]  # first two principal components
+
+# 2) Set up panel: 2 rows x 3 columns
+op <- par(mfrow = c(2, 3), mar = c(4, 4, 2, 1))
+
+# Color palette with enough colors for maximum k
+cols <- rainbow(max(k_vals))
+
+set.seed(123)  # for reproducible kmeans
+
+
+# K-means PCA plots ---
+for (k in k_vals) {
+  km <- kmeans(env_data_only, centers = k, nstart = 25)
+  
+  plot(scores,
+       col = alpha(cols[km$cluster], 0.5),
+       pch = 19,
+       xlab = "PC1",
+       ylab = "PC2",
+       main = paste("k =", k),
+       asp = 1)
+}
+
+# K-means maps (panel) ---
+for (k in k_vals) {
+  # K-means clustering
+  km <- kmeans(env_data_only, centers = k, nstart = 25)
+  
+  # Plot spatial map
+  plot(pred$x, pred$y,
+       col = alpha(cols[km$cluster], 0.5),
+       pch = 19,
+       xlab = "x",
+       ylab = "y",
+       main = paste("k =", k),
+       asp = 1)
+}
+
+# (Optional) reset plotting parameters
+par(op)
+
+
+# K-means maps ---
+# World polygons
+world <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
+
+# Turn your points into an sf object
+# If x/y are longitude/latitude in degrees, CRS 4326 is correct.
+# If they’re in another projection, adjust the crs argument accordingly.
+pts_sf <- st_as_sf(pred, coords = c("x", "y"), crs = 4326)
+pts_sf <- st_transform(pts_sf, crs = st_crs(world))  # Match world CRS
+
+# Bounding box of your data
+bbox <- st_bbox(pts_sf)
+
+# Crop world to your data extent
+world_crop <- st_crop(world, bbox)
+
+set.seed(123)
+k_vals <- 4:9
+
+# K-means maps (distinct maps for k clusters) ---
+# Convert your pred df to sf with correct CRS (Lambert-93)
+pts_sf <- st_as_sf(pred, coords = c("x", "y"), crs = 2154)
+
+# Transform to WGS84 for mapping
+pts_wgs84 <- st_transform(pts_sf, 4326)
+
+# Bounding box in WGS84
+bbox <- st_bbox(pts_wgs84)
+
+# World and crop to bbox
+world <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
+world_crop <- st_crop(world, bbox)
+
+
+# Loop through k = 4 to 9
+
+k_vals <- 4:9
+set.seed(123)
+
+# Make sure output directory exists
+dir.create("./figures/Cross-val", recursive = TRUE, showWarnings = FALSE)
+
+for (k in k_vals) {
+  # Run k-means on env_data_only (same order as pts_wgs84)
+  km <- kmeans(env_data_only, centers = k, nstart = 25)
+  
+  # Attach cluster to the sf object
+  pts_plot <- pts_wgs84
+  pts_plot$cluster <- factor(km$cluster)
+  
+  # Panel map: one facet per cluster
+  p <- ggplot() +
+    geom_sf(data = world_crop, fill = "grey95", color = "grey80") +
+    geom_sf(data = pts_plot, aes(color = cluster), size = 0.5) +
+    coord_sf(
+      xlim = c(bbox["xmin"], bbox["xmax"]),
+      ylim = c(bbox["ymin"], bbox["ymax"])
+    ) +
+    facet_wrap(~ cluster) +
+    labs(
+      title = paste("k =", k),
+      x = "Longitude",
+      y = "Latitude"
+    ) +
+    theme_bw() +
+    theme(
+      legend.position = "none",
+      strip.background = element_rect(fill = "grey90"),
+      strip.text = element_text(face = "bold")
+    )
+  
+  # Save figure
+  out_path <- sprintf("./figures/Cross-val/Map_k%d_predictors_T0.0.jpg", k)
+  ggsave(out_path, p, width = 10, height = 8, dpi = 300)
+  message("Saved: ", out_path)
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# --- Check : Geographical distance between points vs predictors PCA distance ----
+
+# Pairwise distances in PCA space
+d_pca <- dist(scores)  # Euclidean
+
+# Pairwise geographical distances
+d_xy <- dist(as.matrix(pred[, c("x", "y")]))
+
+# Convert to numeric vectors
+d_pca_vec <- as.numeric(d_pca)
+d_xy_vec  <- as.numeric(d_xy)
+
+# Sample a subset for plotting
+set.seed(123)
+n_pairs <- length(d_pca_vec) # 202 566 --> bad visibility in plot
+sample_idx <- sample(seq_len(n_pairs), size = min(10000, n_pairs)) # sample 5000 pairs for plotting
+
+# Build a clean data frame for the sampled points
+df <- data.frame(
+  xy = d_xy_vec[sample_idx],
+  pca = d_pca_vec[sample_idx]
+)
+
+# Fit loess using simple names
+lo <- loess(pca ~ xy, data = df)
+
+# Create a grid for prediction
+xgrid <- seq(min(df$xy), max(df$xy), length.out = 200)
+
+# Predict on smooth grid
+ygrid <- predict(lo, newdata = data.frame(xy = xgrid))
+
+# Plot PCA distance vs. actual distance
+plot(d_xy_vec[sample_idx], d_pca_vec[sample_idx],
+     xlab = "Distance in actual space (x,y)",
+     ylab = "Distance in PCA space (PC1–PC2)",
+     main = "Comparison of distances: PCA vs. actual coordinates",
+     pch  = 19, cex = 0.5,
+     col = alpha("skyblue", 0.5))
+lines(xgrid, ygrid, lwd = 3, col = "skyblue4", lty = 5)
+
+# abline(0, 1, col = "red", lwd = 2)
+
+# Report correlation
+correlation <- cor(d_xy_vec, d_pca_vec, method = "spearman")
+correlation # 0.3194651
+
+
+# --- Fit K-means using chosen k (e.g., k=4 based on elbow plot) ----
+set.seed(123)
+k_optimal <- 6
+kmeans_result <- kmeans(env_data_only, centers = k_optimal, nstart = 10)
+
+# --- Assign each point to a cluster ----
+cluster_assignments <- kmeans_result$cluster
+
+# --- Initialize cluster list, enforcing class diversity ---
+min_class_count <- 4
+cluster_data <- list()
+cluster_count <- max(cluster_assignments)
+has_class_variable <- FALSE   # <-- CHANGE HERE depending on your data
+
+for (i in 1:cluster_count) {
+  cluster_i <- env_data_only[cluster_assignments == i, ]
+  # --- Case 1: You DO have a categorical class variable ---
+  if (has_class_variable) {
+    class_distribution <- table(cluster_i$occurrenceStatus)
+  
+    # Keep if both classes are sufficiently represented
+    if (sum(class_distribution >= min_class_count) >= 2) {
+      cluster_data[[i]] <- cluster_i
+    } else {
+      # Try merging with a cluster that has the opposite class
+      opposite_class <- ifelse(names(class_distribution)[which.max(class_distribution)] == "1", 0, 1)
+      for (j in setdiff(1:cluster_count, i)) {
+        cluster_j <- env_data_only[cluster_assignments == j, ]
+        if (opposite_class %in% cluster_j$occurrenceStatus) {
+          cluster_data[[i]] <- rbind(cluster_i, cluster_j)
+          cluster_data[[j]] <- NULL
+          break
+        }
+      }
+    }
+  } else {
+    # --- Case 2: Numeric-only data (no categorical class variable) ---
+    # Simply store clusters without class-based constraints
+    cluster_data[[i]] <- cluster_i
+  }
+}
+
+# --- Clean up any NULLs due to merges ---
+cluster_data <- cluster_data[!sapply(cluster_data, is.null)]
+cluster_count <- length(cluster_data)
+
+cat("Final number of usable clusters: ", cluster_count, "\n")
+
+
+# --- Export cluster assignments  ----
+# Create a data frame with replicates and their cluster assignments
+cluster_df <- data.frame(
+  replicates = pred$replicates,
+  cluster = cluster_assignments
+)
+
+# Save to CSV
+write.csv(cluster_df, "./data/processed_data/Cross-val/cluster_assignments_k6_envCV_T0.0.csv", row.names = FALSE)
+
+# --- Print number of points in each fold ----
+# For each fold, print nb of points in the fold and in the remaining data
+total_points <- nrow(env_data_only)
+fold_points <- numeric(cluster_count)
+for (i in 1:cluster_count) {
+  fold_points <- nrow(cluster_data[[i]])
+  remaining_points <- total_points - fold_points
+  cat("Fold ", i, ": test : ", fold_points, ", train : ", remaining_points, "\n", sep = "")
+}
+
+
+
+# Fold 1: test : 79, train : 558
+# Fold 2: test : 137, train : 500
+# Fold 3: test : 39, train : 598
+# Fold 4: test : 74, train : 563
+# Fold 5: test : 123, train : 514
+# Fold 6: test : 185, train : 452
+
+
+
+

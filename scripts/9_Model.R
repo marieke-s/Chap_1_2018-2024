@@ -49,6 +49,9 @@ library(tidyr)
 library(units)
 library(virtualspecies)
 library(xgboost)
+library(geosphere)
+library(tibble)
+library(purrr)
 
 
 
@@ -163,6 +166,118 @@ cv_configs <- c(list(loo = loo), bloo_results_list)
 rm(tot_sf_4326, loo, bloo_results_list, bloo_results, buffer_sizes, buffer_size)
 
 
+## Check and map CV config ----
+# Extract BLOO with 50 km buffer
+bloo50 <- cv_configs[["bloo50"]]
+
+# Fold sizes: number of points in test (should be 1) and train
+fold_sizes_bloo50 <- purrr::map_dfr(
+  seq_along(bloo50),
+  ~ tibble(
+    Fold    = .x,
+    n_test  = nrow(bloo50[[.x]]$test),
+    n_train = nrow(bloo50[[.x]]$train)
+  )
+)
+
+print(head(fold_sizes_bloo50))
+
+# Fold n_test n_train
+# <int>  <int>   <int>
+#   1     1      1     578
+# 2     2      1     550
+# 3     3      1     550
+# 4     4      1     550
+# 5     5      1     578
+# 6     6      1     555
+
+
+summary(fold_sizes_bloo50)
+
+# Fold         n_test     n_train     
+# Min.   :  1   Min.   :1   Min.   :497.0  
+# 1st Qu.:160   1st Qu.:1   1st Qu.:539.0  
+# Median :319   Median :1   Median :561.0  
+# Mean   :319   Mean   :1   Mean   :558.6  
+# 3rd Qu.:478   3rd Qu.:1   3rd Qu.:578.0  
+# Max.   :637   Max.   :1   Max.   :599.0  
+
+
+
+# --- Map folds ---
+extract_fold_df <- function(cv_object, fold_id, keep_geometry = FALSE) {
+  
+  if (fold_id < 1 || fold_id > length(cv_object)) {
+    stop("fold_id is out of range for this CV object.")
+  }
+  
+  train_sf <- cv_object[[fold_id]]$train
+  test_sf  <- cv_object[[fold_id]]$test
+  
+  if (!keep_geometry) {
+    train_df <- train_sf |> sf::st_drop_geometry()
+    test_df  <- test_sf  |> sf::st_drop_geometry()
+  } else {
+    train_df <- train_sf
+    test_df  <- test_sf
+  }
+  
+  train_df$set <- "train"
+  test_df$set  <- "test"
+  
+  # merge into one data.frame
+  df <- dplyr::bind_rows(test_df, train_df)
+  
+  return(df)
+}
+
+for (X in 1:10) {
+  f <- extract_fold_df(bloo50, fold_id = X) %>% 
+    st_as_sf(coords = c("x", "y"), crs = 4326, remove = FALSE)
+  p <- ggplot() +
+    geom_sf(data = f, aes(color = set), size = 1) +
+    scale_color_manual(values = c("train" = "blue", "test" = "red")) +
+    labs(title = "BLOO CV Fold 3: Train (blue) vs Test (red)") +
+    theme_minimal()
+  print(p)
+}
+
+
+
+# --- Check distances ---
+set.seed(123)
+x <- 50  # number of folds to inspect
+fold_ids_to_check <- sample(seq_along(bloo50), size = x)
+
+dist_stats <- purrr::map_dfr(fold_ids_to_check, function(i) {
+  fold  <- bloo50[[i]]
+  test  <- st_coordinates(fold$test)   # 1 x 2 (lon, lat)
+  train <- st_coordinates(fold$train)  # n_train x 2
+  
+  # Distances in metres (Vincenty, same as in bloo_cv)
+  d_m  <- geosphere::distVincentySphere(train, test)
+  d_km <- d_m / 1000
+  
+  tibble(
+    Fold         = i,
+    min_dist_km  = min(d_km, na.rm = TRUE),
+    mean_dist_km = mean(d_km, na.rm = TRUE),
+    n_train      = nrow(fold$train)
+  )
+})
+
+head(dist_stats)
+summary(dist_stats$min_dist_km)
+summary(dist_stats$mean_dist_km)
+
+# Hard check: any training points inside 50 km?
+any(dist_stats$min_dist_km < 50)
+
+
+
+
+
+
 ## Fit model ----------
 # Initialize list to store models
 models_list <- list()
@@ -187,8 +302,8 @@ beepr::beep()
 
 rm(model)
 
-# Save model ----
-saveRDS(models_list, "./output/models/T0.0.rds") # Response var = R, Crypto and Elasmo
+## Save model ----
+saveRDS(models_list, "./output/models/xgboost/T0.0.rds") # Response var = R, Crypto and Elasmo
 
 ##  Evaluate performance ----
 perf <- evaluate_models(models_list)
@@ -300,6 +415,399 @@ ggplot(mean_importance, aes(x = reorder(Feature, mean_gain), y = mean_gain)) +
   theme_minimal() +
   theme(legend.position = "bottom") +
   ylim(0, max(mean_importance$mean_gain) * 1.15)  # Add space for text
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#-------------------------- T0.1 : XGBOOST :  ENV-k6-CV---------------------
+## Description ----
+#--- Model : XGBOOST
+
+#--- Response var : 
+# from div_indices_v1.0_sel_v1.1.csv
+# R                                                                   <== CHANGE
+
+#---- Predictors : 
+# from predictors_sel_v.1.3
+# [1] "northness"                  "eastness"                   "tpi_mean_log"               "port_dist_m_weight"        
+# [5] "grouped_nb_habitat_per_km2" "bathy_mean"                 "wind_mean_1m"               "vel_mean_1m"               
+# [9] "temp_mean_1m"               "sal_mean_1m"                "canyon_dist_m_weight_log"   "mpa_dist_m_weight_log"     
+# [13] "shore_dist_m_weight_log"    "gravity_mean_log"           "cop_chl_month_mean_log" 
+
+#---- CV config :
+# ENV CV with k = 6 (see 8_Cross_validation.R for k-means clustering) <== CHANGE
+
+#---- Perf : 
+# R2 Pearson_Corr Spearman_Corr      MAE     RMSE AIC Response_Var Model     CV Train_Size
+# 1 0.1699394     0.412237     0.3962696 12.88808 15.89576  NA            R   XGB env_k6   530.8333
+
+
+
+## Prep data for model ----
+# Extract predictors
+predictors <- pred %>% dplyr::select(-c("x", "y", "replicates", grouped_main_habitat)) %>%
+  st_drop_geometry()
+
+# Extract response variables
+ind <- div  %>% dplyr::select("R")
+
+
+
+## CV config -----
+# Convert tot to sf object
+tot_sf_4326 <- st_as_sf(tot, coords = c("x", "y"), crs = 4326, remove = FALSE) # make sure you keep "x" and "y" columns with remove = FALSE (the coordinates columns will be needed for spaMM)
+if (st_crs(tot_sf_4326)$epsg != 4326) {            
+  stop("Error: tot_sf_4326 is not in EPSG:4326 coordinate reference system.")
+}
+stopifnot(nrow(predictors) == nrow(tot_sf_4326))
+
+
+
+
+# Load CV cluster assignments csv
+cv <- readr::read_csv("./data/processed_data/Cross-val/cluster_assignments_k6_envCV_T0.0.csv")
+stopifnot(nrow(cv) == nrow(tot_sf_4326))
+if (!all(cv$replicates %in% tot_sf_4326$replicates)) {
+  stop("Some 'replicates' in the CV file are not found in 'tot_sf_4326'.")
+}
+
+
+
+
+# Attach cluster info to tot_sf_4326 by 'replicates'
+tot_sf_4326 <- tot_sf_4326 %>%
+  dplyr::left_join(cv, by = "replicates")
+if (any(is.na(tot_sf_4326$cluster))) {
+  stop("NA values in 'cluster' after join – check replicates matching.")
+}
+
+
+# Cluster assignments (k = 6 for env CV)
+cluster_assignments <- tot_sf_4326$cluster
+unique_clusters     <- sort(unique(cluster_assignments))
+
+# Build environmental CV folds in the same format as loo/bloo
+env_cv <- vector("list", length = length(unique_clusters))
+
+for (i in seq_along(unique_clusters)) {
+  k            <- unique_clusters[i]
+  test_idx     <- which(cluster_assignments == k)
+  train_idx    <- setdiff(seq_len(nrow(tot_sf_4326)), test_idx)
+  
+  env_cv[[i]] <- list(
+    train = tot_sf_4326[train_idx, ],
+    test  = tot_sf_4326[test_idx, ]
+  )
+}
+
+names(env_cv) <- paste0("fold_", seq_along(env_cv))
+
+# Optional: print fold sizes
+total_points <- nrow(tot_sf_4326)
+for (i in seq_along(env_cv)) {
+  fold_points      <- nrow(env_cv[[i]]$test)
+  remaining_points <- total_points - fold_points
+  cat("Fold ", i, ": test : ", fold_points, ", train : ", remaining_points, "\n", sep = "")
+}
+
+# Create cv_configs object using only environmental CV (k=6)
+cv_configs <- list(env_k6 = env_cv)
+
+# Clean up
+rm(tot_sf_4326, cv, cluster_assignments, unique_clusters, env_cv)
+
+# Fold 1: test : 79, train : 558
+# Fold 2: test : 137, train : 500
+# Fold 3: test : 39, train : 598
+# Fold 4: test : 74, train : 563
+# Fold 5: test : 123, train : 514
+# Fold 6: test : 185, train : 452
+
+
+
+
+
+
+
+
+
+## Fit model ----------
+# Initialize list to store models
+models_list <- list()
+
+# Iterate over each response variable
+for (response_var in colnames(ind)) {   # Just R
+  
+  # Fit the model using fit_models function
+  model <- fit_models(
+    dataset = tot, 
+    response_var = response_var, 
+    predictors = colnames(predictors), 
+    cv_configs = cv_configs["env_k6"],
+    models = c("XGB"), 
+    distribution = NULL
+  )
+  
+  # Store model in list
+  models_list[[response_var]] <- model
+}
+beepr::beep()
+
+
+
+## Save model ----
+saveRDS(models_list, "./output/models/xgboost/T0.1.rds") # Response var = R
+
+
+##  Evaluate performance ----
+perf <- evaluate_models(models_list)
+
+
+# Compare with baseline
+md_baseline <- readRDS("./output/models/xgboost/T0.0.rds")
+perf_baseline <- evaluate_models(md_baseline)
+perf_baseline # 0.7738848
+perf # 0.412237 
+
+perf
+
+
+
+
+
+
+
+
+
+# models_list as you already have
+# cv_configs is your list with env_k6, bloo50, etc.
+
+# 1) Summary performance (average over folds) – same spirit as before
+perf_summary <- evaluate_models(
+  models_list,
+  cv_splits = cv_configs,      # to compute mean train size; optional
+  output    = "summary"
+)
+
+# 2) Per-fold performance table
+perf_folds <- evaluate_models(
+  models_list,
+  cv_splits = cv_configs,
+  output    = "fold"
+)
+
+# 3) Plots (observed vs predicted)
+plots <- evaluate_models(
+  models_list,
+  cv_splits = cv_configs,
+  output    = "plot"
+)
+
+# e.g. print a given plot in your R session:
+print(plots[["R_XGB_env_k6"]])   # adjust name depending on your resp/model/cv
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#-------------------------- T0.2 : XGBOOST : RANDOM-CV ---------------------
+## Description ----
+#--- Model : XGBOOST
+
+#--- Response var : 
+# from div_indices_v1.0_sel_v1.1.csv
+# R                                                                   
+
+
+#---- Predictors : 
+# from predictors_sel_v.1.3
+# [1] "northness"                  "eastness"                   "tpi_mean_log"               "port_dist_m_weight"        
+# [5] "grouped_nb_habitat_per_km2" "bathy_mean"                 "wind_mean_1m"               "vel_mean_1m"               
+# [9] "temp_mean_1m"               "sal_mean_1m"                "canyon_dist_m_weight_log"   "mpa_dist_m_weight_log"     
+# [13] "shore_dist_m_weight_log"    "gravity_mean_log"           "cop_chl_month_mean_log" 
+
+
+#---- CV config :
+# Random CV with 20% test / 80% train, repeated n_folds times         <== CHANGE
+
+#---- Perf :
+# R2 Pearson_Corr Spearman_Corr     MAE     RMSE AIC Response_Var Model     CV Train_Size
+# 1 0.4142866     0.643651     0.6389859 10.0907 13.32401  NA            R   XGB rand20         NA
+
+## Prep data for model ----
+# Extract predictors
+predictors <- pred %>%
+  dplyr::select(-c("x", "y", "replicates", grouped_main_habitat)) %>%
+  st_drop_geometry()
+
+# Extract response variable
+ind <- div %>% dplyr::select("R")
+
+
+## CV config -----
+# Convert tot to sf object 
+tot_sf_4326 <- st_as_sf(tot, coords = c("x", "y"), crs = 4326, remove = FALSE)
+if (st_crs(tot_sf_4326)$epsg != 4326) {            
+  stop("Error: tot_sf_4326 is not in EPSG:4326 coordinate reference system.")
+}
+stopifnot(nrow(predictors) == nrow(tot_sf_4326))
+
+
+
+
+
+# --- Random CV: 20% test / 80% train ---
+set.seed(123)  # for reproducibility
+
+n        <- nrow(tot_sf_4326)
+test_prop <- 0.2
+n_test    <- floor(test_prop * n)
+n_folds   <- 5  # number of random splits / repeats (change if you wish)
+
+rand_cv <- vector("list", length = n_folds)
+
+for (i in seq_len(n_folds)) {
+  test_idx  <- sample(seq_len(n), size = n_test, replace = FALSE)
+  train_idx <- setdiff(seq_len(n), test_idx)
+  
+  rand_cv[[i]] <- list(
+    train = tot_sf_4326[train_idx, ],
+    test  = tot_sf_4326[test_idx, ]
+  )
+}
+
+names(rand_cv) <- paste0("fold_", seq_len(n_folds))
+
+# Optional: check fold sizes
+total_points <- nrow(tot_sf_4326)
+for (i in seq_along(rand_cv)) {
+  fold_points      <- nrow(rand_cv[[i]]$test)
+  remaining_points <- total_points - fold_points
+  cat("Random CV - Fold ", i, ": test : ", fold_points,
+      ", train : ", remaining_points, "\n", sep = "")
+}
+
+# Random CV - Fold 1: test : 127, train : 510
+# Random CV - Fold 2: test : 127, train : 510
+# Random CV - Fold 3: test : 127, train : 510
+# Random CV - Fold 4: test : 127, train : 510
+# Random CV - Fold 5: test : 127, train : 510
+
+
+# CV configs object for this run (only random CV)
+cv_configs <- list(rand20 = rand_cv)
+
+
+
+## Check and map cv config ----
+# Map of folds (points colored by fold_id)
+ggplot(tot_sf_4326) +
+  geom_sf(aes(color = fold_id), size = 2, alpha = 0.8) +
+  labs(
+    title = "Random 5-fold CV (20% test each fold)",
+    color = "Fold"
+  ) +
+  theme_minimal()
+
+
+# Clean up
+rm(tot_sf_4326, n, n_test, test_prop, n_folds, rand_cv, fold_points, remaining_points, i)
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Fit model ----------
+# Initialize list to store models
+models_list <- list()
+
+# Iterate over each response variable
+for (response_var in colnames(ind)) { # Just R
+  
+  # Fit the model using fit_models function
+  model <- fit_models(
+    dataset = tot, 
+    response_var = response_var, 
+    predictors = colnames(predictors), 
+    cv_configs = cv_configs["rand20"],
+    models = c("XGB"), 
+    distribution = NULL
+  )
+  
+  # Store model in list
+  models_list[[response_var]] <- model
+}
+
+beepr::beep()
+
+
+## Save model ----
+saveRDS(models_list, "./output/models/xgboost/T0.2.rds") # Response var = R
+
+##  Evaluate performance ----
+perf <- evaluate_models(models_list)
+perf
+
+# Per fold performance
+perf_folds <- evaluate_models(
+  models_list,
+  cv_splits = cv_configs,
+  output    = "fold"
+)
+
+
+
+
+
+
 
 
 
