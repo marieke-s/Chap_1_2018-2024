@@ -361,8 +361,12 @@ rm(model)
 saveRDS(models_list, "./output/models/xgboost/T0.0.rds") # Response var = R, Crypto and Elasmo
 
 ##  Evaluate performance ----
+models_list <- readRDS("./output/models/xgboost/T0.0.rds")
 perf <- evaluate_models(models_list)
+perf
 
+# Save perf
+saveRDS(perf, "./output/models/xgboost/T0.0_performance.rds")
 
 # Compare with baseline
 md_baseline <- readRDS("/media/marieke/Shared/Chap-1/Model/Scripts/Chap_1/output/models/MEM_tests/R_bloo30_XGB_T8_pred_4.rds")
