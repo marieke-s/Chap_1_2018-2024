@@ -1318,3 +1318,211 @@ perf_folds <- evaluate_models(
 
 
 
+
+
+#-------------------------- T0.4 : XGBOOST : RANDOM-CV ---------------------
+## Description ----
+#--- Model : XGBOOST
+
+#--- Response var : 
+# from div_indices_v1.0_sel_v1.1.csv
+# R                                                                   
+
+
+#---- Predictors : 
+# from predictors_sel_v.1.3
+# [1] "northness"                  "eastness"                   "tpi_mean_log"               "port_dist_m_weight"        
+# [5] "grouped_nb_habitat_per_km2" "bathy_mean"                 "wind_mean_1m"               "vel_mean_1m"               
+# [9] "temp_mean_1m"               "sal_mean_1m"                "canyon_dist_m_weight_log"   "mpa_dist_m_weight_log"     
+# [13] "shore_dist_m_weight_log"    "gravity_mean_log"           "cop_chl_month_mean_log" 
+
+
+#---- CV config :
+# Random CV with 10% test / 90% train, repeated n_folds times         <== CHANGE
+
+#---- Perf :
+# R2 Pearson_Corr Spearman_Corr      MAE     RMSE AIC Response_Var Model     CV Train_Size
+# 1 0.4153888    0.6445066      0.632044 10.36372 13.15706  NA            R   XGB rand20         NA
+
+
+
+## Prep data for model ----
+# Extract predictors
+predictors <- pred %>%
+  dplyr::select(-c("x", "y", "replicates", grouped_main_habitat)) %>%
+  st_drop_geometry()
+
+# Extract response variable
+ind <- div %>% dplyr::select("R")
+
+
+## CV config -----
+# Convert tot to sf object 
+tot_sf_4326 <- st_as_sf(tot, coords = c("x", "y"), crs = 4326, remove = FALSE)
+if (st_crs(tot_sf_4326)$epsg != 4326) {            
+  stop("Error: tot_sf_4326 is not in EPSG:4326 coordinate reference system.")
+}
+stopifnot(nrow(predictors) == nrow(tot_sf_4326))
+
+# --- Random K-fold CV: 10 folds (~10% each) ---
+set.seed(123)  # reproducible
+
+n <- nrow(tot_sf_4326)
+K <- 10        # 10 folds → 10% test each
+
+# Random fold assignment
+fold_id <- sample(rep(1:K, length.out = n))
+
+# Attach to sf for mapping
+tot_sf_4326$fold_id <- factor(fold_id)
+
+# Build CV object
+rand_cv <- vector("list", length = K)
+
+for (k in seq_len(K)) {
+  test_idx  <- which(fold_id == k)
+  train_idx <- which(fold_id != k)
+  
+  rand_cv[[k]] <- list(
+    train = tot_sf_4326[train_idx, ],
+    test  = tot_sf_4326[test_idx, ]
+  )
+}
+
+names(rand_cv) <- paste0("fold_", seq_len(K))
+
+
+# Optional: check fold sizes
+total_points <- nrow(tot_sf_4326)
+for (k in seq_along(rand_cv)) {
+  fold_points      <- nrow(rand_cv[[k]]$test)
+  remaining_points <- total_points - fold_points
+  cat("Random K-fold - Fold ", k, ": test : ", fold_points,
+      ", train : ", remaining_points, "\n", sep = "")
+}
+
+
+# Random K-fold - Fold 1: test : 64, train : 573
+# Random K-fold - Fold 2: test : 64, train : 573
+# Random K-fold - Fold 3: test : 64, train : 573
+# Random K-fold - Fold 4: test : 64, train : 573
+# Random K-fold - Fold 5: test : 64, train : 573
+# Random K-fold - Fold 6: test : 64, train : 573
+# Random K-fold - Fold 7: test : 64, train : 573
+# Random K-fold - Fold 8: test : 63, train : 574
+# Random K-fold - Fold 9: test : 63, train : 574
+# Random K-fold - Fold 10: test : 63, train : 574
+
+
+# CV configs object for this run (only random CV)
+cv_configs <- list(rand20 = rand_cv)
+
+## Check and map cv config ----
+panel_data <- map_dfr(seq_along(rand_cv), function(k) {
+  fold <- rand_cv[[k]]
+  
+  train_sf <- fold$train
+  test_sf  <- fold$test
+  
+  train_sf$set <- "train"
+  test_sf$set  <- "test"
+  
+  bind_rows(train_sf, test_sf) %>%
+    mutate(panel_fold = paste0("Fold ", k))
+})
+
+# make sure it’s sf (it already is, but this is safe)
+panel_data <- st_as_sf(panel_data)
+
+# ensure fold_id is a factor
+tot_sf_4326$fold_id <- factor(tot_sf_4326$fold_id)
+
+fold_levels <- levels(tot_sf_4326$fold_id)
+
+ggplot(panel_data) +
+  geom_sf(aes(color = set), size = 1) +
+  facet_wrap(~ panel_fold, ncol = 3) +
+  scale_color_manual(
+    values = c(train = "grey80", test = "red")
+  ) +
+  labs(
+    title = "Random K-fold CV",
+    subtitle = "Each panel: test fold in red, others as training (grey)",
+    color = "Set"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    strip.text = element_text(size = 14, face = "bold")
+  )
+
+ggsave("./figures/Cross-val/Map_RandomCV_10-90_T0.2.png",
+       width = 10, height = 8, dpi = 300)
+
+
+
+
+
+
+
+## Fit model ----------
+# Initialize list to store models
+models_list <- list()
+
+# Iterate over each response variable
+for (response_var in colnames(ind)) { # Just R
+  
+  # Fit the model using fit_models function
+  model <- fit_models(
+    dataset = tot, 
+    response_var = response_var, 
+    predictors = colnames(predictors), 
+    cv_configs = cv_configs["rand20"],
+    models = c("XGB"), 
+    distribution = NULL
+  )
+  
+  # Store model in list
+  models_list[[response_var]] <- model
+}
+
+beepr::beep()
+
+
+## Save model ----
+saveRDS(models_list, "./output/models/xgboost/T0.4.rds") # Response var = R
+
+##  Evaluate performance ----
+perf <- evaluate_models(models_list)
+perf # 0.6445066
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
