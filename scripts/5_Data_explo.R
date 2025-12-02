@@ -59,9 +59,12 @@ pred_raw$grouped_main_habitat <- tolower(pred_raw$grouped_main_habitat)
 # set character as factor
 pred_raw$grouped_main_habitat <- as.factor(pred_raw$grouped_main_habitat)
 
-
+# predictors_raw_v3.1 ----
+pred_raw <- st_read("./data/processed_data/predictors/predictors_raw_v3.1.gpkg")
 # mtdt_7_sel_v1.1 ----
 mtdt <- st_read("./data/processed_data/Mtdt/mtdt_7_sel_v1.1.gpkg")
+# mtdt_7 ---
+mtdt <- st_read("./data/processed_data/Mtdt/mtdt_7.gpkg")
 
 # div_indices_sel_v1.1.gpkg ----
 div <- readr::read_csv2("./data/processed_data/Traits/div_indices_v1.0_sel_v1.1.csv") %>%
@@ -663,6 +666,7 @@ cols_to_plot <- pred_raw[2:151] %>%
   colnames()
 
 map_index_plots(df = pred_raw, version = "predictors_raw_num_v1.2", output_directory = "./figures/Predictors/Map_Hist", cols_to_plot = cols_to_plot)
+map_index_plots(df = pred_raw, version = "predictors_raw_num_v1.3", output_directory = "./figures/Predictors/Map_Hist", cols_to_plot = "Boat_density_month")
 
 
 rm(cols_to_plot)
@@ -697,12 +701,11 @@ pred_raw <- pred_raw %>%
 # CHL TEMP SAL WS CUR
 # Env cols to plot : all column containing "chl", "temp", "sst", "sal", "ws", "vel", "wind"
 env_cols <- colnames(pred_raw)[grepl("chl|temp|sst|sal|ws|vel|wind", colnames(pred_raw), ignore.case = TRUE)]
-
-
+env_cols <- "Boat_density_month"
 
 map_index_plots(df = pred_raw, 
-                version = "ppredictors_raw_num_v1.2_SEASON", 
-                output_directory = "./figures/Predictors/Map_Hist/by_season", 
+                version = "predictors_raw_num_v1.3_SEASON", 
+                output_directory = "./figures/Predictors/Explo_raw/Map_Hist/by_season", 
                 cols_to_plot = env_cols,
                 factor = "season", 
                 panel_text_scale = "s")

@@ -59,7 +59,7 @@ library(purrr)
 # Load functions
 source("./utils/Fct_Modeling.R")
 
-#------------- Load and prep data ------------------
+#-------------------------- T.0 : Load and prep data ------------------
 # predictors_sel_v.1.3 ----
 pred <- st_read("./data/processed_data/predictors/predictors_sel_v1.3.gpkg")
 
@@ -89,7 +89,7 @@ tot <- pred %>%
   left_join(st_drop_geometry(mtdt), by = "replicates") %>%
   left_join(div, by = "replicates")
 
-#-------------------------- T0.0 : XGBOOST :  ---------------------
+#-------------------------- T0.0 : XGBOOST : bloo50  ---------------------
 ## Description ----
 #--- Model : XGBOOST
 
@@ -111,7 +111,9 @@ tot <- pred %>%
 # R2              Pearson_Corr Spearman_Corr      MAE      RMSE AIC Response_Var Model     CV Train_Size
 # 1 0.59889763    0.7738848     0.7738419 8.598846 11.212882  NA            R   XGB bloo50         NA
 # 2 0.56089502    0.7489293     0.8188332 2.619474  3.964392  NA       Crypto   XGB bloo50         NA
-# 3 0.07769429    0.7489293      0.3864764 1.014452  1.470286  NA       Elasmo   XGB bloo50         NA
+# 3 0.07769429    0.2787370     0.3864764 1.014452  1.470286  NA       Elasmo   XGB bloo50         NA
+
+
 
 ## Prep data for model ----
 # Extract predictors
@@ -371,6 +373,34 @@ perf
 
 
 
+#-------------------------- T0.0.1 : XGBOOST : bloo50  [on marbec-gpu] ---------------------
+## Description ----
+#--- Model : XGBOOST
+
+#--- Response var : 
+# from div_indices_v1.0_sel_v1.1.csv
+# "DeBRa"      "RedList"    "LRFI"       "TopPred"    "Commercial" "Grouper"   "AngelShark"  <== CHANGE
+
+#---- Predictors : 
+# from predictors_sel_v.1.3
+# [1] "northness"                  "eastness"                   "tpi_mean_log"               "port_dist_m_weight"        
+# [5] "grouped_nb_habitat_per_km2" "bathy_mean"                 "wind_mean_1m"               "vel_mean_1m"               
+# [9] "temp_mean_1m"               "sal_mean_1m"                "canyon_dist_m_weight_log"   "mpa_dist_m_weight_log"     
+# [13] "shore_dist_m_weight_log"    "gravity_mean_log"           "cop_chl_month_mean_log" 
+
+#---- CV config :
+# BLOO CV with buffer size = 50 km
+
+#---- Perf : 
+# R2 Pearson_Corr Spearman_Corr        MAE       RMSE AIC Response_Var Model     CV Train_Size
+# 1 0.1234221    0.3513149     0.6578672 0.17644896 0.35649337  NA        DeBRa   XGB bloo50         NA
+# 2 0.4868173    0.6977230     0.7671870 0.88346354 1.31262646  NA      RedList   XGB bloo50         NA
+# 3 0.5956218    0.7717654     0.7126899 6.19833542 8.06845462  NA         LRFI   XGB bloo50         NA
+# 4 0.5864132    0.7657762     0.7642129 1.66474540 2.36872499  NA      TopPred   XGB bloo50         NA
+# 5 0.6279663    0.7924432     0.7570144 4.27136071 5.54144664  NA   Commercial   XGB bloo50         NA
+# 6 0.3171457    0.5631569     0.5327619 0.30929279 0.37687384  NA      Grouper   XGB bloo50         NA
+# 7 0.2952172    0.5433390     0.1751339 0.01780742 0.09190353  NA   AngelShark   XGB bloo50         NA
+
 #-------------------------- Plot variable importance -------------------
 md <- models_list
 # perf <- evaluate_models(md)
@@ -487,6 +517,18 @@ ggplot(mean_importance, aes(x = reorder(Feature, mean_gain), y = mean_gain)) +
 
 
 
+
+
+
+
+# [[MODEL FITTED ON MARBEC-GPU]] ----
+##  Evaluate performance ----
+models_list <- readRDS("./output/models/xgboost/T0.0.1.rds")
+perf <- evaluate_models(models_list)
+perf
+
+# Save perf 
+saveRDS(perf, "./output/models/xgboost/T0.0.1_performance.rds")
 
 
 
@@ -703,7 +745,7 @@ print(plots[["R_XGB_env_k6"]])   # adjust name depending on your resp/model/cv
 
 
 
-#-------------------------- T0.2 : XGBOOST : RANDOM-CV ---------------------
+#-------------------------- T0.2 : XGBOOST : RANDOM-CV 80-20 ---------------------
 ## Description ----
 #--- Model : XGBOOST
 
@@ -893,7 +935,7 @@ perf_folds <- evaluate_models(
 
 
 
-#-------------------------- T0.3 : XGBOOST : SPATIAL-CV-50km ---------------------
+#-------------------------- T0.3 : XGBOOST : SPATIAL-CV-50, 100, 200km ---------------------
 ## Description ----
 #--- Model : XGBOOST
 
@@ -1320,7 +1362,7 @@ perf_folds <- evaluate_models(
 
 
 
-#-------------------------- T0.4 : XGBOOST : RANDOM-CV ---------------------
+#-------------------------- T0.4 : XGBOOST : RANDOM-CV 90-10---------------------
 ## Description ----
 #--- Model : XGBOOST
 
@@ -1521,6 +1563,191 @@ perf # 0.6445066
 
 
 
+
+
+
+
+
+
+#-------------------------- T.1 : Load and prep data ------------------
+# predictors_sel_v.1.4 ----
+pred <- st_read("./data/processed_data/predictors/predictors_sel_v1.4.gpkg")
+
+# remove space and majuscule in habitat names
+pred$grouped_main_habitat <- gsub(" ", "_", pred$grouped_main_habitat)
+pred$grouped_main_habitat <- tolower(pred$grouped_main_habitat)
+
+# set character as factor
+pred$grouped_main_habitat <- as.factor(pred$grouped_main_habitat)
+
+# check levels
+levels(pred$grouped_main_habitat)
+table(pred$grouped_main_habitat)
+
+unique(pred$grouped_main_habitat)
+
+# mtdt_7_sel_v1.1 ----
+mtdt <- st_read("./data/processed_data/Mtdt/mtdt_7_sel_v1.1.gpkg")
+
+# div_indices_sel_v1.1.gpkg ----
+div <- readr::read_csv2("./data/processed_data/Traits/div_indices_v1.0_sel_v1.1.csv") %>%
+  mutate(DeBRa = as.numeric(DeBRa))
+
+# tot ----
+tot <- pred %>%
+  st_drop_geometry() %>%
+  left_join(st_drop_geometry(mtdt), by = "replicates") %>%
+  left_join(div, by = "replicates")
+
+
+#-------------------------- T1.0 : XGBOOST : bloo50  [on marbec-gpu]---------------------
+## Description ----
+#--- Model : XGBOOST
+
+#--- Response var : 
+# from div_indices_v1.0_sel_v1.1.csv
+# R
+
+#---- Predictors : 
+# from predictors_sel_v.1.3=4 
+# [1] "northness"                  "eastness"                   "tpi_mean_log"              
+# [4] "port_dist_m_weight"         "bathy_mean"                 "wind_mean_1m"              
+# [7] "vel_mean_1m"                "temp_mean_1m"               "sal_mean_1m"               
+# [10] "grouped_nb_habitat_per_km2" "canyon_dist_m_weight_log"   "mpa_dist_m_weight_log"     
+# [13] "shore_dist_m_weight_log"    "gravity_mean_log"           "cop_chl_month_mean_log"    
+# [16] "Boat_density_month_log"                                       <== CHANGE
+
+#---- CV config :
+# BLOO CV with buffer size = 50 km
+
+#---- Perf : 
+# R2              Pearson_Corr Spearman_Corr        MAE        RMSE AIC Response_Var Model     CV Train_Size
+# 1  0.60698014    0.7790893     0.7695691 8.46826331 11.10390361  NA            R   XGB bloo50         NA
+# 2  0.58232803    0.7631042     0.8305654 2.57250228  3.84527522  NA       Crypto   XGB bloo50         NA
+# 3  0.10702283    0.3271434     0.4081011 0.99986696  1.45600642  NA       Elasmo   XGB bloo50         NA
+# 4  0.04856717    0.2203796     0.5050083 0.20353596  0.36573106  NA        DeBRa   XGB bloo50         NA
+# 5  0.51729240    0.7192304     0.7875041 0.88075750  1.29827096  NA      RedList   XGB bloo50         NA
+# 6  0.58726090    0.7663295     0.7025712 6.33019028  8.16209304  NA         LRFI   XGB bloo50         NA
+# 7  0.57787778    0.7601827     0.7598383 1.68161264  2.38770971  NA      TopPred   XGB bloo50         NA
+# 8  0.62866074    0.7928813     0.7665601 4.26526788  5.58965117  NA   Commercial   XGB bloo50         NA
+# 9  0.27898353    0.5281889     0.4995802 0.31641806  0.38295882  NA      Grouper   XGB bloo50         NA
+# 10 0.29125019    0.5396760     0.1751339 0.01821245  0.09242783  NA   AngelShark   XGB bloo50         NA
+
+
+
+
+
+## Prep data for model ----
+# Extract predictors
+predictors <- pred %>% dplyr::select(-c("x", "y", "replicates", grouped_main_habitat)) %>%
+  st_drop_geometry()
+
+# Extract response variables
+ind <- div  %>% dplyr::select(-c("replicates"))
+
+## CV config -----
+# Convert tot to sf object
+tot_sf_4326 <- st_as_sf(tot, coords = c("x", "y"), crs = 4326, remove = FALSE) # make sure you keep "x" and "y" columns with remove = FALSE (the coordinates columns will be needed for spaMM)
+
+
+# Set coords to numeric
+tot_sf_4326$x <- as.numeric(tot_sf_4326$x)
+tot_sf_4326$y <- as.numeric(tot_sf_4326$y)
+
+
+
+
+# LOO CV
+# Load 
+loo <- loo_cv(tot_sf_4326)
+
+
+# BLOO CV
+# Compute different BLOO-CV configurations 
+# Define buffer sizes
+buffer_sizes <- seq(from = 10, to = 200, by = 10)
+
+# Initialize list to store BLOO-CV results
+bloo_results_list <- list()
+
+# Loop through each buffer size and compute BLOO-CV
+for (buffer_size in buffer_sizes) {
+  
+  # Compute BLOO-CV
+  bloo_results <- bloo_cv(st_as_sf(tot_sf_4326), buffer_size)
+  
+  # Store results in list with a named index
+  bloo_results_list[[paste0("bloo", buffer_size)]] <- bloo_results
+}
+
+
+# ALL CV
+# Combine all CV configurations
+cv_configs <- c(list(loo = loo), bloo_results_list)
+
+
+
+rm(tot_sf_4326, loo, bloo_results_list, bloo_results, buffer_sizes, buffer_size)
+
+
+## Check CV config ----
+# Extract BLOO with 50 km buffer
+bloo50 <- cv_configs[["bloo50"]]
+
+# Fold sizes: number of points in test (should be 1) and train
+fold_sizes_bloo50 <- purrr::map_dfr(
+  seq_along(bloo50),
+  ~ tibble(
+    Fold    = .x,
+    n_test  = nrow(bloo50[[.x]]$test),
+    n_train = nrow(bloo50[[.x]]$train)
+  )
+)
+
+print(head(fold_sizes_bloo50))
+
+# Fold n_test n_train
+# <int>  <int>   <int>
+#   1     1      1     578
+# 2     2      1     550
+# 3     3      1     550
+# 4     4      1     550
+# 5     5      1     578
+# 6     6      1     555
+
+
+summary(fold_sizes_bloo50)
+
+# Fold         n_test     n_train     
+# Min.   :  1   Min.   :1   Min.   :497.0  
+# 1st Qu.:160   1st Qu.:1   1st Qu.:539.0  
+# Median :319   Median :1   Median :561.0  
+# Mean   :319   Mean   :1   Mean   :558.6  
+# 3rd Qu.:478   3rd Qu.:1   3rd Qu.:578.0  
+# Max.   :637   Max.   :1   Max.   :599.0  
+
+
+
+
+
+
+
+
+# [[MODEL FITTED ON MARBEC-GPU]] ----
+##  Evaluate performance ----
+models_list <- readRDS("./output/models/xgboost/T1.0.rds")
+perf <- evaluate_models(models_list)
+class(perf)
+
+# Save perf 
+saveRDS(perf, "./output/models/xgboost/T1.0_performance.rds")
+perf <- readRDS("./output/models/xgboost/T1.0_performance.rds")
+
+# Compare with baseline
+md_baseline <- readRDS("./output/models/xgboost/T0.0.rds")
+perf_baseline <- evaluate_models(md_baseline)
+perf_baseline 
+perf
 
 
 

@@ -201,6 +201,9 @@ sapply(buff, function(x) sum(is.na(x)))
 
 
 ####### Boats (Luka) ############
+buff <- st_read("./data/processed_data/predictors/predictors_raw_v3.0.gpkg") %>% 
+  dplyr::select(-boat_density_month)
+
 # Load csv file
 boats <- read.csv("./data/processed_data/predictors/Boats/mtdt_7_boats_month_ALL.csv")
 
@@ -1735,10 +1738,19 @@ st_write(x, "./data/processed_data/predictors/predictors_raw_v2.2.gpkg", append 
 # Based on mtdt_7.gpkg, same as predictors_raw_v2 : accounting for no detection samples 
 # PREDICTORS :  
 #  --- Key changes ---
-# Boat detection added 
 # Habitat including "Zone bathyale"
 
 st_write(x, "./data/processed_data/predictors/predictors_raw_v3.0.gpkg", append = FALSE)
 
 
+# Export predictors_raw_v3.1 -----
+# 28/11/2025. 
+# ROWS
+# Based on mtdt_7.gpkg, same as predictors_raw_v2 : accounting for no detection samples 
+# PREDICTORS :  
+#  --- Key changes ---
+# Habitat including "Zone bathyale" (= predictors_raw_v3.0)
+# Adding boats detection density over 4 weeks.
+
+st_write(buff, "./data/processed_data/predictors/predictors_raw_v3.1.gpkg", append = FALSE)
 
