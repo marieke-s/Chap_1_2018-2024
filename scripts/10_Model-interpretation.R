@@ -526,3 +526,58 @@ for (i in seq_along(feature_chunks)) {
   dev.off()
 }
 
+
+#------------ Performance comparison -----------------
+perf0 <- readRDS("./output/models/xgboost/T0.0_performance.rds")
+perf1 <- readRDS("./output/models/xgboost/T0.0.1_performance.rds")
+perf2 <- readRDS("./output/models/xgboost/T1.0_performance.rds")
+
+str(perf0)
+str(perf1)
+str(perf2)
+
+
+# Combine perf0 and perf1 = MODEL 1
+perf_model1 <- bind_rows(perf0, perf1) %>%
+  mutate(Model_ID = "Model1")
+
+# perf2 = MODEL 2
+perf_model2 <- perf2 %>%
+  mutate(Model_ID = "Model2")
+names(perf_model2) 
+
+# Select only Pearson correlation + response var + model
+perf_all <- bind_rows(perf_model1, perf_model2) %>%
+  dplyr::select(Response_Var, Model_ID, Pearson_Corr)
+
+perf_all$Response_Var <- factor(
+  perf_all$Response_Var,
+  levels = unique(perf_all$Response_Var)  # preserves order appearing in table
+)
+
+
+ggplot(perf_all, aes(x = Response_Var,
+                     y = Pearson_Corr,
+                     fill = Model_ID)) +
+  geom_bar(stat = "identity",
+           position = position_identity(),
+           alpha = 0.4) +                     # transparency to see overlap
+  scale_fill_manual(values = c("Model1" = "steelblue",
+                               "Model2" = "orange")) +
+  labs(title = "Comparison of Pearson Correlation: Model 1 vs Model 2",
+       x = "Response Variable",
+       y = "Pearson Correlation",
+       fill = "Model") +
+  coord_flip() +                             # horizontal bars
+  theme_minimal(base_size = 12) +
+  theme(axis.text.y = element_text(size = 10),
+        axis.text.x = element_text(size = 10))
+
+
+
+
+
+
+
+
+
