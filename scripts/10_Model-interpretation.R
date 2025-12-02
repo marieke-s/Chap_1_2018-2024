@@ -86,6 +86,35 @@ models_list <- readRDS("./output/models/T0.0.rds")
 
 
 
+#-------------------------- T.1 : Load and prep data ------------------
+# predictors_sel_v.1.4 ----
+pred <- st_read("./data/processed_data/predictors/predictors_sel_v1.4.gpkg")
+
+# remove space and majuscule in habitat names
+pred$grouped_main_habitat <- gsub(" ", "_", pred$grouped_main_habitat)
+pred$grouped_main_habitat <- tolower(pred$grouped_main_habitat)
+
+# set character as factor
+pred$grouped_main_habitat <- as.factor(pred$grouped_main_habitat)
+
+# check levels
+levels(pred$grouped_main_habitat)
+table(pred$grouped_main_habitat)
+
+unique(pred$grouped_main_habitat)
+
+# mtdt_7_sel_v1.1 ----
+mtdt <- st_read("./data/processed_data/Mtdt/mtdt_7_sel_v1.1.gpkg")
+
+# div_indices_sel_v1.1.gpkg ----
+div <- readr::read_csv2("./data/processed_data/Traits/div_indices_v1.0_sel_v1.1.csv") %>%
+  mutate(DeBRa = as.numeric(DeBRa))
+
+# model T.1.0 ----
+models_list <- readRDS("./output/models/xgboost/T1.0.rds")
+
+
+
 #------------- Prep ----------
 df <- pred %>%
   st_drop_geometry() %>%
@@ -194,7 +223,7 @@ md <- models_list
 
 # 1.  Extract and Aggregate Variable Importance
 # Get folds
-folds <- md$Crypto$XGB$bloo50
+folds <- md$Elasmo$XGB$bloo50
 
 # Extract importance from each fold's model
 importance_list <- lapply(folds, function(fold) {
@@ -226,7 +255,7 @@ ggplot(mean_importance, aes(x = reorder(Feature, mean_gain), y = mean_gain)) +
 
 # Save the plot 
 ggsave(
-  filename = "./figures/models/T0.0/Var_imp_T0.0_Crypto.png",
+  filename = "./figures/models/T1.0/Var_imp_T1.0_Elasmo.png",
   width    = 8,
   height   = 6
 )
@@ -298,7 +327,7 @@ plot <- SHAPforxgboost::shap.plot.summary(shap_long)
 
 # Save the plot
 ggsave(
-  filename = "./figures/models/T0.0/SHAP_T.0.0_$R$XGB$bloo50$Fold_1$.png",
+  filename = "./figures/models/T1.0/SHAP_T.1.0_$R$XGB$bloo50$Fold_1$.png",
   plot     = plot,
   width    = 8,
   height   = 6
@@ -335,7 +364,7 @@ for (i in seq_along(feature_chunks)) {
   
   # open a graphics device to save the panel
   png(
-    filename = sprintf("./fugures/models/T0.0/shap_dependence_panel_%02d.png", i),
+    filename = sprintf("./figures/models/T1.0/shap_dependence_panel_%02d.png", i),
     width    = 2000,
     height   = 2000,
     res      = 300
