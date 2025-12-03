@@ -564,7 +564,7 @@ ggplot(perf_all, aes(x = Response_Var,
            alpha = 0.4) +                     # transparency to see overlap
   scale_fill_manual(values = c("Model1" = "steelblue",
                                "Model2" = "orange")) +
-  labs(title = "Comparison of Pearson Correlation: Model 1 vs Model 2",
+  labs(title = "XGboost BLOO50 perf (Pearson cor) : With and without boats",
        x = "Response Variable",
        y = "Pearson Correlation",
        fill = "Model") +
