@@ -317,11 +317,16 @@ str(grid)
 
 #------------ grid_v1.1_3857 -----------------
 grid <- st_read("./data/processed_data/prediction_extent/grid_v1.1.gpkg", quiet = TRUE)
-grid_3832 <- sf::st_transform(grid, crs = 3832)
-st_crs(grid_3832)
+names(grid)
 
-st_write(grid_3832, "./data/processed_data/prediction_extent/grid_v1.1_3857.gpkg",
+grid_3857 <- sf::st_transform(grid, crs = 3857)
+st_crs(grid_3857)
+
+st_write(grid_3857, "./data/processed_data/prediction_extent/grid_v1.1_3857.gpkg",
   delete_dsn = TRUE)
+
+
+
 #------------ Check extraction ----------------
 # Read all .geojson in the folder 
 # grid_files <- list.files("./data/processed_data/predictors/Prediction_grid_v1.0/CUR-WIND/", pattern = "*\\.geojson$", full.names = TRUE)
@@ -411,6 +416,7 @@ corse1 <- readr::read_csv("./data/processed_data/predictors/Prediction_grid_v1.1
 # correlation
 corse1 <- corse1 %>%
   # keep replicates that are in corse2
-  filter(id %in% corse2$id)
+  filter(replicates %in% corse2$replicates)
+
 cor(corse1$Boat_density_month, corse2$Boat_density_month)
 names(corse1)
