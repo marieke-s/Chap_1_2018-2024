@@ -231,7 +231,7 @@ buff <- buff %>%
   )
 
 
-
+sapply()
 
 rm(bat, extra_cols, rast, poly, var)
 
@@ -297,11 +297,11 @@ rm(buff_all, extra_cols)
 # Data :
 # A 100m resolution raster file from Andromed with 14 bands representing the surface of different habitats in m².
 # Load raster 
-rast <- terra::rast("./data/processed_data/predictors/Habitat/habitat_raster.tif")
+rast <- terra::rast("./data/processed_data/predictors/Habitat/habitat_raster_2.tif")
 
-rast_grouped <- terra::rast("./data/processed_data/predictors/Habitat/grouped_habitat_raster.tif")
+rast_grouped <- terra::rast("./data/processed_data/predictors/Habitat/grouped_habitat_raster_v2.tif")
 
-
+names(rast_grouped)
 
 
 
@@ -324,7 +324,7 @@ buff1 <- calculate_habitats(buff = buff,
 
 
 # For grouped habitats
-buff1 <- calculate_habitats(buff = buff1, 
+buff2 <- calculate_habitats(buff = buff1, 
                             rast = rast_grouped, 
                             id_column_name = "id", 
                             name = "grouped_",
@@ -334,7 +334,9 @@ beepr::beep()
 
 
 
-
+# (done on marbec-gpu)
+buff1 <- st_read("./data/processed_data/predictors/Prediction_grid_v1.1/buff1.gpkg")
+buff2 <- st_read("./data/processed_data/predictors/Prediction_grid_v1.1/buff2.gpkg")
 
 
 
@@ -353,9 +355,22 @@ buff <- buff %>%
 
 rm(buff1, extra_cols)
 
+extra_cols <- setdiff(names(buff2), names(buff))
+
+# left_join keeps all rows in buff and brings matching columns from dist by 'replicates'
+buff <- buff %>%
+  left_join(
+    buff2 %>% 
+      st_drop_geometry() %>% 
+      dplyr::select(id, dplyr::all_of(extra_cols)),
+    by = "id"
+  )
+
+rm(buff2, extra_cols)
 
 
 
+sapply(buff, function(x) sum(is.na(x))) # 13 NA in habitat variables
 
 
 #--- Handle NAs  ------
@@ -365,7 +380,7 @@ rm(buff1, extra_cols)
 # Select buff with NA in habitat columns
 habitat_cols <- c("main_habitat", "grouped_main_habitat", "grouped_nb_habitat_per_km2", "nb_habitat_per_km2")
 buff_na <- buff %>%
-  filter(if_any(all_of(habitat_cols), is.na)) # 15 NA 
+  filter(if_any(all_of(habitat_cols), is.na)) # 13 NA 
 
 buff_na <- buff_na %>% 
   dplyr::select(id, area_km2)
@@ -399,6 +414,10 @@ buff2 <- calculate_habitats_nn(
 
 beepr::beep()
 
+
+
+
+
 # Merge back NA values -----
 
 # Merge buff1 and buff 2 by id 
@@ -424,61 +443,21 @@ rows_to_update <- !is.na(idx)
 buff[rows_to_update, hab_cols] <- buff12[idx[rows_to_update], hab_cols] %>% sf::st_drop_geometry()
 
 # Check NA ----
-sapply(buff, function(x) sum(is.na(x))) # 2 NA remaining for 'main habitat'
+sapply(buff, function(x) sum(is.na(x))) # 0 NA remaining for 'main habitat'
 
 # Clean ups
 rm(buff1, buff2, buff12, buff_na, hab_cols, idx, rows_to_update)
 
 
+names()
 
-
-
-
-
-
-
-# Merge -----
-# Detect columns in dist that are not in buff
-extra_cols <- setdiff(names(df), names(buff))
-
-# left_join keeps all rows in buff and brings matching columns from dist by 'replicates'
-buff <- buff %>%
-  left_join(
-    df %>% 
-      st_drop_geometry() %>% 
-      dplyr::select(id, dplyr::all_of(extra_cols)),
-    by = "id"
-  )
-
-rm(df, extra_cols)
-rm(rast, rast_grouped)
-rm(h, habitats, new_cols)
+sapply(buff, function(x) sum(is.na(x))) 
 
 
 
 #--- Surface proportion of each grouped habitat ----
 # Handle habitats proportions (grouped only)
 # From 2a_Prep_Predictors.R:
-
-
-# Habitats (base names, must match layers in rast_grouped)
-habitats <- c(
-  "Algues.infralittorales",
-  "matte_morte_P.oceanica",
-  "coralligenous",
-  "rock",
-  "soft_bottom",
-  "meadow",
-  "Habitats.artificiels"
-)
-
-mean_cols <- paste0(habitats, "_mean")
-
-## 1. Remove old habitat mean columns if present
-buff <- buff %>%
-  dplyr::select(-any_of(mean_cols))
-
-## 2. Compute weighted means of each habitat within buffers
 
 buff <- sf::st_as_sf(buff)
 df   <- buff
@@ -579,17 +558,8 @@ for (col in mean_cols) {
 }
 
 # Check 
-summary(rowSums(df[, mean_cols] %>% st_drop_geometry(), na.rm = TRUE)) # All 1 = good -> nop min = 0
-boxplot(rowSums(df[, mean_cols] %>% st_drop_geometry(), na.rm = TRUE))
+summary(rowSums(df[, mean_cols] %>% st_drop_geometry(), na.rm = TRUE)) # All 1 = good 
 
-
-# Print row with rowSums = 0
-df %>%
-  filter(rowSums(df[, mean_cols] %>% st_drop_geometry(), na.rm = TRUE) == 0) %>%
-  dplyr::select(id, all_of(mean_cols)) %>%
-  print(n = Inf)
-
-# The 2 values = 0 correspond to the 2 remaining NAs (bathyale habitat) -> we leave it to NAs since we will modify the habitat variable to include bathyale zone later on. 
 
 ## 5. Merge back to buff 
 buff <- df %>% dplyr::select(-overlap)
@@ -735,49 +705,49 @@ rm(sst)
 
 
 
-#--- grid_v1.0_2023-07-01_with_predictors-raw_v1.0 ----
-# predictors for grid_v1.0
-# fixed predictors : all but : 
-# Without Laure in out reserve variable
-# Without features associated to port, canyon and MPA distance.
-# With 2 NA remaining in habitat variables
-# climatic predictors : CHL, SST, WIND, VEL, SAL, TEMP for June 2023; SAL TEMP for surface and 40m depth.  
-
-buff %>% 
-  dplyr::select(-value) %>%
-  st_write("./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_2023-07-01_with_predictors-raw_v1.0.gpkg", delete_dsn = TRUE)
-
-
-
-#--- grid_v1.0_2023-07-01_with_predictors-raw_v1.1 ----
-# same as  grid_v1.0_2023-07-01_with_predictors-raw_v1.1 but filling with habitat NA with "soft_bottom" as nearest pixel value is filled by soft bottom. 
-buff_filled <- buff %>%
-  mutate(
-    main_habitat = ifelse(is.na(main_habitat), "soft_bottom", main_habitat),
-    grouped_main_habitat = ifelse(is.na(grouped_main_habitat), "soft_bottom", grouped_main_habitat),
-    nb_habitat_per_km2 = ifelse(is.na(nb_habitat_per_km2), 1, nb_habitat_per_km2),
-    matte_morte_P.oceanica_mean = ifelse(is.na(matte_morte_P.oceanica_mean), 0, matte_morte_P.oceanica_mean),
-    `Algues infralittorales_mean` = ifelse(is.na(`Algues infralittorales_mean`), 0, `Algues infralittorales_mean`),
-    coralligenous_mean = ifelse(is.na(coralligenous_mean), 0, coralligenous_mean),
-    meadow_mean = ifelse(is.na(meadow_mean), 0, meadow_mean),
-    `Habitats artificiels_mean` = ifelse(is.na(`Habitats artificiels_mean`), 0, `Habitats artificiels_mean`),
-    rock_mean = ifelse(is.na(rock_mean), 0, rock_mean),
-    soft_bottom_mean = ifelse(is.na(soft_bottom_mean), 1, soft_bottom_mean)
-    
-  )
-sapply(buff_filled, function(x) sum(is.na(x))) # 0 NA now
-buff_filled %>% 
-  dplyr::select(-value) %>%
-  st_write("./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_2023-07-01_with_predictors-raw_v1.1.gpkg", delete_dsn = TRUE)
-
-
-
-
-#--- grid_v1.0_2023-07-01_with_predictors-tr_v1.1 ----
-pred_raw <- st_read("./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_2023-07-01_with_predictors-raw_v1.1.gpkg")
-
-
-# As in 6_Data-transformation.R : 
+# #--- grid_v1.0_2023-07-01_with_predictors-raw_v1.0 ----
+# # predictors for grid_v1.0
+# # fixed predictors : all but : 
+# # Without Laure in out reserve variable
+# # Without features associated to port, canyon and MPA distance.
+# # With 2 NA remaining in habitat variables
+# # climatic predictors : CHL, SST, WIND, VEL, SAL, TEMP for June 2023; SAL TEMP for surface and 40m depth.  
+# 
+# buff %>% 
+#   dplyr::select(-value) %>%
+#   st_write("./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_2023-07-01_with_predictors-raw_v1.0.gpkg", delete_dsn = TRUE)
+# 
+# 
+# 
+# #--- grid_v1.0_2023-07-01_with_predictors-raw_v1.1 ----
+# # same as  grid_v1.0_2023-07-01_with_predictors-raw_v1.1 but filling with habitat NA with "soft_bottom" as nearest pixel value is filled by soft bottom. 
+# buff_filled <- buff %>%
+#   mutate(
+#     main_habitat = ifelse(is.na(main_habitat), "soft_bottom", main_habitat),
+#     grouped_main_habitat = ifelse(is.na(grouped_main_habitat), "soft_bottom", grouped_main_habitat),
+#     nb_habitat_per_km2 = ifelse(is.na(nb_habitat_per_km2), 1, nb_habitat_per_km2),
+#     matte_morte_P.oceanica_mean = ifelse(is.na(matte_morte_P.oceanica_mean), 0, matte_morte_P.oceanica_mean),
+#     `Algues infralittorales_mean` = ifelse(is.na(`Algues infralittorales_mean`), 0, `Algues infralittorales_mean`),
+#     coralligenous_mean = ifelse(is.na(coralligenous_mean), 0, coralligenous_mean),
+#     meadow_mean = ifelse(is.na(meadow_mean), 0, meadow_mean),
+#     `Habitats artificiels_mean` = ifelse(is.na(`Habitats artificiels_mean`), 0, `Habitats artificiels_mean`),
+#     rock_mean = ifelse(is.na(rock_mean), 0, rock_mean),
+#     soft_bottom_mean = ifelse(is.na(soft_bottom_mean), 1, soft_bottom_mean)
+#     
+#   )
+# sapply(buff_filled, function(x) sum(is.na(x))) # 0 NA now
+# buff_filled %>% 
+#   dplyr::select(-value) %>%
+#   st_write("./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_2023-07-01_with_predictors-raw_v1.1.gpkg", delete_dsn = TRUE)
+# 
+# 
+# 
+# 
+# #--- grid_v1.0_2023-07-01_with_predictors-tr_v1.1 ----
+# pred_raw <- st_read("./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_2023-07-01_with_predictors-raw_v1.1.gpkg")
+# 
+# 
+# # As in 6_Data-transformation.R : 
 
 # Remove 0 variance predictors ----
 nzv <- caret::nearZeroVar(pred_raw %>% st_drop_geometry(), saveMetrics = TRUE)
@@ -1018,7 +988,7 @@ st_write(gp, "./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_20
 #--------------------------------------------------- PREDICTION GRID V.1.0 - FIXED PREDICTORS ----------------
 # grid_v1.0_2023-07-01_with_predictors-raw_FIXED_v1.1 ----
 
-buff <- st_read("./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_2023-07-01_with_predictors-raw_v1.1.gpkg")
+buff <- st_read("./data/processed_data/predictors/Prediction_grid_v1.1/grid_v1.0_2023-07-01_with_predictors-raw_v1.1.gpkg")
 names(buff)
 
 # remove cols containing 'chl' 'temp' 'sal' 'wind' 'vel' 'sst'
@@ -1035,10 +1005,19 @@ names(buff_clean)
 st_write(buff_clean, "./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_2023-07-01_with_predictors-raw_FIXED_v1.1.gpkg", delete_dsn = TRUE)
 
 
+# grid_v1.1_with_predictors-raw_FIXED_v1.2 ----
+# With habitat 2
+
+
+# Export 
+st_write(buff, "./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.1_with_predictors-raw_FIXED_v1.2.gpkg", delete_dsn = TRUE)
+
 
 #--------------------------------------------------- PREDICTION GRID V.1.1 - APRIL-SEPTEMBER 2023 ----------------
 #--- Load grid_v1.0_2023-07-01_with_predictors-raw_FIXED_v1.1 ----
-buff <- st_read("./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_2023-07-01_with_predictors-raw_FIXED_v1.1.gpkg")
+buff <- st_read("./data/processed_data/predictors/Prediction_grid_v1.1/grid_v1.0_2023-07-01_with_predictors-raw_FIXED_v1.1.gpkg")
+#--- Load grid_v1.1_with_predictors-raw_FIXED_v1.2 ----
+buff <- st_read("./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.1_with_predictors-raw_FIXED_v1.2.gpkg")
 # CHL -----
 # Lister les fichiers CSV
 chl_files <- list.files(
@@ -1279,8 +1258,7 @@ dim(merged_sf_list$`2023-05-01`) # should be 4423
 
 ## 5. Loop over merged files and APPEND to existing buff_by_date
 for (d in intersect(names(buff_by_date), names(merged_sf_list))) {
-  message("Updating buff_by_date for ", d, " with CUR-WIND data")
-  
+
   file <- merged_sf_list[[d]] %>% st_drop_geometry()
   
   # only add columns that are not already present in this date's buff
@@ -1338,8 +1316,7 @@ dim(merged_sf_list$`2023-05-01`) # should be 4423
 
 ## 5. Loop over merged files and APPEND to existing buff_by_date
 for (d in intersect(names(buff_by_date), names(merged_sf_list))) {
-  message("Updating buff_by_date for ", d, " with CUR-WIND data")
-  
+
   file <- merged_sf_list[[d]] %>% st_drop_geometry()
   
   # only add columns that are not already present in this date's buff
@@ -1351,15 +1328,16 @@ for (d in intersect(names(buff_by_date), names(merged_sf_list))) {
         dplyr::select(id, dplyr::all_of(extra_cols)),
       by = "id"
     ) %>%
+    # Add "_bottom" suffix to extra_cols colnames
+    rename_with(~ paste0(., "_bottom"), .cols = all_of(extra_cols)) %>%
     # Remove cols starting with 'X2023' if they appear
-    dplyr::select(-starts_with("X2023")) %>%
-    # Add '_surf' suffix to SAL and TEMP columns
-    rename_with(~ paste0(., "_bottom"), 
-                .cols = c(starts_with("sal_"), starts_with("temp_")))
+    dplyr::select(-starts_with("X2023")) 
+    
 }
 
 # Check results
-names(buff_by_date$`2023-07-01`)
+names(buff_by_date$`2023-05-01`)
+
 
 # Clean up 
 rm(file_info, paths_by_date, merged_sf_list)
@@ -1368,18 +1346,170 @@ rm(file_info, paths_by_date, merged_sf_list)
 
 
 
-#--- Export grid_v1.0_2023-0X-01_with_predictors-raw_v1.1 -----
+
+# Boats -----
+# Lister les fichiers CSV
+boat_files <- list.files(
+  "./data/processed_data/predictors/Prediction_grid_v1.1/",
+  pattern = "\\_full.geojson$", 
+  full.names = TRUE
+)
+
+## 1. Extract the date from the file name
+boat_file_info <- tibble::tibble(
+  path = boat_files,
+  date = str_extract(basename(boat_files), "\\d{4}-\\d{2}-\\d{2}")
+)
+
+## 2. Group file paths by date
+boat_paths_by_date <- split(boat_file_info$path, boat_file_info$date)
+
+## 3. Read files per date (one df per date)
+boat_by_date <- lapply(boat_paths_by_date, function(paths) {
+  # in case there is >1 file per date in the future, bind rows
+  map_dfr(paths, ~ st_read(.x))
+})
+
+dim(boat_by_date$`2023-05-01`) # should be 4423
+
+## 5. Loop over merged files and APPEND to existing buff_by_date
+for (d in intersect(names(buff_by_date), names(boat_by_date))) {
+  
+  file <- boat_by_date[[d]] %>% st_drop_geometry()
+  
+  # only add columns that are not already present in this date's buff
+  extra_cols <- setdiff(names(file), names(buff_by_date[[d]]))
+  
+  buff_by_date[[d]] <- buff_by_date[[d]] %>%
+    left_join(
+      file %>%
+        dplyr::select(id, dplyr::all_of(extra_cols)),
+      by = "id"
+    ) %>%
+    # Remove cols starting with 'X2023' if they appear
+    dplyr::select(-starts_with("X2023"))
+}
+
+# Check results
+names(buff_by_date$`2023-10-01`)
+sapply(buff_by_date$`2023-07-01`, function(x) sum(is.na(x)))
+
+
+
+
+#--- Add 07/2023 SAL-TEMP CUR-WIND cols ----
+juneenv <- st_read("./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.0_2023-07-01_with_predictors-raw_v1.0.gpkg")
+names(juneenv)
+
+# Merge juneenv cols starting with "sal_" "temp_" "vel_" "ws_" to buff_by_date$`2023-07-01`
+extra_cols <- names(juneenv)[grepl("^(sal_|temp_|vel_|ws_)", names(juneenv))]
+
+buff_by_date$`2023-07-01` <- buff_by_date$`2023-07-01` %>%
+  left_join(
+    juneenv %>%
+      st_drop_geometry() %>%
+      dplyr::select(id, dplyr::all_of(extra_cols)),
+    by = "id"
+  )
+
+sapply(buff_by_date$`2023-07-01`, function(x) sum(is.na(x)))
+
+
+# Clean up 
+rm(boat_file_info, boat_paths_by_date, boat_by_date, chl_by_date, sst_by_date, juneenv, d, extra_cols, files, sst_file_info, sst_paths_by_date, file_info, paths_by_date, merged_sf_list)
+rm(chl_paths_by_date, file, sst_df, boat_files, sst_files, chl_files, chl_file_info)
+
+#--- Homogenize column names ----
+
+# For each date in buff_by_date print the number of cols and their name 
+for (d in names(buff_by_date)) {
+  message("Date: ", d)
+  message("Number of columns: ", ncol(buff_by_date[[d]]))
+  print(names(buff_by_date[[d]]))
+  message("-----")
+}
+
+# Remove "depth_sampling_40m" 
+dates <- c("2023-08-01", "2023-09-01", "2023-10-01")
+for (d in dates) {
+  buff_by_date[[d]] <- buff_by_date[[d]] %>%
+    dplyr::select(-depth_sampling_40m)
+}
+rm(dates)
+# Remove "_40m" cols in buff_by_date$`2023-07-01`
+buff_by_date$`2023-07-01` <- buff_by_date$`2023-07-01` %>%
+  dplyr::select(-contains("_40m"))
+
+
+# Remove "_month" in the end of buff_by_date$`2023-07-01` colnames 
+colnames(buff_by_date$`2023-07-01`) <- gsub("_month$", "", colnames(buff_by_date$`2023-07-01`))
+
+
+# Remove date after "Boat_density_month" in all dates
+for (d in names(buff_by_date)) {
+  colnames(buff_by_date[[d]]) <- gsub("Boat_density_month_\\d{4}.\\d{2}.\\d{2}", "Boat_density_month", colnames(buff_by_date[[d]]))
+}
+
+# Replace "_surface" by "_surf" in all buff_by_date$`2023-07-01` colnames
+colnames(buff_by_date$`2023-07-01`) <- gsub("_surface", "_surf", colnames(buff_by_date$`2023-07-01`))
+
+# Replace "_surface" by "_surf" in all dates colnames
+for (d in names(buff_by_date)) {
+  colnames(buff_by_date[[d]]) <- gsub("_surface", "_surf", colnames(buff_by_date[[d]]))
+}
+
+buff_by_date$`2023-07-01` <- buff_by_date$`2023-07-01` %>%
+  dplyr::select(-region_bottom)
+
+# Check if colnames are the same across all dates
+common_cols <- Reduce(intersect, lapply(buff_by_date, names))
+
+# Print difference between each date's cols and common_cols
+for (d in names(buff_by_date)) {
+  diff_cols <- setdiff(names(buff_by_date[[d]]), common_cols)
+  if (length(diff_cols) > 0) {
+    message("Date: ", d, " has extra columns: ", paste(diff_cols, collapse = ", "))
+  }
+}
+
+# #--- Export grid_v1.0_2023-0X-01_with_predictors-raw_v1.1 -----
+# saveRDS(
+#   buff_by_date,
+#   file = "./data/processed_data/predictors/Prediction_grid_v1.0/Export_grid_v1.0_2023-Apr-Sept_with_predictors-raw_v1.1.rds"
+# )
+# 
+# #--- Export grid_v1.0_2023-0X-01_with_predictors-raw_v1.2 -----
+# # Includes boat detection by month 
+# # Included all climatic variables for 2023-07-01 as well
+# # Same columns across dates
+# 
+# saveRDS(
+#   buff_by_date,
+#   file = "./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-raw_v1.2.rds"
+# )
+# 
+# 
+
+#--- Export grid_v1.0_2023-0X-01_with_predictors-raw_v1.3 -----
+# Includes Boat detection by month 
+# Included all climatic variables for 2023-07-01 as well
+# Same columns across dates
+
+# NEW ! Includes habitat v2
+
 saveRDS(
   buff_by_date,
-  file = "./data/processed_data/predictors/Prediction_grid_v1.0/Export_grid_v1.0_2023-Apr-Sept_with_predictors-raw_v1.1.rds"
+  file = "./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-raw_v1.3.rds"
 )
+
+
 
 #--- Transform and select ----
 
 
 # 0. Get list of variables that are log-transformed in training set ----
 
-p <- st_read("./data/processed_data/predictors/predictors_tr_v1.2.gpkg", quiet = TRUE)
+p <- st_read("./data/processed_data/predictors/predictors_tr_v1.3.gpkg", quiet = TRUE)
 
 log_cols <- colnames(
   p %>%
@@ -1523,7 +1653,7 @@ pred_tr <- pred_tr %>%
 
 # 2. Loop through buff_by_date, apply transform, and write one GPKG per date -----
 
-
+buff_by_date <- readRDS("./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-raw_v1.2.rds")
 out_dir <- "./data/processed_data/predictors/Prediction_grid_v1.1"
 
 if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
@@ -1541,7 +1671,7 @@ pred_tr_list <- lapply(names(buff_by_date), function(d) {
   
   out_file <- file.path(
     out_dir,
-    paste0("grid_v1.0_", d, "_with_predictors-tr_v1.1.gpkg")
+    paste0("grid_v1.1_", d, "_with_predictors-tr_v1.2.gpkg")
   )
   
   st_write(pred_tr, out_file, delete_dsn = TRUE)
@@ -1550,4 +1680,22 @@ pred_tr_list <- lapply(names(buff_by_date), function(d) {
 })
 
 names(pred_tr_list) <- names(buff_by_date)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

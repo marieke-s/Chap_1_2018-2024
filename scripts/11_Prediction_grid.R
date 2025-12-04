@@ -325,7 +325,7 @@ st_crs(grid_3857)
 st_write(grid_3857, "./data/processed_data/prediction_extent/grid_v1.1_3857.gpkg",
   delete_dsn = TRUE)
 
-
+names(grid_3857)
 
 #------------ Check extraction ----------------
 # Read all .geojson in the folder 
