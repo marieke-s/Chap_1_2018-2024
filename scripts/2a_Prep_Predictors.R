@@ -989,7 +989,6 @@ rast_grouped <- rast_grouped[[!(names(rast_grouped) %in% c("Association rhodolit
 # Keep "Zone bathyale" alone 
 
 
-plot(rast_grouped)
 
 
 

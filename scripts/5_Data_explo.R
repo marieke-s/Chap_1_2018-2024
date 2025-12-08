@@ -1524,6 +1524,384 @@ map_index_plots(df = indicators, version = "div_indices_sel_v1.1", output_direct
 
 
 #--- R x bathy [to do] -----
-#--- R x region [to do] -----
 
 
+#-------------------------------------  Link R - variables explo -----------------------------------------
+#--- Load data ----
+# predictors_sel_v.1.5 
+pred <- st_read("./data/processed_data/predictors/predictors_sel_v1.5.gpkg")
+
+# remove space and majuscule in habitat names
+pred$grouped_main_habitat <- gsub(" ", "_", pred$grouped_main_habitat)
+pred$grouped_main_habitat <- tolower(pred$grouped_main_habitat)
+
+# set character as factor
+pred$grouped_main_habitat <- as.factor(pred$grouped_main_habitat)
+
+# check levels
+levels(pred$grouped_main_habitat)
+table(pred$grouped_main_habitat)
+
+unique(pred$grouped_main_habitat)
+
+# mtdt_7_sel_v1.1 
+mtdt <- st_read("./data/processed_data/Mtdt/mtdt_7_sel_v1.1.gpkg")
+
+# div_indices_sel_v1.1.gpkg 
+div <- readr::read_csv2("./data/processed_data/Traits/div_indices_v1.0_sel_v1.1.csv") %>%
+  mutate(DeBRa = as.numeric(DeBRa))
+
+# tot 
+tot <- pred %>%
+  st_drop_geometry() %>%
+  left_join(st_drop_geometry(mtdt), by = "replicates") %>%
+  left_join(div, by = "replicates")
+
+
+
+#--- R ~ volume/area/depth_sampling  ----------------------------
+predictor.variable.names = c("estimated_volume_total",
+                             "depth_sampling", "area_km2")
+
+spatialRF::plot_training_df(
+  data = tot,
+  dependent.variable.name = "R",
+  predictor.variable.names = predictor.variable.names,
+  ncol = 3,
+  point.color = viridis::viridis(100, option = "F"),
+  line.color = "gray30"
+)
+
+# Save plot
+ggsave(
+  filename = "./figures/Div_indices/R_vs_volume_area_depth-sampling.png",
+  width = 12,
+  height = 4,
+  dpi = 300
+)
+
+
+# Correlation test
+cor.test(tot$R, tot$estimated_volume_total, method = "pearson")
+# Pearson's product-moment correlation
+# 
+# data:  tot$R and tot$estimated_volume_total
+# t = 11.261, df = 635, p-value < 2.2e-16
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  0.3411226 0.4707572
+# sample estimates:
+#       cor 
+# 0.4079942 
+
+
+cor.test(tot$R, tot$depth_sampling, method = "pearson")
+# Pearson's product-moment correlation
+# 
+# data:  tot$R and tot$depth_sampling
+# t = -1.8355, df = 635, p-value = 0.0669
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.149487695  0.005063804
+# sample estimates:
+#         cor 
+# -0.07264805 
+
+
+cor.test(tot$R, tot$area_km2, method = "pearson")
+# Pearson's product-moment correlation
+# 
+# data:  tot$R and tot$area_km2
+# t = -0.7347, df = 635, p-value = 0.4628
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.10658545  0.04864995
+# sample estimates:
+#         cor 
+# -0.02914347 
+
+
+
+
+#--- R ~ method/project ----------------------------
+
+
+library(ggplot2)
+library(forcats)
+
+
+# Remove AUV and glider methods
+dt <- tot %>%
+  filter(!method %in% c("AUV", "glider"))
+
+# By method 
+p <- ggplot(dt, aes(x = method, y = R)) +
+  geom_violin(fill = "grey90", color = "grey60", width = 0.9, alpha = 0.8, trim = FALSE) +
+  geom_boxplot(width = 0.25, outlier.shape = NA, fill = "steelblue", alpha = 0.6) +
+  geom_jitter(width = 0.15, alpha = 0.25, size = 1) +
+  stat_summary(fun = median, geom = "point", size = 2.2, color = "black") +
+  labs(
+    title = "R by sampling method",
+    x = "Sampling method",
+    y = "R"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    axis.text.x = element_text(angle = 35, hjust = 1)
+  )
+p
+
+# Save plot 
+ggsave(
+  filename = "./figures/Div_indices/R_by_method.png",
+  plot = p,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
+
+
+# By project 
+p <- ggplot(dt, aes(x = project, y = R)) +
+  geom_violin(fill = "grey90", color = "grey60", width = 0.9, alpha = 0.8, trim = FALSE) +
+  geom_boxplot(width = 0.25, outlier.shape = NA, fill = "steelblue", alpha = 0.6) +
+  geom_jitter(width = 0.15, alpha = 0.25, size = 1) +
+  stat_summary(fun = median, geom = "point", size = 2.2, color = "black") +
+  labs(
+    title = "R by sampling method",
+    x = "Sampling method",
+    y = "R"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    axis.text.x = element_text(angle = 35, hjust = 1)
+  )
+p
+
+# Save plot 
+ggsave(
+  filename = "./figures/Div_indices/R_by_project.png",
+  plot = p,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
+
+
+#--- R ~ habitat ----------------------------
+
+# Main habitat
+p <- ggplot(tot, aes(x = grouped_main_habitat, y = R)) +
+  geom_violin(fill = "grey90", color = "grey60", width = 0.9, alpha = 0.8, trim = FALSE) +
+  geom_boxplot(width = 0.25, outlier.shape = NA, fill = "steelblue", alpha = 0.6) +
+  geom_jitter(width = 0.15, alpha = 0.25, size = 1) +
+  stat_summary(fun = median, geom = "point", size = 2.2, color = "black") +
+  labs(
+    title = "R by sampling method",
+    x = "Sampling method",
+    y = "R"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    axis.text.x = element_text(angle = 35, hjust = 1)
+  )
+p
+# Save plot 
+ggsave(
+  filename = "./figures/Div_indices/R_by_habitat.png",
+  plot = p,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
+
+
+
+
+# Nb habitat / km2
+spatialRF::plot_training_df(
+  data = tot,
+  dependent.variable.name = "R",
+  predictor.variable.names = "nb_habitat_per_km2",
+  ncol = 2,
+  point.color = viridis::viridis(100, option = "F"),
+  line.color = "gray30"
+)
+# Save plot
+ggsave(
+  filename = "./figures/Div_indices/R_vs_nb-habitat_per_km2.png",
+  width = 6,
+  height = 4,
+  dpi = 300
+)
+
+#--- R ~ regions ----------------------------
+p <- ggplot(tot, aes(x = region, y = R)) +
+  geom_violin(fill = "grey90", color = "grey60", width = 0.9, alpha = 0.8, trim = FALSE) +
+  geom_boxplot(width = 0.25, outlier.shape = NA, fill = "steelblue", alpha = 0.6) +
+  geom_jitter(width = 0.15, alpha = 0.25, size = 1) +
+  stat_summary(fun = median, geom = "point", size = 2.2, color = "black") +
+  labs(
+    title = "R by region",
+    x = "Region",
+    y = "R"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    axis.text.x = element_text(angle = 35, hjust = 1)
+  )
+p
+
+# Save plot
+ggsave(
+  filename = "./figures/Div_indices/R_by_region.png",
+  plot = p,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
+
+
+#--- R ~ year ----------------------------
+tot$year <- year(tot$date) %>% as.factor()
+
+
+p <- ggplot(tot, aes(x = year, y = R)) +
+  geom_violin(fill = "grey90", color = "grey60", width = 0.9, alpha = 0.8, trim = FALSE) +
+  geom_boxplot(width = 0.25, outlier.shape = NA, fill = "steelblue", alpha = 0.6) +
+  geom_jitter(width = 0.15, alpha = 0.25, size = 1) +
+  stat_summary(fun = median, geom = "point", size = 2.2, color = "black") +
+  labs(
+    title = "R by year",
+    x = "year",
+    y = "R"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    axis.text.x = element_text(angle = 35, hjust = 1)
+  )
+p
+
+# Save plot
+ggsave(
+  filename = "./figures/Div_indices/R_by_year.png",
+  plot = p,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
+
+
+
+
+#--- Characteristics of R hotspots ----------------------------
+# Hist of R --
+ggplot(tot, aes(x = R)) +
+  geom_histogram(bins = 50, fill = "steelblue", color = "black", alpha = 0.7) +
+  labs(
+    title = "Histogram of R values",
+    x = "R",
+    y = "Frequency"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5)
+  )
+
+
+# Boxplot plot of R --
+boxplot(tot$R)
+
+
+# Map of hotspots --
+# Add geometry
+tot <- pred %>%
+  dplyr::select(replicates, geom) %>%
+  left_join(st_drop_geometry(tot), by = "replicates")
+
+# Hotspots definition : R >  60
+hot <- tot %>% filter(R > 60)
+
+# Map hotspots
+
+ggplot() +
+  # non-hotspots: transparent fill, visible outline
+  geom_sf(data = tot, 
+          fill = "white",          # no fill
+          color = "black",    # outline color
+          size = 0.1,
+          alpha = 0.5) +      # translucent outline
+  
+  # hotspots: colored by R
+  geom_sf(data = hot, 
+          aes(color = R), 
+          size = 2.2) +
+  
+  scale_color_viridis_c() +
+  
+  theme_minimal() +
+  labs(title = "R Hotspots (R ≥ 60)",
+       color = "R")
+
+
+# Save plot
+ggsave(
+  filename = "./figures/Div_indices/R_hotspots_map.png",
+  width = 8,
+  height = 6,
+  dpi = 300
+)
+
+
+# Characteristics of hotspots ---
+nrow(hot) # 45 sites
+
+# Hist
+ggplot(hot, aes(x = R)) +
+  geom_histogram(bins = 20, fill = "orange", color = "black", alpha = 0.7) +
+  labs(
+    title = "Histogram of R values in Hotspots",
+    x = "R",
+    y = "Frequency"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5)
+  )
+# Boxplot
+boxplot(hot$R)
+
+
+# Methods used in hotspots
+table(hot$method)
+# dive_motionless                     dive_transect motionless_descended_from_surface                   seabed_transect                  surface_transect 
+# 9                                 3                                 2                                10                                21 
+
+table(hot$estimated_volume_total) 
+# 60  64  90 120 
+# 24   1   1  19 
+
+summary(hot$estimated_volume_total)
+# Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+# 60.00   60.00   60.00   86.09  120.00  120.00 
+
+boxplot(hot$estimated_volume_total)
+
+
+# !! Hotspot --> no volume < 60
+
+hot$year <- year(hot$date)
+table(hot$year)
+# 2018 2019 2020 2021 2022 2023 2024 
+# 4    3    1   13    2   13    9 
+
+table(hot$region)
+# Corse Occitanie      PACA 
+# 14        14        17 
+
+tot %>% filter(estimated_volume_total < 60) %>% pull(R) %>% summary

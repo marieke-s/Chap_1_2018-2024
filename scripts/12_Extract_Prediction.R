@@ -1014,8 +1014,8 @@ st_write(buff, "./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.1_
 
 
 #--------------------------------------------------- PREDICTION GRID V.1.1 - APRIL-SEPTEMBER 2023 ----------------
-#--- Load grid_v1.0_2023-07-01_with_predictors-raw_FIXED_v1.1 ----
-buff <- st_read("./data/processed_data/predictors/Prediction_grid_v1.1/grid_v1.0_2023-07-01_with_predictors-raw_FIXED_v1.1.gpkg")
+# #--- Load grid_v1.0_2023-07-01_with_predictors-raw_FIXED_v1.1 ----
+# buff <- st_read("./data/processed_data/predictors/Prediction_grid_v1.1/grid_v1.0_2023-07-01_with_predictors-raw_FIXED_v1.1.gpkg")
 #--- Load grid_v1.1_with_predictors-raw_FIXED_v1.2 ----
 buff <- st_read("./data/processed_data/predictors/Prediction_grid_v1.0/grid_v1.1_with_predictors-raw_FIXED_v1.2.gpkg")
 # CHL -----
@@ -1064,8 +1064,8 @@ buff_by_date <- lapply(names(chl_by_date), function(d) {
 names(buff_by_date) <- names(chl_by_date)
 
 ## Quick check
-names(buff_by_date$`2023-10-01`)
-dim(buff_by_date$`2023-05-01`)
+names(buff_by_date$`2023-10-01`) # should contain CHL cols
+dim(buff_by_date$`2023-05-01`) # should be 4423
 
 
 
@@ -1144,8 +1144,8 @@ for (d in intersect(names(buff_by_date), names(sst_by_date))) {
 }
 
 # quick sanity check
-names(buff_by_date$`2023-05-01`)
-dim(buff_by_date$`2023-05-01`)
+names(buff_by_date$`2023-05-01`) # should contain sst cols
+dim(buff_by_date$`2023-05-01`) # should be 4423
 
 
 
@@ -1201,6 +1201,7 @@ for (d in intersect(names(buff_by_date), names(merged_sf_list))) {
 
 # Check results
 names(buff_by_date$`2023-05-01`)
+dim(buff_by_date$`2023-05-01`)
 
 # Clean up 
 rm(file_info, paths_by_date, merged_sf_list)
@@ -1279,6 +1280,7 @@ for (d in intersect(names(buff_by_date), names(merged_sf_list))) {
 
 # Check results
 names(buff_by_date$`2023-05-01`)
+dim(buff_by_date$`2023-05-01)
 
 # Clean up 
 rm(file_info, paths_by_date, merged_sf_list)
@@ -1350,7 +1352,7 @@ rm(file_info, paths_by_date, merged_sf_list)
 # Boats -----
 # Lister les fichiers CSV
 boat_files <- list.files(
-  "./data/processed_data/predictors/Prediction_grid_v1.1/",
+  "./data/processed_data/predictors/Prediction_grid_v1.1/boats",
   pattern = "\\_full.geojson$", 
   full.names = TRUE
 )
@@ -1430,12 +1432,20 @@ for (d in names(buff_by_date)) {
 }
 
 # Remove "depth_sampling_40m" 
-dates <- c("2023-08-01", "2023-09-01", "2023-10-01")
+# dates <- c("2023-08-01", "2023-09-01", "2023-10-01", "2023-05-01", "2023-06-01")
+dates <- c( "2023-05-01", "2023-06-01")
 for (d in dates) {
   buff_by_date[[d]] <- buff_by_date[[d]] %>%
     dplyr::select(-depth_sampling_40m)
 }
 rm(dates)
+
+# Remove "region" 
+dates <- c("2023-08-01", "2023-09-01", "2023-10-01")
+for (d in dates) {
+  buff_by_date[[d]] <- buff_by_date[[d]] %>%
+    dplyr::select(-region)
+}
 # Remove "_40m" cols in buff_by_date$`2023-07-01`
 buff_by_date$`2023-07-01` <- buff_by_date$`2023-07-01` %>%
   dplyr::select(-contains("_40m"))
@@ -1472,6 +1482,21 @@ for (d in names(buff_by_date)) {
   }
 }
 
+# Remove "region" 
+dates <- c("2023-05-01", "2023-06-01", "2023-07-01")
+for (d in dates) {
+  buff_by_date[[d]] <- buff_by_date[[d]] %>%
+    dplyr::select(-region)
+}
+
+# Remove depth_sampling_40m
+dates <- c("2023-08-01", "2023-09-01", "2023-10-01")
+
+for (d in dates) {
+  buff_by_date[[d]] <- buff_by_date[[d]] %>%
+    dplyr::select(-depth_sampling_40m)
+}
+
 # #--- Export grid_v1.0_2023-0X-01_with_predictors-raw_v1.1 -----
 # saveRDS(
 #   buff_by_date,
@@ -1490,16 +1515,29 @@ for (d in names(buff_by_date)) {
 # 
 # 
 
-#--- Export grid_v1.0_2023-0X-01_with_predictors-raw_v1.3 -----
-# Includes Boat detection by month 
+# #--- Export grid_v1.0_2023-0X-01_with_predictors-raw_v1.3 -----
+# # Includes Boat detection by month 
+# # Included all climatic variables for 2023-07-01 as well
+# # Same columns across dates
+# 
+# # NEW ! Includes habitat v2
+# 
+# saveRDS(
+#   buff_by_date,
+#   file = "./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-raw_v1.3.rds"
+# )
+
+
+
+#--- Export grid_v1.0_2023-0X-01_with_predictors-raw_v1.4 -----
+# NEW ! Includes Boat detection by month FROM FULL GRID !! =/= v1.3 (where there was missing cells)
 # Included all climatic variables for 2023-07-01 as well
 # Same columns across dates
-
-# NEW ! Includes habitat v2
+# Includes habitat v2
 
 saveRDS(
   buff_by_date,
-  file = "./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-raw_v1.3.rds"
+  file = "./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-raw_v1.4.rds"
 )
 
 
@@ -1509,7 +1547,7 @@ saveRDS(
 
 # 0. Get list of variables that are log-transformed in training set ----
 
-p <- st_read("./data/processed_data/predictors/predictors_tr_v1.3.gpkg", quiet = TRUE)
+p <- st_read("./data/processed_data/predictors/predictors_sel_v1.5.gpkg")
 
 log_cols <- colnames(
   p %>%
@@ -1519,15 +1557,19 @@ log_cols <- colnames(
 
 # original variable names (without _log)
 base_log_vars <- sub("_log$", "", log_cols)
+base_log_vars <- tolower(base_log_vars)
 base_log_vars <- sub("_month", "", base_log_vars)  # remove _month if present
 
+# replace names
+base_log_vars[base_log_vars == "cop_chl_mean"] <- "Cop_CHL_month_mean"
+setdiff(base_log_vars, colnames(buff_by_date$`2023-05-01`))
 
 # 1. Function to apply transformation -----
 #    (this replaces pred_raw -> pred_tr workflow)
 
 transform_pred <- function(pred_raw, base_log_vars) {
   
-  pred_tr <- pred_raw
+  pred_tr <- pred_raw 
   
   # Remove ws_min_surface_month if present
   if ("ws_min_surface" %in% names(pred_tr)) {
@@ -1546,14 +1588,13 @@ transform_pred <- function(pred_raw, base_log_vars) {
     "soft_bottom_mean",
     "meadow_mean",
     "rock_mean",
-    "coralligenous_mean"
+    "coralligenous_mean",
+    "zone_bathyale_mean" 
   )
   
-  # # Safety: keep only those habitat columns that exist
-  # hab_cols <- intersect(hab_cols, colnames(pred_tr))
-  
   if (length(hab_cols) > 0) {
-    X <- as.data.frame(pred_tr[, hab_cols])
+    A <- pred_tr %>% st_drop_geometry() %>% dplyr::select(all_of(hab_cols))
+    X <- as.data.frame(A) 
     X <- data.frame(lapply(X, function(col) as.numeric(as.character(col))))
     X <- as.matrix(X) + 1e-6  # pseudocount
     
@@ -1623,7 +1664,7 @@ transform_pred <- function(pred_raw, base_log_vars) {
     
     # Replace original numeric columns with transformed ones
     pred_tr <- pred_tr %>%
-      st_drop_geometry() %>%
+      # st_drop_geometry() %>%
       dplyr::select(-all_of(l)) %>%
       dplyr::bind_cols(pred_num_log) %>%
       dplyr::bind_cols(st_geometry(pred_tr)) %>%
@@ -1648,15 +1689,15 @@ pred_tr <- pred_tr %>%
   }
   
   pred_tr
-}
 
+}
 
 # 2. Loop through buff_by_date, apply transform, and write one GPKG per date -----
 
-buff_by_date <- readRDS("./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-raw_v1.2.rds")
-out_dir <- "./data/processed_data/predictors/Prediction_grid_v1.1"
-
-if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
+# buff_by_date <- readRDS("./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-raw_v1.3.rds")
+# out_dir <- "./data/processed_data/predictors/Prediction_grid_v1.1/v1.3/"
+buff_by_date <- readRDS("./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-raw_v1.4.rds")
+out_dir <- "./data/processed_data/predictors/Prediction_grid_v1.1/v1.4/"
 
 pred_tr_list <- lapply(names(buff_by_date), function(d) {
   message("Processing date: ", d)
@@ -1671,7 +1712,7 @@ pred_tr_list <- lapply(names(buff_by_date), function(d) {
   
   out_file <- file.path(
     out_dir,
-    paste0("grid_v1.1_", d, "_with_predictors-tr_v1.2.gpkg")
+    paste0("grid_v1.1_", d, "_with_predictors-tr_v1.3.gpkg")
   )
   
   st_write(pred_tr, out_file, delete_dsn = TRUE)
@@ -1680,6 +1721,16 @@ pred_tr_list <- lapply(names(buff_by_date), function(d) {
 })
 
 names(pred_tr_list) <- names(buff_by_date)
+
+
+
+
+
+# Save pred_tr_list
+saveRDS(pred_tr_list, "./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-tr_v1.4.rds")
+
+
+
 
 
 

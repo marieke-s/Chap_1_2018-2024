@@ -33,7 +33,7 @@ source("./utils/Fct_Data-Prep.R")
 #------------- Load data ------------------
 # predictors_tr_v.1.3 ----
 pred <- st_read("./data/processed_data/predictors/predictors_tr_v1.3.gpkg")
-
+names(pred)
 # mtdt_7_sel_v1.1 ----
 mtdt <- st_read("./data/processed_data/Mtdt/mtdt_7_sel_v1.1.gpkg") # no lockdown, automn-winter, > 50m sites
 
@@ -336,6 +336,23 @@ st_write(sel, "./data/processed_data/predictors/predictors_sel_v1.4.gpkg", delet
 
 
 
+
+# Export predictors_sel_v.1.5.gpkg ----
+# based on predictors_tr_v1.3 (from predictors_raw_3.0 - with boats and habitat 2)
+# selected predictors : all
+st_write(pred, "./data/processed_data/predictors/predictors_sel_v1.5.gpkg", delete_dsn = TRUE)
+# Export predictors_sel_v.1.5_month.gpkg ----
+# All predictors but only monthly temporal variables
+sel <- pred
+day_cols <- grepl("_7j", colnames(sel)) | grepl("_24h", colnames(sel)) | grepl("_1y", colnames(sel)) | grepl("_year", colnames(sel)) | grepl("5years", colnames(sel)) | grepl("week", colnames(sel)) | grepl("day", colnames(sel))
+
+colnames(sel[which(day_cols)])
+
+sel <- sel[, !day_cols]
+names(sel)
+rm(day_cols)
+
+st_write(sel, "./data/processed_data/predictors/predictors_sel_v1.5_month.gpkg", delete_dsn = TRUE)
 
 #----------------- AUTRES -----------------
 #---- Visualise selected pred ----
