@@ -16,3 +16,7 @@ scripts/.virtual_documents/
 .RDataTmp*
 .RData
 .Rhistory
+
+.RDataTmp*
+.RData
+.Rhistory
