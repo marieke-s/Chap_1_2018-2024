@@ -1279,14 +1279,14 @@ for (d in intersect(names(buff_by_date), names(merged_sf_list))) {
 }
 
 # Check results
-names(buff_by_date$`2023-05-01`)
-dim(buff_by_date$`2023-05-01)
+names(buff_by_date$`2023-07-01`)
+dim(buff_by_date$`2023-05-01`)
 
 # Clean up 
 rm(file_info, paths_by_date, merged_sf_list)
 
 
-
+b_original_0 <- buff_by_date
 
 # SAL-TEMP-bottom -----
 
@@ -1313,7 +1313,7 @@ merged_sf_list <- lapply(paths_by_date, function(paths) {
   map_dfr(paths, ~ st_read(.x, quiet = TRUE))
 })
 
-dim(merged_sf_list$`2023-05-01`) # should be 4423
+#dim(merged_sf_list$`2023-05-01`) # should be 4423
 
 
 ## 5. Loop over merged files and APPEND to existing buff_by_date
@@ -1338,7 +1338,7 @@ for (d in intersect(names(buff_by_date), names(merged_sf_list))) {
 }
 
 # Check results
-names(buff_by_date$`2023-05-01`)
+names(buff_by_date$`2023-07-01`)
 
 
 # Clean up 
@@ -1347,7 +1347,7 @@ rm(file_info, paths_by_date, merged_sf_list)
 
 
 
-
+b_original_1 <- buff_by_date
 
 # Boats -----
 # Lister les fichiers CSV
@@ -1393,10 +1393,12 @@ for (d in intersect(names(buff_by_date), names(boat_by_date))) {
 }
 
 # Check results
-names(buff_by_date$`2023-10-01`)
+names(buff_by_date$`2023-07-01`)
 sapply(buff_by_date$`2023-07-01`, function(x) sum(is.na(x)))
 
 
+# b_original_2 <- buff_by_date
+names(b_original_2$`2023-07-01`)
 
 
 #--- Add 07/2023 SAL-TEMP CUR-WIND cols ----
@@ -1406,20 +1408,25 @@ names(juneenv)
 # Merge juneenv cols starting with "sal_" "temp_" "vel_" "ws_" to buff_by_date$`2023-07-01`
 extra_cols <- names(juneenv)[grepl("^(sal_|temp_|vel_|ws_)", names(juneenv))]
 
+
 buff_by_date$`2023-07-01` <- buff_by_date$`2023-07-01` %>%
-  left_join(
-    juneenv %>%
-      st_drop_geometry() %>%
-      dplyr::select(id, dplyr::all_of(extra_cols)),
+  left_join(juneenv %>% st_drop_geometry() %>% dplyr::select(id, dplyr::all_of(extra_cols)),
     by = "id"
   )
 
+# Checks
+sort(names(buff_by_date$`2023-07-01`))
+setdiff(names(b_original_2$`2023-07-01`), names(buff_by_date$`2023-07-01`))
 sapply(buff_by_date$`2023-07-01`, function(x) sum(is.na(x)))
+
+
 
 
 # Clean up 
 rm(boat_file_info, boat_paths_by_date, boat_by_date, chl_by_date, sst_by_date, juneenv, d, extra_cols, files, sst_file_info, sst_paths_by_date, file_info, paths_by_date, merged_sf_list)
 rm(chl_paths_by_date, file, sst_df, boat_files, sst_files, chl_files, chl_file_info)
+
+b_original_3 <- buff_by_date
 
 #--- Homogenize column names ----
 
@@ -1438,7 +1445,6 @@ for (d in dates) {
   buff_by_date[[d]] <- buff_by_date[[d]] %>%
     dplyr::select(-depth_sampling_40m)
 }
-rm(dates)
 
 # Remove "region" 
 dates <- c("2023-08-01", "2023-09-01", "2023-10-01")
@@ -1446,14 +1452,27 @@ for (d in dates) {
   buff_by_date[[d]] <- buff_by_date[[d]] %>%
     dplyr::select(-region)
 }
+
+# Remove "region" 
+dates <- c("2023-05-01", "2023-06-01", "2023-07-01")
+for (d in dates) {
+  buff_by_date[[d]] <- buff_by_date[[d]] %>%
+    dplyr::select(-region)
+}
+
+# Remove depth_sampling_40m
+dates <- c("2023-08-01", "2023-09-01", "2023-10-01")
+for (d in dates) {
+  buff_by_date[[d]] <- buff_by_date[[d]] %>%
+    dplyr::select(-depth_sampling_40m)
+}
+
 # Remove "_40m" cols in buff_by_date$`2023-07-01`
 buff_by_date$`2023-07-01` <- buff_by_date$`2023-07-01` %>%
   dplyr::select(-contains("_40m"))
 
-
 # Remove "_month" in the end of buff_by_date$`2023-07-01` colnames 
 colnames(buff_by_date$`2023-07-01`) <- gsub("_month$", "", colnames(buff_by_date$`2023-07-01`))
-
 
 # Remove date after "Boat_density_month" in all dates
 for (d in names(buff_by_date)) {
@@ -1482,20 +1501,10 @@ for (d in names(buff_by_date)) {
   }
 }
 
-# Remove "region" 
-dates <- c("2023-05-01", "2023-06-01", "2023-07-01")
-for (d in dates) {
-  buff_by_date[[d]] <- buff_by_date[[d]] %>%
-    dplyr::select(-region)
-}
+sort(names(buff_by_date$`2023-07-01`))
 
-# Remove depth_sampling_40m
-dates <- c("2023-08-01", "2023-09-01", "2023-10-01")
 
-for (d in dates) {
-  buff_by_date[[d]] <- buff_by_date[[d]] %>%
-    dplyr::select(-depth_sampling_40m)
-}
+
 
 # #--- Export grid_v1.0_2023-0X-01_with_predictors-raw_v1.1 -----
 # saveRDS(
@@ -1540,14 +1549,28 @@ saveRDS(
   file = "./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-raw_v1.4.rds"
 )
 
+l <- readRDS("./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-raw_v1.4.rds")
+l
+#--------------------------------------------------- TRANSFORM & SELECT ---------------------------------------
 
+# Load & prep grid data to transform (to match colnames of model's predictors) ----
+# Grid data to transform
+buff_by_date <- readRDS("./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-raw_v1.4.rds")
+sort(names(buff_by_date$`2023-07-01`))
 
-#--- Transform and select ----
+# Put all colnames to lowercase
+buff_by_date <- lapply(buff_by_date, function(df) {
+  names(df) <- tolower(names(df))
+  df})
 
+b_original_4 <- buff_by_date
 
 # 0. Get list of variables that are log-transformed in training set ----
 
+
+# Training predictors used for model to predict
 p <- st_read("./data/processed_data/predictors/predictors_sel_v1.5.gpkg")
+p1 <- st_read("./data/processed_data/predictors/predictors_sel_v1.4.gpkg")
 
 log_cols <- colnames(
   p %>%
@@ -1559,10 +1582,13 @@ log_cols <- colnames(
 base_log_vars <- sub("_log$", "", log_cols)
 base_log_vars <- tolower(base_log_vars)
 base_log_vars <- sub("_month", "", base_log_vars)  # remove _month if present
+# replace "cop_chl_mean" by "cop_chl_month_mean"
+base_log_vars <- gsub("cop_chl_mean", "cop_chl_month_mean", base_log_vars)
 
 # replace names
-base_log_vars[base_log_vars == "cop_chl_mean"] <- "Cop_CHL_month_mean"
 setdiff(base_log_vars, colnames(buff_by_date$`2023-05-01`))
+                                  
+                                  
 
 # 1. Function to apply transformation -----
 #    (this replaces pred_raw -> pred_tr workflow)
@@ -1696,7 +1722,6 @@ pred_tr <- pred_tr %>%
 
 # buff_by_date <- readRDS("./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-raw_v1.3.rds")
 # out_dir <- "./data/processed_data/predictors/Prediction_grid_v1.1/v1.3/"
-buff_by_date <- readRDS("./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-raw_v1.4.rds")
 out_dir <- "./data/processed_data/predictors/Prediction_grid_v1.1/v1.4/"
 
 pred_tr_list <- lapply(names(buff_by_date), function(d) {
@@ -1722,8 +1747,16 @@ pred_tr_list <- lapply(names(buff_by_date), function(d) {
 
 names(pred_tr_list) <- names(buff_by_date)
 
+# Checks
+sort(names(pred_tr_list$`2023-07-01`))
+setdiff(names(p1), names(pred_tr_list$`2023-07-01`))
 
 
+# Match colnames to model's predictors names
+# boat_density_log -> Boat_density_month_log for all dates
+for (d in names(pred_tr_list)) {
+  colnames(pred_tr_list[[d]]) <- gsub("boat_density_log", "Boat_density_month_log", colnames(pred_tr_list[[d]]))
+}
 
 
 # Save pred_tr_list

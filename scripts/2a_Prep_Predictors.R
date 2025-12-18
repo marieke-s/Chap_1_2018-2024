@@ -1002,7 +1002,7 @@ rast <- terra::rast("./data/processed_data/predictors/Habitat/habitat_raster_2.t
 rast_grouped <- terra::rast("./data/processed_data/predictors/Habitat/grouped_habitat_raster_v2.tif")
 
 
-
+plot(rast_grouped)
 
 
 

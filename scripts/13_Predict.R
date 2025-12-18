@@ -309,7 +309,7 @@ names(pred_list[[3]])
 
 
 #===============================================================================
-#-------------------------- T.1.33:RF: Load and prep data ------------------
+#-------------------------- T.1.33:RF: -----------------------------------------
 #-------------------------- Load and prep data ------------------
 # predictors_sel_v.1.4 
 pred <- st_read("./data/processed_data/predictors/predictors_sel_v1.4.gpkg")
@@ -378,25 +378,50 @@ rf <- randomForest::randomForest(formula = formula, data = train_df, ntree = 500
 # Save rf
 saveRDS(rf, "./output/models/rf/T1.33-retrain.rds")
 
-#-------------------------- Load retrained model ---------------
+#-------------------------- => Load retrained model ---------------
 md <- readRDS("./output/models/rf/T1.33-retrain.rds")
-#-------------------------- Predict ---------------------------
+
+#-------------------------- Bottom ----
+#--- Load & prep data for predict ---------------------------
+# Load grid predictor's data
 data <- readRDS("./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-tr_v1.4.rds")
 
+# Print model's predictors names
+(md$importance[,0])
+sort(names(data$`2023-05-01`))
 
+# Add estimated_volume_total to 60L (= 2 field replicates) inside all dates
+data <- lapply(data, function(df) {
+  df$estimated_volume_total <- 60
+  df
+})
 
-# Bottom ----
-# Remove surface sal temp cols
+# Add year to 2023 inside all dates
+data <- lapply(data, function(df) {
+  df$year <- 2023
+  df
+})
+
+# Add x and y coordinates using cell's centroid
+# in the same format as md's predictors (degree)
+data <- lapply(data, function(df) {
+  # transform from Lambert-93 (2154) to lon/lat
+  df_ll  <- st_transform(df, 4326)          # or "EPSG:4326"
+  coords <- st_coordinates(st_centroid(df_ll))
+  df$x   <- coords[, 1]  # longitude
+  df$y   <- coords[, 2]  # latitude
+  df
+})
+
+# Check
+range(data$`2023-05-01`$x)
+range(predictors$x)
+
+# Remove surface sal temp cols ----
 data <- lapply(data, \(df) df |> dplyr::select(!matches("^(temp|sal).*_surf$")))
 
 # Drop geometry 
 data <- lapply(data, \(df) df %>% st_drop_geometry())
-
-# Put all colnames to lowercase
-data <- lapply(data, function(df) {
-  names(df) <- tolower(names(df))
-  df
-})
 
 # Replace '_surf' or '_bottom' by '_1m' in colnames
 data <- lapply(data, function(df) {
@@ -406,12 +431,504 @@ data <- lapply(data, function(df) {
 
 
 
+# Checks 
+sort(setdiff(names(predictors), names(data$`2023-07-01`))) # should be 0
+sort(setdiff((md$importance[,0]), names(data$`2023-07-01`))) # should be 0
+setdiff((md$importance[,0]), names(predictors)) # should be 0
 
-sort(setdiff(names(predictors), names(data$`2023-05-01`)))
+
+# In data select only the model's predictors
+data <- lapply(data, function(df) {
+  df %>% dplyr::select(all_of(names(predictors)))
+})
+
+# Checks
+setdiff(names(data$`2023-07-01`), names(predictors)) # should be 0
+
+#--- Predict on all months ---------------------------
+
+predictions <- lapply(names(data), function(date) {
+  print(paste0("Predicting for date: ", date))
+  df <- data[[date]]
+  df$prediction_R <- predict(md, newdata = df)
+  df
+})
 
 
+names(predictions) <- names(data)
+
+# Save predictions ----
+# Add back geometry to predictions using dt$geom 
+dt <- readRDS("./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-tr_v1.4.rds")
+
+predictions <- lapply(names(predictions), function(date) {
+  print(paste0("Adding geometry for date: ", date))
+  df <- predictions[[date]]
+  geom <- st_geometry(dt[[date]])
+  st_as_sf(df, geometry = geom, crs = st_crs(dt[[date]]))
+})
+names(predictions) <- names(data)
+
+
+# Export predictions 
+for (date in names(predictions)) {
+  print(paste0("Exporting predictions for date: ", date))
+  st_write(predictions[[date]], paste0("./output/predictions/rf/T1.33_R_predictions_bottom_", date, ".gpkg"), delete_dsn = TRUE)
+}
+
+saveRDS(predictions, "./output/predictions/rf/T1.33_R_predictions_bottom_2023-av-sept.rds")
+
+# Map all predictions  ----
+
+
+
+# Map and save plots
+# for (date in names(predictions)) {
+#   print(paste0("Mapping predictions for date: ", date))
+#   p <- ggplot(predictions[[date]]) +
+#     geom_sf(aes(fill = prediction_R), color = NA) +
+#     scale_fill_viridis_c(option = "plasma") +
+#     labs(title = paste0("Predicted Species Richness (R) - ", date),
+#          fill = "Prediction") +
+#     theme_minimal()
+#   
+#   # Save plot
+#   ggsave(filename = paste0("./figures/Predictions/rf/T1.33_R_predictions_bottom_", date, ".png"),
+#          plot = p, width = 10, height = 8)
+# }
+# 
+# 
+
+
+
+library(lubridate)
+
+# French locale for month names
+old_locale <- Sys.getlocale("LC_TIME")
+Sys.setlocale("LC_TIME", "fr_FR.UTF-8")
+
+for (date in names(predictions)) {
+  
+  # Convert "2023-05-01" → Date, subtract 1 month
+  date_minus1 <- ymd(date) %m-% months(1)
+  
+  # Format into "Avril 2023"
+  title_date <- format(date_minus1, "%B %Y")
+  title_date <- tools::toTitleCase(title_date)  # capitalize
+  
+  print(paste0("Mapping predictions for date: ", date))
+  
+  p <- ggplot(predictions[[date]]) +
+    geom_sf(aes(fill = prediction_R), color = NA) +
+    scale_fill_viridis_c(option = "plasma") +
+    labs(
+      title = paste0("Prédiction de richesse spécifique (R) - ", title_date),
+      fill = "Prediction"
+    ) +
+    theme_minimal()
+  
+  # filename remains based on real date
+  ggsave(
+    filename = paste0("./figures/Predictions/rf/T1.33_R_predictions_bottom_", date, ".png"),
+    plot = p, width = 10, height = 8
+  )
+}
+
+# restore locale
+Sys.setlocale("LC_TIME", old_locale)
+
+
+
+
+
+
+
+#-------------------------- Surface ----
+#--- Load & prep data for predict ---------------------------
+# Load grid predictor's data
+data <- readRDS("./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-tr_v1.4.rds")
+
+# Print model's predictors names
+(md$importance[,0])
 sort(names(data$`2023-05-01`))
 
+# Add estimated_volume_total to 60L (= 2 field replicates) inside all dates
+data <- lapply(data, function(df) {
+  df$estimated_volume_total <- 60
+  df
+})
+
+# Add year to 2023 inside all dates
+data <- lapply(data, function(df) {
+  df$year <- 2023
+  df
+})
+
+# Add x and y coordinates using cell's centroid
+# in the same format as md's predictors (degree)
+data <- lapply(data, function(df) {
+  # transform from Lambert-93 (2154) to lon/lat
+  df_ll  <- st_transform(df, 4326)          # or "EPSG:4326"
+  coords <- st_coordinates(st_centroid(df_ll))
+  df$x   <- coords[, 1]  # longitude
+  df$y   <- coords[, 2]  # latitude
+  df
+})
+
+# Check
+range(data$`2023-05-01`$x)
+range(predictors$x)
+
+# Remove bottom sal temp cols ----
+data <- lapply(data, \(df) df |> dplyr::select(!matches("^(temp|sal).*_bottom$")))
+
+# Drop geometry 
+data <- lapply(data, \(df) df %>% st_drop_geometry())
+
+# Replace '_surf' or '_bottom' by '_1m' in colnames
+data <- lapply(data, function(df) {
+  names(df) <- gsub("_(surf|bottom)$", "_1m", names(df))
+  df
+})
+
+
+
+# Checks 
+sort(setdiff(names(predictors), names(data$`2023-07-01`))) # should be 0
+sort(setdiff((md$importance[,0]), names(data$`2023-07-01`))) # should be 0
+setdiff((md$importance[,0]), names(predictors)) # should be 0
+
+
+# In data select only the model's predictors
+data <- lapply(data, function(df) {
+  df %>% dplyr::select(all_of(names(predictors)))
+})
+
+# Checks
+setdiff(names(data$`2023-07-01`), names(predictors)) # should be 0
+
+#--- Predict on all months ---------------------------
+
+predictions <- lapply(names(data), function(date) {
+  print(paste0("Predicting for date: ", date))
+  df <- data[[date]]
+  df$prediction_R <- predict(md, newdata = df)
+  df
+})
+
+
+names(predictions) <- names(data)
+
+# Save predictions ----
+# Add back geometry to predictions using dt$geom 
+dt <- readRDS("./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-tr_v1.4.rds")
+
+predictions <- lapply(names(predictions), function(date) {
+  print(paste0("Adding geometry for date: ", date))
+  df <- predictions[[date]]
+  geom <- st_geometry(dt[[date]])
+  st_as_sf(df, geometry = geom, crs = st_crs(dt[[date]]))
+})
+names(predictions) <- names(data)
+
+
+# Export predictions 
+for (date in names(predictions)) {
+  print(paste0("Exporting predictions for date: ", date))
+  st_write(predictions[[date]], paste0("./output/predictions/rf/T1.33/T1.33_R_predictions_surface_", date, ".gpkg"), delete_dsn = TRUE)
+}
+
+saveRDS(predictions, "./output/predictions/rf/T1.33/T1.33_R_predictions_surface_2023-av-sept.rds")
+
+# Map all predictions  ----
+
+
+
+# Map and save plots
+# for (date in names(predictions)) {
+#   print(paste0("Mapping predictions for date: ", date))
+#   p <- ggplot(predictions[[date]]) +
+#     geom_sf(aes(fill = prediction_R), color = NA) +
+#     scale_fill_viridis_c(option = "plasma") +
+#     labs(title = paste0("Predicted Species Richness (R) - ", date),
+#          fill = "Prediction") +
+#     theme_minimal()
+#   
+#   # Save plot
+#   ggsave(filename = paste0("./figures/Predictions/rf/T1.33_R_predictions_bottom_", date, ".png"),
+#          plot = p, width = 10, height = 8)
+# }
+# 
+# 
+
+
+
+# French locale for month names
+old_locale <- Sys.getlocale("LC_TIME")
+Sys.setlocale("LC_TIME", "fr_FR.UTF-8")
+
+for (date in names(predictions)) {
+  
+  # Convert "2023-05-01" → Date, subtract 1 month
+  date_minus1 <- ymd(date) %m-% months(1)
+  
+  # Format into "Avril 2023"
+  title_date <- format(date_minus1, "%B %Y")
+  title_date <- tools::toTitleCase(title_date)  # capitalize
+  
+  print(paste0("Mapping predictions for date: ", date))
+  
+  p <- ggplot(predictions[[date]]) +
+    geom_sf(aes(fill = prediction_R), color = NA) +
+    scale_fill_viridis_c(option = "plasma") +
+    labs(
+      title = paste0("Prédiction de richesse spécifique (R) en surface - ", title_date),
+      fill = "Prediction"
+    ) +
+    theme_minimal()
+  
+  # filename remains based on real date
+  ggsave(
+    filename = paste0("./figures/Predictions/rf/T1.33/T1.33_R_predictions_surface_", date, ".png"),
+    plot = p, width = 10, height = 8
+  )
+}
+
+# restore locale
+Sys.setlocale("LC_TIME", old_locale)
+
+
+
+#===============================================================================
+
+
+#-------------------------- T.1.37:RF: ( = T33 on all resp var) | REDLIST -----------------------------------------
+#-------------------------- Load and prep data ------------------
+# predictors_sel_v.1.4 
+pred <- st_read("./data/processed_data/predictors/predictors_sel_v1.4.gpkg")
+
+# remove space and majuscule in habitat names
+pred$grouped_main_habitat <- gsub(" ", "_", pred$grouped_main_habitat)
+pred$grouped_main_habitat <- tolower(pred$grouped_main_habitat)
+
+# set character as factor
+pred$grouped_main_habitat <- as.factor(pred$grouped_main_habitat)
+
+# check levels
+levels(pred$grouped_main_habitat)
+table(pred$grouped_main_habitat)
+
+unique(pred$grouped_main_habitat)
+
+# mtdt_7_sel_v1.1
+mtdt <- st_read("./data/processed_data/Mtdt/mtdt_7_sel_v1.1.gpkg")
+
+# div_indices_sel_v1.1.gpkg
+div <- readr::read_csv2("./data/processed_data/Traits/div_indices_v1.0_sel_v1.1.csv") %>%
+  mutate(DeBRa = as.numeric(DeBRa))
+
+# tot
+tot <- pred %>%
+  st_drop_geometry() %>%
+  left_join(st_drop_geometry(mtdt), by = "replicates") %>%
+  left_join(div, by = "replicates")
+
+# --- Prep data for model ---
+
+pred1.5 <- st_read("./data/processed_data/predictors/predictors_sel_v1.5_month.gpkg")
+sort(names(pred1.5))
+
+# Add pred1.5$soft_bottom_clr and pred1.5$rock_clr to tot
+tot <- tot %>%
+  left_join(pred1.5 %>% st_drop_geometry() %>% dplyr::select(c("replicates", "soft_bottom_clr", "rock_clr", "area_km2")), by = "replicates")
+
+sort(names(tot))
+
+# Add year
+tot <- tot %>%
+  mutate(year = lubridate::year(date))
+
+col_pred <- c(colnames(pred %>% st_drop_geometry() %>% dplyr::select(-c(replicates, grouped_main_habitat, northness, eastness))), "year", "soft_bottom_clr", "rock_clr", "area_km2", "estimated_volume_total")
+
+# Extract predictors
+predictors <- tot %>% 
+  dplyr::select(all_of(col_pred)) 
+names(predictors)
+
+# Extract response variables
+ind <- div  %>% dplyr::select("RedList")
+names(ind)
+
+# Train df
+train_df <- tot %>% dplyr::select(c(names(ind), names(predictors)))
+names(train_df)
+
+#-------------------------- Retrain model on REDLIST ---------------------------
+formula <- as.formula(paste("RedList", "~", paste(names(predictors), collapse = " + ")))
+
+rf <- randomForest::randomForest(formula = formula, data = train_df, ntree = 500, importance = TRUE, mtry = 2, nodesize = 1)
+
+# Save rf
+saveRDS(rf, "./output/models/rf/T1.37-retrain_RedList.rds")
+
+#-------------------------- => Load retrained model ---------------
+md <- readRDS("./output/models/rf/T1.37-retrain_RedList.rds")
+
+#-------------------------- Bottom ----
+#--- Load & prep data for predict ---------------------------
+# Load grid predictor's data
+data <- readRDS("./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-tr_v1.4.rds")
+
+# Print model's predictors names
+(md$importance[,0])
+sort(names(data$`2023-05-01`))
+
+# Add estimated_volume_total to 60L (= 2 field replicates) inside all dates
+data <- lapply(data, function(df) {
+  df$estimated_volume_total <- 60
+  df
+})
+
+# Add year to 2023 inside all dates
+data <- lapply(data, function(df) {
+  df$year <- 2023
+  df
+})
+
+# Add x and y coordinates using cell's centroid
+# in the same format as md's predictors (degree)
+data <- lapply(data, function(df) {
+  # transform from Lambert-93 (2154) to lon/lat
+  df_ll  <- st_transform(df, 4326)          # or "EPSG:4326"
+  coords <- st_coordinates(st_centroid(df_ll))
+  df$x   <- coords[, 1]  # longitude
+  df$y   <- coords[, 2]  # latitude
+  df
+})
+
+# Check
+range(data$`2023-05-01`$x)
+range(predictors$x)
+
+# Remove surface sal temp cols ----
+data <- lapply(data, \(df) df |> dplyr::select(!matches("^(temp|sal).*_surf$")))
+
+# Drop geometry 
+data <- lapply(data, \(df) df %>% st_drop_geometry())
+
+# Replace '_surf' or '_bottom' by '_1m' in colnames
+data <- lapply(data, function(df) {
+  names(df) <- gsub("_(surf|bottom)$", "_1m", names(df))
+  df
+})
+
+
+
+# Checks 
+sort(setdiff(names(predictors), names(data$`2023-07-01`))) # should be 0
+sort(setdiff((md$importance[,0]), names(data$`2023-07-01`))) # should be 0
+setdiff((md$importance[,0]), names(predictors)) # should be 0
+
+
+# In data select only the model's predictors
+data <- lapply(data, function(df) {
+  df %>% dplyr::select(all_of(names(predictors)))
+})
+
+# Checks
+setdiff(names(data$`2023-07-01`), names(predictors)) # should be 0
+
+#--- Predict on all months ---------------------------
+
+predictions <- lapply(names(data), function(date) {
+  print(paste0("Predicting for date: ", date))
+  df <- data[[date]]
+  df$prediction_RedList <- predict(md, newdata = df)
+  df
+})
+
+
+names(predictions) <- names(data)
+
+# Save predictions ----
+# Add back geometry to predictions using dt$geom 
+dt <- readRDS("./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-tr_v1.4.rds")
+
+predictions <- lapply(names(predictions), function(date) {
+  print(paste0("Adding geometry for date: ", date))
+  df <- predictions[[date]]
+  geom <- st_geometry(dt[[date]])
+  st_as_sf(df, geometry = geom, crs = st_crs(dt[[date]]))
+})
+names(predictions) <- names(data)
+
+
+# Export predictions 
+for (date in names(predictions)) {
+  print(paste0("Exporting predictions for date: ", date))
+  st_write(predictions[[date]], paste0("./output/predictions/rf/T1.37_RedList_predictions_bottom_", date, ".gpkg"), delete_dsn = TRUE)
+}
+
+saveRDS(predictions, "./output/predictions/rf/T1.37_RedList_predictions_bottom_2023-av-sept.rds")
+
+# Map all predictions  ----
+
+
+
+# Map and save plots
+# for (date in names(predictions)) {
+#   print(paste0("Mapping predictions for date: ", date))
+#   p <- ggplot(predictions[[date]]) +
+#     geom_sf(aes(fill = prediction_R), color = NA) +
+#     scale_fill_viridis_c(option = "plasma") +
+#     labs(title = paste0("Predicted Species Richness (R) - ", date),
+#          fill = "Prediction") +
+#     theme_minimal()
+#   
+#   # Save plot
+#   ggsave(filename = paste0("./figures/Predictions/rf/T1.33_R_predictions_bottom_", date, ".png"),
+#          plot = p, width = 10, height = 8)
+# }
+# 
+# 
+
+
+
+library(lubridate)
+
+# French locale for month names
+old_locale <- Sys.getlocale("LC_TIME")
+Sys.setlocale("LC_TIME", "fr_FR.UTF-8")
+
+for (date in names(predictions)) {
+  
+  # Convert "2023-05-01" → Date, subtract 1 month
+  date_minus1 <- ymd(date) %m-% months(1)
+  
+  # Format into "Avril 2023"
+  title_date <- format(date_minus1, "%B %Y")
+  title_date <- tools::toTitleCase(title_date)  # capitalize
+  
+  print(paste0("Mapping predictions for date: ", date))
+  
+  p <- ggplot(predictions[[date]]) +
+    geom_sf(aes(fill = prediction_RedList), color = NA) +
+    scale_fill_viridis_c(option = "plasma") +
+    labs(
+      title = paste0("Prédiction nombre d'espèces IUCN (RedList) - ", title_date),
+      fill = "Prediction"
+    ) +
+    theme_minimal()
+  
+  # filename remains based on real date
+  ggsave(
+    filename = paste0("./figures/Predictions/rf/T1.37/T1.37_RedList_predictions_bottom_", date, ".png"),
+    plot = p, width = 10, height = 8
+  )
+}
+
+# restore locale
+Sys.setlocale("LC_TIME", old_locale)
 
 
 
@@ -419,12 +936,555 @@ sort(names(data$`2023-05-01`))
 
 
 
+#-------------------------- Surface ----
+#--- Load & prep data for predict ---------------------------
+# Load grid predictor's data
+data <- readRDS("./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-tr_v1.4.rds")
+
+# Print model's predictors names
+(md$importance[,0])
+sort(names(data$`2023-05-01`))
+
+# Add estimated_volume_total to 60L (= 2 field replicates) inside all dates
+data <- lapply(data, function(df) {
+  df$estimated_volume_total <- 60
+  df
+})
+
+# Add year to 2023 inside all dates
+data <- lapply(data, function(df) {
+  df$year <- 2023
+  df
+})
+
+# Add x and y coordinates using cell's centroid
+# in the same format as md's predictors (degree)
+data <- lapply(data, function(df) {
+  # transform from Lambert-93 (2154) to lon/lat
+  df_ll  <- st_transform(df, 4326)          # or "EPSG:4326"
+  coords <- st_coordinates(st_centroid(df_ll))
+  df$x   <- coords[, 1]  # longitude
+  df$y   <- coords[, 2]  # latitude
+  df
+})
+
+# Check
+range(data$`2023-05-01`$x)
+range(predictors$x)
+
+# Remove bottom sal temp cols ----
+data <- lapply(data, \(df) df |> dplyr::select(!matches("^(temp|sal).*_bottom$")))
+
+# Drop geometry 
+data <- lapply(data, \(df) df %>% st_drop_geometry())
+
+# Replace '_surf' or '_bottom' by '_1m' in colnames
+data <- lapply(data, function(df) {
+  names(df) <- gsub("_(surf|bottom)$", "_1m", names(df))
+  df
+})
+
+
+
+# Checks 
+sort(setdiff(names(predictors), names(data$`2023-07-01`))) # should be 0
+sort(setdiff((md$importance[,0]), names(data$`2023-07-01`))) # should be 0
+setdiff((md$importance[,0]), names(predictors)) # should be 0
+
+
+# In data select only the model's predictors
+data <- lapply(data, function(df) {
+  df %>% dplyr::select(all_of(names(predictors)))
+})
+
+# Checks
+setdiff(names(data$`2023-07-01`), names(predictors)) # should be 0
+
+#--- Predict on all months ---------------------------
+
+predictions <- lapply(names(data), function(date) {
+  print(paste0("Predicting for date: ", date))
+  df <- data[[date]]
+  df$prediction_RedList <- predict(md, newdata = df)
+  df
+})
+
+
+names(predictions) <- names(data)
+
+# Save predictions ----
+# Add back geometry to predictions using dt$geom 
+dt <- readRDS("./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-tr_v1.4.rds")
+
+predictions <- lapply(names(predictions), function(date) {
+  print(paste0("Adding geometry for date: ", date))
+  df <- predictions[[date]]
+  geom <- st_geometry(dt[[date]])
+  st_as_sf(df, geometry = geom, crs = st_crs(dt[[date]]))
+})
+names(predictions) <- names(data)
+
+
+# Export predictions 
+for (date in names(predictions)) {
+  print(paste0("Exporting predictions for date: ", date))
+  st_write(predictions[[date]], paste0("./output/predictions/rf/T1.37/T1.37_RedList_predictions_surface_", date, ".gpkg"), delete_dsn = TRUE)
+}
+
+saveRDS(predictions, "./output/predictions/rf/T1.37/T1.37_RedList_predictions_surface_2023-av-sept.rds")
+
+# Map all predictions  ----
+
+
+
+# Map and save plots
+# for (date in names(predictions)) {
+#   print(paste0("Mapping predictions for date: ", date))
+#   p <- ggplot(predictions[[date]]) +
+#     geom_sf(aes(fill = prediction_R), color = NA) +
+#     scale_fill_viridis_c(option = "plasma") +
+#     labs(title = paste0("Predicted Species Richness (R) - ", date),
+#          fill = "Prediction") +
+#     theme_minimal()
+#   
+#   # Save plot
+#   ggsave(filename = paste0("./figures/Predictions/rf/T1.33_R_predictions_bottom_", date, ".png"),
+#          plot = p, width = 10, height = 8)
+# }
+# 
+# 
+
+
+
+# French locale for month names
+old_locale <- Sys.getlocale("LC_TIME")
+Sys.setlocale("LC_TIME", "fr_FR.UTF-8")
+
+for (date in names(predictions)) {
+  
+  # Convert "2023-05-01" → Date, subtract 1 month
+  date_minus1 <- ymd(date) %m-% months(1)
+  
+  # Format into "Avril 2023"
+  title_date <- format(date_minus1, "%B %Y")
+  title_date <- tools::toTitleCase(title_date)  # capitalize
+  
+  print(paste0("Mapping predictions for date: ", date))
+  
+  p <- ggplot(predictions[[date]]) +
+    geom_sf(aes(fill = prediction_RedList), color = NA) +
+    scale_fill_viridis_c(option = "plasma") +
+    labs(
+      title = paste0("Prédiction du nombre d'espèces IUCN (RedList) en surface - ", title_date),
+      fill = "Prediction"
+    ) +
+    theme_minimal()
+  
+  # filename remains based on real date
+  ggsave(
+    filename = paste0("./figures/Predictions/rf/T1.37/T1.37_RedList_predictions_surface_", date, ".png"),
+    plot = p, width = 10, height = 8
+  )
+}
+
+# restore locale
+Sys.setlocale("LC_TIME", old_locale)
+
+
+
+#===============================================================================
+
+#-------------------------- T.1.37:RF: ( = T33 on all resp var) | CRYPTO -----------------------------------------
+#-------------------------- Load and prep data ------------------
+# predictors_sel_v.1.4 
+pred <- st_read("./data/processed_data/predictors/predictors_sel_v1.4.gpkg")
+
+# remove space and majuscule in habitat names
+pred$grouped_main_habitat <- gsub(" ", "_", pred$grouped_main_habitat)
+pred$grouped_main_habitat <- tolower(pred$grouped_main_habitat)
+
+# set character as factor
+pred$grouped_main_habitat <- as.factor(pred$grouped_main_habitat)
+
+# check levels
+levels(pred$grouped_main_habitat)
+table(pred$grouped_main_habitat)
+
+unique(pred$grouped_main_habitat)
+
+# mtdt_7_sel_v1.1
+mtdt <- st_read("./data/processed_data/Mtdt/mtdt_7_sel_v1.1.gpkg")
+
+# div_indices_sel_v1.1.gpkg
+div <- readr::read_csv2("./data/processed_data/Traits/div_indices_v1.0_sel_v1.1.csv") %>%
+  mutate(DeBRa = as.numeric(DeBRa))
+
+# tot
+tot <- pred %>%
+  st_drop_geometry() %>%
+  left_join(st_drop_geometry(mtdt), by = "replicates") %>%
+  left_join(div, by = "replicates")
+
+# --- Prep data for model ---
+
+pred1.5 <- st_read("./data/processed_data/predictors/predictors_sel_v1.5_month.gpkg")
+sort(names(pred1.5))
+
+# Add pred1.5$soft_bottom_clr and pred1.5$rock_clr to tot
+tot <- tot %>%
+  left_join(pred1.5 %>% st_drop_geometry() %>% dplyr::select(c("replicates", "soft_bottom_clr", "rock_clr", "area_km2")), by = "replicates")
+
+sort(names(tot))
+
+# Add year
+tot <- tot %>%
+  mutate(year = lubridate::year(date))
+
+col_pred <- c(colnames(pred %>% st_drop_geometry() %>% dplyr::select(-c(replicates, grouped_main_habitat, northness, eastness))), "year", "soft_bottom_clr", "rock_clr", "area_km2", "estimated_volume_total")
+
+# Extract predictors
+predictors <- tot %>% 
+  dplyr::select(all_of(col_pred)) 
+names(predictors)
+
+# Extract response variables
+ind <- div  %>% dplyr::select("Crypto")
+names(ind)
+
+# Train df
+train_df <- tot %>% dplyr::select(c(names(ind), names(predictors)))
+names(train_df)
+
+#-------------------------- Retrain model on CRYPTO ---------------------------
+formula <- as.formula(paste("Crypto", "~", paste(names(predictors), collapse = " + ")))
+
+rf <- randomForest::randomForest(formula = formula, data = train_df, ntree = 500, importance = TRUE, mtry = 2, nodesize = 1)
+
+# Save rf
+saveRDS(rf, "./output/models/rf/T1.37-retrain_Crypto.rds")
+
+#-------------------------- => Load retrained model ---------------
+md <- readRDS("./output/models/rf/T1.37-retrain_Crypto.rds")
+
+#-------------------------- Bottom ----
+#--- Load & prep data for predict ---------------------------
+# Load grid predictor's data
+data <- readRDS("./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-tr_v1.4.rds")
+
+# Print model's predictors names
+(md$importance[,0])
+sort(names(data$`2023-05-01`))
+
+# Add estimated_volume_total to 60L (= 2 field replicates) inside all dates
+data <- lapply(data, function(df) {
+  df$estimated_volume_total <- 60
+  df
+})
+
+# Add year to 2023 inside all dates
+data <- lapply(data, function(df) {
+  df$year <- 2023
+  df
+})
+
+# Add x and y coordinates using cell's centroid
+# in the same format as md's predictors (degree)
+data <- lapply(data, function(df) {
+  # transform from Lambert-93 (2154) to lon/lat
+  df_ll  <- st_transform(df, 4326)          # or "EPSG:4326"
+  coords <- st_coordinates(st_centroid(df_ll))
+  df$x   <- coords[, 1]  # longitude
+  df$y   <- coords[, 2]  # latitude
+  df
+})
+
+# Check
+range(data$`2023-05-01`$x)
+range(predictors$x)
+
+# Remove surface sal temp cols ----
+data <- lapply(data, \(df) df |> dplyr::select(!matches("^(temp|sal).*_surf$")))
+
+# Drop geometry 
+data <- lapply(data, \(df) df %>% st_drop_geometry())
+
+# Replace '_surf' or '_bottom' by '_1m' in colnames
+data <- lapply(data, function(df) {
+  names(df) <- gsub("_(surf|bottom)$", "_1m", names(df))
+  df
+})
+
+
+
+# Checks 
+sort(setdiff(names(predictors), names(data$`2023-07-01`))) # should be 0
+sort(setdiff((md$importance[,0]), names(data$`2023-07-01`))) # should be 0
+setdiff((md$importance[,0]), names(predictors)) # should be 0
+
+
+# In data select only the model's predictors
+data <- lapply(data, function(df) {
+  df %>% dplyr::select(all_of(names(predictors)))
+})
+
+# Checks
+setdiff(names(data$`2023-07-01`), names(predictors)) # should be 0
+
+#--- Predict on all months ---------------------------
+
+predictions <- lapply(names(data), function(date) {
+  print(paste0("Predicting for date: ", date))
+  df <- data[[date]]
+  df$prediction_Crypto <- predict(md, newdata = df)
+  df
+})
+
+
+names(predictions) <- names(data)
+
+# Save predictions ----
+# Add back geometry to predictions using dt$geom 
+dt <- readRDS("./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-tr_v1.4.rds")
+
+predictions <- lapply(names(predictions), function(date) {
+  print(paste0("Adding geometry for date: ", date))
+  df <- predictions[[date]]
+  geom <- st_geometry(dt[[date]])
+  st_as_sf(df, geometry = geom, crs = st_crs(dt[[date]]))
+})
+names(predictions) <- names(data)
+
+
+# Export predictions 
+for (date in names(predictions)) {
+  print(paste0("Exporting predictions for date: ", date))
+  st_write(predictions[[date]], paste0("./output/predictions/rf/T1.37_Crypto_predictions_bottom_", date, ".gpkg"), delete_dsn = TRUE)
+}
+
+saveRDS(predictions, "./output/predictions/rf/T1.37_Crypto_predictions_bottom_2023-av-sept.rds")
+
+# Map all predictions  ----
+
+
+
+# Map and save plots
+# for (date in names(predictions)) {
+#   print(paste0("Mapping predictions for date: ", date))
+#   p <- ggplot(predictions[[date]]) +
+#     geom_sf(aes(fill = prediction_R), color = NA) +
+#     scale_fill_viridis_c(option = "plasma") +
+#     labs(title = paste0("Predicted Species Richness (R) - ", date),
+#          fill = "Prediction") +
+#     theme_minimal()
+#   
+#   # Save plot
+#   ggsave(filename = paste0("./figures/Predictions/rf/T1.33_R_predictions_bottom_", date, ".png"),
+#          plot = p, width = 10, height = 8)
+# }
+# 
+# 
+
+
+
+library(lubridate)
+
+# French locale for month names
+old_locale <- Sys.getlocale("LC_TIME")
+Sys.setlocale("LC_TIME", "fr_FR.UTF-8")
+
+for (date in names(predictions)) {
+  
+  # Convert "2023-05-01" → Date, subtract 1 month
+  date_minus1 <- ymd(date) %m-% months(1)
+  
+  # Format into "Avril 2023"
+  title_date <- format(date_minus1, "%B %Y")
+  title_date <- tools::toTitleCase(title_date)  # capitalize
+  
+  print(paste0("Mapping predictions for date: ", date))
+  
+  p <- ggplot(predictions[[date]]) +
+    geom_sf(aes(fill = prediction_RedList), color = NA) +
+    scale_fill_viridis_c(option = "plasma") +
+    labs(
+      title = paste0("Prédiction nombre d'espèces cryptiques (Crypto) - ", title_date),
+      fill = "Prediction"
+    ) +
+    theme_minimal()
+  
+  # filename remains based on real date
+  ggsave(
+    filename = paste0("./figures/Predictions/rf/T1.37/T1.37_Crypto_predictions_bottom_", date, ".png"),
+    plot = p, width = 10, height = 8
+  )
+}
+
+# restore locale
+Sys.setlocale("LC_TIME", old_locale)
 
 
 
 
 
 
+
+#-------------------------- Surface ----
+#--- Load & prep data for predict ---------------------------
+# Load grid predictor's data
+data <- readRDS("./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-tr_v1.4.rds")
+
+# Print model's predictors names
+(md$importance[,0])
+sort(names(data$`2023-05-01`))
+
+# Add estimated_volume_total to 60L (= 2 field replicates) inside all dates
+data <- lapply(data, function(df) {
+  df$estimated_volume_total <- 60
+  df
+})
+
+# Add year to 2023 inside all dates
+data <- lapply(data, function(df) {
+  df$year <- 2023
+  df
+})
+
+# Add x and y coordinates using cell's centroid
+# in the same format as md's predictors (degree)
+data <- lapply(data, function(df) {
+  # transform from Lambert-93 (2154) to lon/lat
+  df_ll  <- st_transform(df, 4326)          # or "EPSG:4326"
+  coords <- st_coordinates(st_centroid(df_ll))
+  df$x   <- coords[, 1]  # longitude
+  df$y   <- coords[, 2]  # latitude
+  df
+})
+
+# Check
+range(data$`2023-05-01`$x)
+range(predictors$x)
+
+# Remove bottom sal temp cols ----
+data <- lapply(data, \(df) df |> dplyr::select(!matches("^(temp|sal).*_bottom$")))
+
+# Drop geometry 
+data <- lapply(data, \(df) df %>% st_drop_geometry())
+
+# Replace '_surf' or '_bottom' by '_1m' in colnames
+data <- lapply(data, function(df) {
+  names(df) <- gsub("_(surf|bottom)$", "_1m", names(df))
+  df
+})
+
+
+
+# Checks 
+sort(setdiff(names(predictors), names(data$`2023-07-01`))) # should be 0
+sort(setdiff((md$importance[,0]), names(data$`2023-07-01`))) # should be 0
+setdiff((md$importance[,0]), names(predictors)) # should be 0
+
+
+# In data select only the model's predictors
+data <- lapply(data, function(df) {
+  df %>% dplyr::select(all_of(names(predictors)))
+})
+
+# Checks
+setdiff(names(data$`2023-07-01`), names(predictors)) # should be 0
+
+#--- Predict on all months ---------------------------
+
+predictions <- lapply(names(data), function(date) {
+  print(paste0("Predicting for date: ", date))
+  df <- data[[date]]
+  df$prediction_Crypto <- predict(md, newdata = df)
+  df
+})
+
+
+names(predictions) <- names(data)
+
+# Save predictions ----
+# Add back geometry to predictions using dt$geom 
+dt <- readRDS("./data/processed_data/predictors/Prediction_grid_v1.1/Export_grid_v1.1_2023-Apr-Sept_with_predictors-tr_v1.4.rds")
+
+predictions <- lapply(names(predictions), function(date) {
+  print(paste0("Adding geometry for date: ", date))
+  df <- predictions[[date]]
+  geom <- st_geometry(dt[[date]])
+  st_as_sf(df, geometry = geom, crs = st_crs(dt[[date]]))
+})
+names(predictions) <- names(data)
+
+
+# Export predictions 
+for (date in names(predictions)) {
+  print(paste0("Exporting predictions for date: ", date))
+  st_write(predictions[[date]], paste0("./output/predictions/rf/T1.37/T1.37_Crypto_predictions_surface_", date, ".gpkg"), delete_dsn = TRUE)
+}
+
+saveRDS(predictions, "./output/predictions/rf/T1.37/T1.37_Crypto_predictions_surface_2023-av-sept.rds")
+
+# Map all predictions  ----
+
+
+
+# Map and save plots
+# for (date in names(predictions)) {
+#   print(paste0("Mapping predictions for date: ", date))
+#   p <- ggplot(predictions[[date]]) +
+#     geom_sf(aes(fill = prediction_R), color = NA) +
+#     scale_fill_viridis_c(option = "plasma") +
+#     labs(title = paste0("Predicted Species Richness (R) - ", date),
+#          fill = "Prediction") +
+#     theme_minimal()
+#   
+#   # Save plot
+#   ggsave(filename = paste0("./figures/Predictions/rf/T1.33_R_predictions_bottom_", date, ".png"),
+#          plot = p, width = 10, height = 8)
+# }
+# 
+# 
+
+
+
+# French locale for month names
+old_locale <- Sys.getlocale("LC_TIME")
+Sys.setlocale("LC_TIME", "fr_FR.UTF-8")
+
+for (date in names(predictions)) {
+  
+  # Convert "2023-05-01" → Date, subtract 1 month
+  date_minus1 <- ymd(date) %m-% months(1)
+  
+  # Format into "Avril 2023"
+  title_date <- format(date_minus1, "%B %Y")
+  title_date <- tools::toTitleCase(title_date)  # capitalize
+  
+  print(paste0("Mapping predictions for date: ", date))
+  
+  p <- ggplot(predictions[[date]]) +
+    geom_sf(aes(fill = prediction_RedList), color = NA) +
+    scale_fill_viridis_c(option = "plasma") +
+    labs(
+      title = paste0("Prédiction du nombre d'espèces cryptiques (Crypto) en surface - ", title_date),
+      fill = "Prediction"
+    ) +
+    theme_minimal()
+  
+  # filename remains based on real date
+  ggsave(
+    filename = paste0("./figures/Predictions/rf/T1.37/T1.37_Crypto_predictions_surface_", date, ".png"),
+    plot = p, width = 10, height = 8
+  )
+}
+
+# restore locale
+Sys.setlocale("LC_TIME", old_locale)
+
+
+
+#===============================================================================
 
 
 

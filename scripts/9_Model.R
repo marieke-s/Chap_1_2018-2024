@@ -10069,7 +10069,7 @@ ggsave("./figures/models/rf/T1.32_variable_importance_IncNodePurity.png")
 
 
 
-#-------------------------- T1.33 : RF : bloo10 with coordinates + year + sand + rock without eastness & northness --------------------- 
+#-------------------------- T1.33 : RF : bloo50 with coordinates + year + sand + rock without eastness & northness --------------------- 
 #-------------------------- mtry = 2, ntree = 500, nodesize = 1 ---------------
 
 #-------------------------- + area_km2 + estimated_volume_total ------------------------
@@ -10085,7 +10085,7 @@ ggsave("./figures/models/rf/T1.32_variable_importance_IncNodePurity.png")
 
 
 #---- CV config :
-# BLOO CV with buffer size = 500 km
+# BLOO CV with buffer size = 50 km
 
 #---- Perf : 
 # R2 Pearson_Corr Spearman_Corr      MAE     RMSE AIC Response_Var Model     CV Train_Size
@@ -10210,7 +10210,7 @@ folds  <- md$R$RF$bloo50
 importance_list <- lapply(folds, function(fold) {
   imp <- randomForest::importance(fold$model)
   as.data.frame(imp) |>
-    rownames_to_column(var = "Feature")
+    tibble::rownames_to_column(var = "Feature")
 })
 
 # 2. Combine and average
@@ -10413,7 +10413,7 @@ saveRDS(models_list, "./output/models/rf/T1.34.rds")
 
 
 
-#-------------------------- T1.35 : RF : bloo10 with coordinates + year + sand + rock without eastness & northness --------------------- 
+#-------------------------- T1.35 : RF : bloo50 with coordinates + year + sand + rock without eastness & northness --------------------- 
 #-------------------------- mtry = 2, ntree = 500, nodesize = 1 ---------------
 
 #-------------------------- + area_km2scaled(estimated_volume_total) +scale(x,y,year)  ------------------------
@@ -10551,6 +10551,864 @@ saveRDS(perf, "./output/models/rf/T1.35_performance.rds")
 
 
 
-#================================================ BEST MODELS SO FAR ============================================
+
+#-------------------------- T1.36 : All_fitted_models bloo50/bloo20 (All_fitted_20) [MARBEC GPU GAETAN] ---------------------
+md <- readRDS("./output/models/rf/All_fitted_models.rds")
+
+## Description ----
+# Predictors 
+md$R$RF$bloo50$Fold_1$model$forest$independent.variable.names
+
+# [1] "x"                          "y"                          "northness"                 
+# [4] "eastness"                   "tpi_mean_log"               "port_dist_m_weight"        
+# [7] "bathy_mean"                 "wind_mean_1m"               "vel_mean_1m"               
+# [10] "temp_mean_1m"               "sal_mean_1m"                "grouped_nb_habitat_per_km2"
+# [13] "canyon_dist_m_weight_log"   "mpa_dist_m_weight_log"      "shore_dist_m_weight_log"   
+# [16] "gravity_mean_log"           "cop_chl_month_mean_log"     "Boat_density_month_log"    
+# [19] "year"                       "soft_bottom_clr"            "rock_clr"                  
+# [22] "area_km2"                   "temp_min_1m"      
+
+# Resp var
+
+
+# Model + parameters
+md$R$RF$bloo50$Fold_1$model$num.trees # ntree = 300
+md$R$RF$bloo50$Fold_1$model$mtry # mtry = 3
+md$R$RF$bloo50$Fold_1$model$min.node.size # min.node.size = 5
+md$R$RF$bloo50$Fold_1$model$r.squared # 0.4464482
+
+
+## Evaluate perf ----
+
+evaluate_models <- function(models_list,
+                            response_var = NULL,
+                            models       = NULL,
+                            cv_names     = NULL,   # names of CV methods to use (e.g. "env_k6", "bloo50")
+                            cv_splits    = NULL,   # optional: list of CV splits to compute train sizes
+                            output       = c("summary", "fold", "plot", "all")) {
+  
+  output <- match.arg(output)
+  cat("\n🔹 Starting Model Evaluation\n")
+  
+  #-----------------------------------------
+  # Helper to compute metrics
+  #-----------------------------------------
+  compute_metrics <- function(observed, predicted, aic_values = NULL) {
+    data.frame(
+      R2            = cor(observed, predicted, use = "complete.obs")^2,
+      Pearson_Corr  = cor(observed, predicted, method = "pearson",  use = "complete.obs"),
+      Spearman_Corr = cor(observed, predicted, method = "spearman", use = "complete.obs"),
+      MAE           = mean(abs(observed - predicted), na.rm = TRUE),
+      RMSE          = sqrt(mean((observed - predicted)^2, na.rm = TRUE)),
+      AIC           = if (!is.null(aic_values)) mean(aic_values, na.rm = TRUE) else NA_real_
+    )
+  }
+  
+  # Storage
+  performance_summary  <- data.frame()
+  performance_per_fold <- data.frame()
+  plot_list            <- list()
+  
+  # Filter response variables
+  response_vars <- if (!is.null(response_var)) {
+    intersect(response_var, names(models_list))
+  } else {
+    names(models_list)
+  }
+  
+  for (resp_var in response_vars) {
+    
+    available_models <- names(models_list[[resp_var]])
+    
+    model_types <- if (!is.null(models)) {
+      intersect(models, available_models)
+    } else {
+      available_models
+    }
+    
+    for (model_name in model_types) {
+      
+      cat("\n🔹 Evaluating model:", model_name, "for response variable:", resp_var, "\n")
+      
+      available_cvs <- names(models_list[[resp_var]][[model_name]])
+      
+      cv_methods <- if (!is.null(cv_names)) {
+        intersect(cv_names, available_cvs)
+      } else {
+        available_cvs
+      }
+      
+      for (cv_name in cv_methods) {
+        
+        cat("\n🔹 Processing CV Method:", cv_name, "\n")
+        
+        model_folds <- models_list[[resp_var]][[model_name]][[cv_name]]
+        # Optional CV splits to get train sizes
+        this_cv_split <- if (!is.null(cv_splits)) cv_splits[[cv_name]] else NULL
+        
+        all_observed    <- c()
+        all_predictions <- c()
+        aic_values      <- c()
+        train_sizes     <- c()
+        
+        for (i in seq_along(model_folds)) {
+          
+          cat("   ➡️ Fold:", i, "/", length(model_folds), "\n")
+          
+          fold_name <- paste0("Fold_", i)
+          fold_data <- model_folds[[fold_name]]
+          
+          
+          test_set <- fold_data$test_set
+          
+          
+          test_df <- as.data.frame(st_drop_geometry(test_set))
+          
+          fold_observed <- test_df[[resp_var]]
+          
+          #-----------------------------
+          # Predictions
+          #-----------------------------
+          fold_pred <- tryCatch({
+            if (model_name == "XGB") {
+              test_df <- test_df %>% dplyr::mutate(across(where(is.character), as.factor))
+              
+              xgb_features   <- fold_data$model$feature_names
+              available_cols <- intersect(colnames(test_df), xgb_features)
+              
+              test_x_raw <- test_df[, available_cols, drop = FALSE]
+              
+              valid_cols <- sapply(test_x_raw, function(col) {
+                if (is.factor(col)) {
+                  nlevels(col) > 1
+                } else if (is.numeric(col)) {
+                  length(unique(col)) > 1
+                } else {
+                  TRUE
+                }
+              })
+              
+              test_x_clean <- test_x_raw[, valid_cols, drop = FALSE]
+              
+              if (ncol(test_x_clean) == 0) {
+                test_matrix <- matrix(0, nrow = nrow(test_df), ncol = length(xgb_features))
+                colnames(test_matrix) <- xgb_features
+              } else {
+                test_matrix <- model.matrix(~ . - 1, data = test_x_clean)
+                
+                missing_cols <- setdiff(xgb_features, colnames(test_matrix))
+                for (col in missing_cols) {
+                  test_matrix <- cbind(test_matrix, setNames(data.frame(0), col))
+                }
+                
+                test_matrix <- test_matrix[, xgb_features, drop = FALSE]
+              }
+              
+              test_matrix <- xgb.DMatrix(data = test_matrix)
+              predict(fold_data$model, newdata = test_matrix)
+              
+            } else if (model_name == "RF") {
+              fold_pred <- fold_data$predictions
+            } else if (model_name == "GLSRF") {
+              fold_pred <- fold_data$predictions
+              
+            } else {
+              predict(fold_data$model, newdata = test_df, type = "response")
+            }
+          }, error = function(e) {
+            cat("      ❌ Prediction failed for", model_name, "on", fold_name, ":", e$message, "\n")
+            return(rep(NA_real_, length(fold_observed)))
+          })
+          
+          # Append to global vectors
+          all_observed    <- c(all_observed,    fold_observed)
+          all_predictions <- c(all_predictions, fold_pred)
+          
+          # AIC per fold if relevant
+          if (model_name %in% c("GLM", "GAM", "GLM.nb", "spaMM")) {
+            aic_values <- c(aic_values, AIC(fold_data$model))
+          }
+          
+          # Train size (if we have cv_splits)
+          this_train_size <- NA_real_
+          if (!is.null(this_cv_split) && length(this_cv_split) >= i && !is.null(this_cv_split[[i]]$train)) {
+            this_train_size <- nrow(this_cv_split[[i]]$train)
+            train_sizes     <- c(train_sizes, this_train_size)
+          }
+          
+          #-----------------------------
+          # Per-fold metrics
+          #-----------------------------
+          if (!all(is.na(fold_pred))) {
+            fold_metrics <- compute_metrics(fold_observed, fold_pred,
+                                            if (model_name %in% c("GLM", "GAM", "GLM.nb", "spaMM"))
+                                              AIC(fold_data$model) else NULL)
+            
+            fold_metrics$Response_Var <- resp_var
+            fold_metrics$Model        <- model_name
+            fold_metrics$CV           <- cv_name
+            fold_metrics$Fold         <- i
+            fold_metrics$Train_Size   <- this_train_size
+            
+            performance_per_fold <- rbind(performance_per_fold, fold_metrics)
+            
+            cat(sprintf(
+              "      Fold %d metrics: R2 = %.3f | RMSE = %.3f | MAE = %.3f | Pearson = %.3f | Spearman = %.3f\n",
+              i,
+              fold_metrics$R2,
+              fold_metrics$RMSE,
+              fold_metrics$MAE,
+              fold_metrics$Pearson_Corr,
+              fold_metrics$Spearman_Corr
+            ))
+          } else {
+            cat("      ⚠️ All predictions NA for", fold_name, "- no fold metrics.\n")
+          }
+        } # end folds
+        
+        
+        #-----------------------------
+        # Global (across folds) metrics
+        #-----------------------------
+        if (length(all_observed) == 0 || length(all_predictions) == 0) {
+          cat("\n⚠️ No valid predictions for model", model_name, "and CV", cv_name, "- skipping global metrics.\n")
+        } else {
+          global_metrics <- compute_metrics(all_observed, all_predictions, aic_values)
+          global_metrics$Response_Var <- resp_var
+          global_metrics$Model        <- model_name
+          global_metrics$CV           <- cv_name
+          global_metrics$Train_Size   <- if (length(train_sizes) > 0) mean(train_sizes) else NA_real_
+          
+          performance_summary <- rbind(performance_summary, global_metrics)
+          
+          #-----------------------------
+          # Plot observed vs predicted
+          #-----------------------------
+          if (output %in% c("plot", "all")) {
+            if (!requireNamespace("ggplot2", quietly = TRUE)) {
+              warning("ggplot2 not available; plots will not be created.")
+            } else {
+              df_plot <- data.frame(
+                Observed  = all_observed,
+                Predicted = all_predictions
+              )
+              
+              p <- ggplot2::ggplot(df_plot, ggplot2::aes(x = Observed, y = Predicted)) +
+                ggplot2::geom_point(alpha = 0.6) +
+                ggplot2::geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+                ggplot2::labs(
+                  title = paste("Observed vs Predicted -", resp_var, "-", model_name, "-", cv_name),
+                  x = "Observed",
+                  y = "Predicted"
+                ) +
+                ggplot2::theme_minimal()
+              
+              plot_name <- paste(resp_var, model_name, cv_name, sep = "_")
+              plot_list[[plot_name]] <- p
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  #-----------------------------
+  # Return according to 'output'
+  #-----------------------------
+  if (output == "summary") {
+    return(performance_summary)
+  } else if (output == "fold") {
+    return(performance_per_fold)
+  } else if (output == "plot") {
+    return(plot_list)
+  } else {  # "all
+    return(list(
+      summary  = performance_summary,
+      per_fold = performance_per_fold,
+      plots    = plot_list
+    ))
+  }
+}
+
+perf <- evaluate_models(md)
+perf
+# R2 Pearson_Corr Spearman_Corr         MAE       RMSE AIC Response_Var Model     CV
+# 1  0.308884015   0.55577335    0.54931249 11.95673879 14.5533653  NA            R    RF bloo50
+# 2  0.318806201   0.56462926    0.56204326  3.55933402  4.3646251  NA       Crypto    RF bloo50
+# 3  0.050708305   0.22518505    0.22811567  1.14256753  1.4645368  NA       Elasmo    RF bloo50
+# 4  0.302181080   0.54971000    0.55333411  0.18424532  0.3145530  NA        DeBRa    RF bloo50
+# 5  0.061961983   0.24892164    0.25941153  1.25033416  1.5577066  NA      RedList    RF bloo50
+# 6  0.293423673   0.54168595    0.53316755  8.70881603 10.7038085  NA         LRFI    RF bloo50
+# 7  0.115327071   0.33959840    0.34073493  2.64682222  3.2316517  NA      TopPred    RF bloo50
+# 8  0.278197745   0.52744454    0.51548822  6.22832108  7.6185525  NA   Commercial    RF bloo50
+# 9  0.080532690   0.28378282    0.28926803  0.36293335  0.4217820  NA      Grouper    RF bloo50
+# 10 0.000138836  -0.01178287    0.02246302  0.02857265  0.1114742  NA   AngelShark    RF bloo50
+
+
+
+
+
+
 #==== Surface only : T1.29/T1.28 : pseudo R2 = 0.68 =============================================================
-#====  All data : T33 : pseudo R2 = 0.63            =============================================================#================================================================================================================
+#====  All data : T33 : pseudo R2 = 0.63   (CV50 with volume)         =============================================================#================================================================================================================
+#-------------------------- T1.38 = T1.33 on all variables - bloo50 [MARBEC GPU MARIEKE] -------------------------------------------
+## Evaluate performance ----
+models_list <- readRDS("~/Downloads/T1.37.rds")
+perf <- evaluate_models(models_list)
+perf 
+beepr::beep()
+
+
+
+
+
+# Save ----
+saveRDS(perf, "./output/models/rf/T1.37_performance.rds")
+
+saveRDS(models_list, "./output/models/rf/T1.32.rds") 
+
+## Plot observed vs predicted ----
+md <- models_list
+evaluate_models(md, output = "all")
+
+## Variance importance plot ----
+folds  <- md$R$RF$bloo10
+
+# 1. Extract importance from each RF fold
+importance_list <- lapply(folds, function(fold) {
+  imp <- randomForest::importance(fold$model)
+  as.data.frame(imp) |>
+    rownames_to_column(var = "Feature")
+})
+
+# 2. Combine and average
+all_importance <- bind_rows(importance_list, .id = "Fold")
+
+# Check columns if you want
+# names(all_importance)
+
+mean_importance <- all_importance |>
+  group_by(Feature) |>
+  summarise(across(where(is.numeric), ~ mean(.x, na.rm = TRUE)),
+            .groups = "drop") |>
+  arrange(desc(IncNodePurity))   # or desc(`%IncMSE`) depending on your RF type
+
+
+
+# 3. Plot
+# 3. Plot (choose the column IncNodePurity or `%IncMSE`)
+
+ggplot(mean_importance,
+       aes(x = reorder(Feature, `%IncMSE`), y = `%IncMSE`)) +
+  geom_col() +
+  coord_flip() +
+  theme_minimal()
+
+ggsave("./figures/models/rf/T1.32_variable_importance_percentIncMSE.png")
+
+ggplot(mean_importance,
+       aes(x = reorder(Feature, IncNodePurity), y = IncNodePurity)) +
+  geom_col() +
+  coord_flip() +
+  theme_minimal()
+ggsave("./figures/models/rf/T1.32_variable_importance_IncNodePurity.png")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#-------------------------- T1.39 : RF = T1.33 --------------------- 
+#-------------------------- mtry = 2, ntree = 500, nodesize = 1 ---------------
+
+#-------------------------- + area_km2 + estimated_volume_total ------------------------
+#-------------------------- + depth_sampling ------------------------
+## Description ----
+#--- Model : RF
+# Parameters : mtry = 2, ntree = 500, nodesize = 1
+
+#--- Response var : 
+# from div_indices_v1.0_sel_v1.1.csv
+# R
+
+#---- Predictors : 
+
+
+#---- CV config :
+# BLOO CV with buffer size = 50 km
+
+#---- Perf : 
+# R2 Pearson_Corr Spearman_Corr      MAE     RMSE AIC Response_Var Model     CV Train_Size
+# 1 0.4014184    0.6335759     0.6286837 11.16216 13.75386  NA            R    RF bloo50         NA
+
+
+## Prep data for model ----
+
+pred1.5 <- st_read("./data/processed_data/predictors/predictors_sel_v1.5_month.gpkg")
+sort(names(pred1.5))
+
+# Add pred1.5$soft_bottom_clr and pred1.5$rock_clr to tot
+tot <- tot %>%
+  left_join(pred1.5 %>% st_drop_geometry() %>% dplyr::select(c("replicates", "soft_bottom_clr", "rock_clr", "area_km2")), by = "replicates")
+
+sort(names(tot))
+
+# Add year
+tot <- tot %>%
+  mutate(year = year(date))
+
+col_pred <- c(colnames(pred %>% st_drop_geometry() %>% dplyr::select(-c(replicates, grouped_main_habitat, northness, eastness))), "year", "soft_bottom_clr", "rock_clr", "area_km2", "estimated_volume_total", "depth_sampling")
+
+# Extract predictors
+predictors <- tot %>% 
+  dplyr::select(all_of(col_pred)) 
+names(predictors)
+
+# Extract response variables
+ind <- div  %>% dplyr::select("R")
+names(ind)
+
+## CV config -----
+# Convert tot to sf object
+tot_sf_4326 <- st_as_sf(tot, coords = c("x", "y"), crs = 4326, remove = FALSE) # make sure you keep "x" and "y" columns with remove = FALSE (the coordinates columns will be needed for spaMM)
+
+
+# Set coords to numeric
+tot_sf_4326$x <- as.numeric(tot_sf_4326$x)
+tot_sf_4326$y <- as.numeric(tot_sf_4326$y)
+
+
+
+
+# LOO CV
+# Load 
+# loo <- loo_cv(tot_sf_4326)
+
+
+# BLOO CV
+# Compute different BLOO-CV configurations 
+# Define buffer sizes
+#buffer_sizes <- seq(from = 10, to = 200, by = 10)
+buffer_sizes = 50
+
+# Initialize list to store BLOO-CV results
+bloo_results_list <- list()
+
+# Loop through each buffer size and compute BLOO-CV
+for (buffer_size in buffer_sizes) {
+  
+  # Compute BLOO-CV
+  bloo_results <- bloo_cv(st_as_sf(tot_sf_4326), buffer_size)
+  
+  # Store results in list with a named index
+  bloo_results_list[[paste0("bloo", buffer_size)]] <- bloo_results
+}
+
+
+# ALL CV
+# Combine all CV configurations
+# cv_configs <- c(list(loo = loo), bloo_results_list)
+cv_configs <- c(bloo_results_list)
+
+
+rm(tot_sf_4326, loo , bloo_results_list, bloo_results, buffer_sizes, buffer_size)
+
+
+## Fit model ----------
+# Initialize list to store models
+models_list <- list()
+
+# Iterate over each response variable
+for (response_var in colnames(ind)) {   # Just R
+  
+  # Fit the model using fit_models function
+  model <- fit_models(
+    dataset = tot, 
+    response_var = response_var, 
+    predictors = colnames(predictors), 
+    cv_configs = cv_configs["bloo50"],
+    models = c("RF"), 
+    distribution = NULL
+  )
+  
+  # Store model in list
+  models_list[[response_var]] <- model
+}
+
+## Evaluate performance ----
+perf <- evaluate_models(models_list)
+perf 
+beepr::beep()
+
+
+
+
+
+# Save ----
+saveRDS(perf, "./output/models/rf/T1.39_performance.rds")
+
+saveRDS(models_list, "./output/models/rf/T1.39.rds") 
+
+
+## Plot observed vs predicted ----
+md <- readRDS("./output/models/rf/T1.39.rds")
+#md <- models_list
+source("./utils/Fct_Modeling.R")
+evaluate_models(md, output = "all")
+
+## Variance importance plot ----
+folds  <- md$R$RF$bloo50
+
+# 1. Extract importance from each RF fold
+importance_list <- lapply(folds, function(fold) {
+  imp <- randomForest::importance(fold$model)
+  as.data.frame(imp) |>
+    tibble::rownames_to_column(var = "Feature")
+})
+
+# 2. Combine and average
+all_importance <- bind_rows(importance_list, .id = "Fold")
+
+# Check columns if you want
+# names(all_importance)
+
+mean_importance <- all_importance |>
+  group_by(Feature) |>
+  summarise(across(where(is.numeric), ~ mean(.x, na.rm = TRUE)),
+            .groups = "drop") |>
+  arrange(desc(IncNodePurity))   # or desc(`%IncMSE`) depending on your RF type
+
+
+
+# 3. Plot
+# 3. Plot (choose the column IncNodePurity or `%IncMSE`)
+
+ggplot(mean_importance,
+       aes(x = reorder(Feature, `%IncMSE`), y = `%IncMSE`)) +
+  geom_col() +
+  coord_flip() +
+  theme_minimal()
+
+ggsave("./figures/models/rf/T1.39_variable_importance_percentIncMSE.png")
+
+ggplot(mean_importance,
+       aes(x = reorder(Feature, IncNodePurity), y = IncNodePurity)) +
+  geom_col() +
+  coord_flip() +
+  theme_minimal()
+ggsave("./figures/models/rf/T1.39_variable_importance_IncNodePurity.png")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#-------------------------- T1.40 : RF = T1.33 --------------------- 
+#-------------------------- mtry = 2, ntree = 500, nodesize = 1 ---------------
+
+#-------------------------- + area_km2 + estimated_volume_total ------------------------
+#-------------------------- + depth_sampling + region ------------------------
+## Description ----
+#--- Model : RF
+# Parameters : mtry = 2, ntree = 500, nodesize = 1
+
+#--- Response var : 
+# from div_indices_v1.0_sel_v1.1.csv
+# R
+
+#---- Predictors : 
+
+
+#---- CV config :
+# BLOO CV with buffer size = 500 km
+
+#---- Perf :
+## Description ----
+#--- Model : RF
+# Parameters : mtry = 2, ntree = 500, nodesize = 1
+
+#--- Response var : 
+# from div_indices_v1.0_sel_v1.1.csv
+# R
+
+#---- Predictors : 
+
+
+#---- CV config :
+# BLOO CV with buffer size = 50 km
+
+#---- Perf : 
+# R2 Pearson_Corr Spearman_Corr      MAE     RMSE AIC Response_Var Model     CV Train_Size
+# 1 0.4014184    0.6335759     0.6286837 11.16216 13.75386  NA            R    RF bloo50         NA
+
+
+
+
+## Prep data for model ----
+
+pred1.5 <- st_read("./data/processed_data/predictors/predictors_sel_v1.5_month.gpkg")
+sort(names(pred1.5))
+
+# Add pred1.5$soft_bottom_clr and pred1.5$rock_clr to tot
+tot <- tot %>%
+  left_join(pred1.5 %>% st_drop_geometry() %>% dplyr::select(c("replicates", "soft_bottom_clr", "rock_clr", "area_km2")), by = "replicates")
+
+sort(names(tot))
+
+# Add year
+tot <- tot %>%
+  mutate(year = year(date))
+
+col_pred <- c(colnames(pred %>% st_drop_geometry() %>% dplyr::select(-c(replicates, grouped_main_habitat, northness, eastness))), "year", "soft_bottom_clr", "rock_clr", "area_km2", "estimated_volume_total", "depth_sampling", "region")
+
+# Extract predictors
+predictors <- tot %>% 
+  dplyr::select(all_of(col_pred)) 
+names(predictors)
+
+# Extract response variables
+ind <- div  %>% dplyr::select("R")
+names(ind)
+
+## CV config -----
+# Convert tot to sf object
+tot_sf_4326 <- st_as_sf(tot, coords = c("x", "y"), crs = 4326, remove = FALSE) # make sure you keep "x" and "y" columns with remove = FALSE (the coordinates columns will be needed for spaMM)
+
+
+# Set coords to numeric
+tot_sf_4326$x <- as.numeric(tot_sf_4326$x)
+tot_sf_4326$y <- as.numeric(tot_sf_4326$y)
+
+
+
+
+# LOO CV
+# Load 
+# loo <- loo_cv(tot_sf_4326)
+
+
+# BLOO CV
+# Compute different BLOO-CV configurations 
+# Define buffer sizes
+#buffer_sizes <- seq(from = 10, to = 200, by = 10)
+buffer_sizes = 50
+
+# Initialize list to store BLOO-CV results
+bloo_results_list <- list()
+
+# Loop through each buffer size and compute BLOO-CV
+for (buffer_size in buffer_sizes) {
+  
+  # Compute BLOO-CV
+  bloo_results <- bloo_cv(st_as_sf(tot_sf_4326), buffer_size)
+  
+  # Store results in list with a named index
+  bloo_results_list[[paste0("bloo", buffer_size)]] <- bloo_results
+}
+
+
+# ALL CV
+# Combine all CV configurations
+# cv_configs <- c(list(loo = loo), bloo_results_list)
+cv_configs <- c(bloo_results_list)
+
+
+rm(tot_sf_4326, loo , bloo_results_list, bloo_results, buffer_sizes, buffer_size)
+
+
+## Fit model ----------
+# Initialize list to store models
+models_list <- list()
+
+# Iterate over each response variable
+for (response_var in colnames(ind)) {   # Just R
+  
+  # Fit the model using fit_models function
+  model <- fit_models(
+    dataset = tot, 
+    response_var = response_var, 
+    predictors = colnames(predictors), 
+    cv_configs = cv_configs["bloo50"],
+    models = c("RF"), 
+    distribution = NULL
+  )
+  
+  # Store model in list
+  models_list[[response_var]] <- model
+}
+
+## Evaluate performance ----
+perf <- evaluate_models(models_list)
+perf 
+beepr::beep()
+
+
+
+
+
+# Save ----
+saveRDS(perf, "./output/models/rf/T1.40_performance.rds")
+
+saveRDS(models_list, "./output/models/rf/T1.40.rds") 
+
+
+## Plot observed vs predicted ----
+md <- readRDS("./output/models/rf/T1.40.rds")
+#md <- models_list
+source("./utils/Fct_Modeling.R")
+evaluate_models(md, output = "all")
+
+## Variance importance plot ----
+folds  <- md$R$RF$bloo50
+
+# 1. Extract importance from each RF fold
+importance_list <- lapply(folds, function(fold) {
+  imp <- randomForest::importance(fold$model)
+  as.data.frame(imp) |>
+    tibble::rownames_to_column(var = "Feature")
+})
+
+# 2. Combine and average
+all_importance <- bind_rows(importance_list, .id = "Fold")
+
+# Check columns if you want
+# names(all_importance)
+
+mean_importance <- all_importance |>
+  group_by(Feature) |>
+  summarise(across(where(is.numeric), ~ mean(.x, na.rm = TRUE)),
+            .groups = "drop") |>
+  arrange(desc(IncNodePurity))   # or desc(`%IncMSE`) depending on your RF type
+
+
+
+# 3. Plot
+# 3. Plot (choose the column IncNodePurity or `%IncMSE`)
+
+ggplot(mean_importance,
+       aes(x = reorder(Feature, `%IncMSE`), y = `%IncMSE`)) +
+  geom_col() +
+  coord_flip() +
+  theme_minimal()
+
+ggsave("./figures/models/rf/T1.40_variable_importance_percentIncMSE.png")
+
+ggplot(mean_importance,
+       aes(x = reorder(Feature, IncNodePurity), y = IncNodePurity)) +
+  geom_col() +
+  coord_flip() +
+  theme_minimal()
+ggsave("./figures/models/rf/T1.40_variable_importance_IncNodePurity.png")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

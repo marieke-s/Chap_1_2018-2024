@@ -664,7 +664,7 @@ indicators <- indicators %>%
 # Based on occ_pooled_v1.1 and species_traits_NA-resolved_v1.0.csv (MO traits 2023 extracted by Ulysse)
 # 9 Div indices : "R"          "Crypto"     "Elasmo"     "DeBRa"      "RedList"    "LRFI"       "TopPred"    "Commercial" "Grouper"   "AngelShark"
 write.table(indicators, "./data/processed_data/Traits/div_indices_v1.0.csv", row.names = F, dec = ".", sep = ";")
-
+write.table(traits, "./data/processed_data/Traits/species_traits_used_for_div_indices_v1.0.csv", row.names = F, dec = ".", sep = ";")
 
 
 

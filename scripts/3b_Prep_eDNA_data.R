@@ -332,7 +332,8 @@ pcr <- pcr %>%
 
 
 
-
+# Export occ_sel-on-mtdt_3 
+write.csv(occ, "./data/processed_data/eDNA/occ_sel-on-mtdt_3.csv", row.names = FALSE, sep = ";")
 
 
 #------------- HANDLE SAMPLES WITH NO SPECIES DETECTED ----------------------

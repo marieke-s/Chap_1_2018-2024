@@ -17,7 +17,7 @@ library(sf)
 library(spatialRF)
 library(units)
 library(AER)
-library(ape)
+library(ape) 
 library(automap)
 library(biomod2)
 library(blockCV)
@@ -990,5 +990,791 @@ model.non.spatial_cv$evaluation
 # 8 Training        r.squared  0.9399748                         0  0.9399748  0.9399748  0.9399296 0.000 0.0009804275  0.9377113  0.9416211
 # 9 Training             rmse  5.7380000                         0  5.7380000  5.7380000  5.7403118 0.007 0.0302062055  5.6559000  5.7989000
 
+
+
+
+
+
+#-------------------------- T.0.7 = T.1.33 RF ---------------------------------------------
+#-------------------------- mtry = 2, ntree = 500, nodesize = 1 ---------------
+
+#-------------------------- + area_km2 + estimated_volume_total ------------------------
+## Prep data for model ----
+
+pred1.5 <- st_read("./data/processed_data/predictors/predictors_sel_v1.5_month.gpkg")
+sort(names(pred1.5))
+
+# Add pred1.5$soft_bottom_clr and pred1.5$rock_clr to tot
+tot <- tot %>%
+  left_join(pred1.5 %>% st_drop_geometry() %>% dplyr::select(c("replicates", "soft_bottom_clr", "rock_clr", "area_km2")), by = "replicates")
+
+sort(names(tot))
+
+# Add year
+tot <- tot %>%
+  mutate(year = year(date))
+
+col_pred <- c(colnames(pred %>% st_drop_geometry() %>% dplyr::select(-c(replicates, grouped_main_habitat, northness, eastness))), "year", "soft_bottom_clr", "rock_clr", "area_km2", "estimated_volume_total")
+
+# Extract predictors
+predictors <- tot %>% 
+  dplyr::select(all_of(col_pred)) 
+names(predictors)
+
+# Extract response variables
+ind <- div  %>% dplyr::select("R")
+names(ind)
+
+
+
+
+# --- Define resp and predictors ---
+response_name <- names(ind)
+covariates_names <- names(predictors)
+
+
+
+
+## Prep data for spatial-RF ------------------------------
+
+tot_sf <- st_as_sf(tot, coords = c("x", "y"), crs = 4326)  # adapt names if needed
+tot_m  <- st_transform(tot_sf, 3857)                       # metric CRS (meters)
+
+xy_m <- st_coordinates(tot_m) |> as.data.frame()
+colnames(xy_m) <- c("x", "y")
+
+nrow(tot)    # 637
+nrow(xy_m)   # must be 637
+head(xy_m)
+
+dm  <- st_distance(tot_m)             # units [m]
+distance_matrix <- as.matrix(drop_units(dm))  # plain numeric
+
+dim(distance_matrix)   # 637 637
+range(distance_matrix)
+
+distance_thresholds <- c(0, 1000, 2000, 5000, 10000, 50000, 100000)
+
+
+## Non spatial rf -----------
+model.non.spatial <- spatialRF::rf(
+  data = tot,
+  dependent.variable.name = response_name,
+  predictor.variable.names = covariates_names,
+  distance.matrix = distance_matrix,
+  distance.thresholds = distance_thresholds,
+  xy = xy_m, #not needed by rf, but other functions read it from the model
+  seed = 1,
+  verbose = FALSE,
+  ranger.arguments = list(
+    mtry = 2,
+    ntree = 500,
+    min.node.size = 1,
+    max.depth = NULL
+  )
+)
+
+saveRDS(model.non.spatial, "./output/models/spatialrf/T.0.7_nonspatial_R.rds")
+
+
+## CV evaluation -----
+model.non.spatial_cv <- spatialRF::rf_evaluate(
+  model = model.non.spatial,
+  xy = xy_m,                  #data coordinates
+  # repetitions = 30,         # number of spatial folds
+  training.fraction = 0.95, # training data fraction on each fold
+  metrics = c("r.squared", "pseudo.r.squared", "rmse"),
+  distance.step = 50000, # 50 km distance for spatial folds
+  seed = 1,
+  verbose = FALSE
+)
+
+saveRDS(model.non.spatial_cv, "./output/models/spatialrf/T.0.6_nonspatial_cv_R.rds")
+
+# model.non.spatial_cv results 
+model.non.spatial_cv$evaluation
+
+# $aggregated
+# model           metric     median median_absolute_deviation         q1         q3       mean    se           sd        min       max
+# 1     Full pseudo.r.squared         NA                        NA         NA         NA  0.9785144    NA           NA         NA        NA
+# 2     Full        r.squared         NA                        NA         NA         NA  0.9574904    NA           NA         NA        NA
+# 3     Full             rmse         NA                        NA         NA         NA  4.4857000    NA           NA         NA        NA
+# 4  Testing pseudo.r.squared  0.6990000              0.0252042000  0.6372500  0.7052500  0.6555000 0.037 0.0914477993  0.4850000  0.726000
+# 5  Testing        r.squared  0.4885000              0.0370650000  0.4072500  0.4977500  0.4368333 0.045 0.1107418921  0.2350000  0.528000
+# 6  Testing             rmse 10.6775000              0.3587892000 10.5600000 13.4222500 11.8325000 0.809 1.9807255994 10.3490000 14.433000
+# 7 Training pseudo.r.squared  0.9781667              0.0002217163  0.9780676  0.9783353  0.9781866 0.000 0.0001727937  0.9779710  0.978389
+# 8 Training        r.squared  0.9568101              0.0004337256  0.9566163  0.9571399  0.9568490 0.000 0.0003380501  0.9564273  0.957245
+# 9 Training             rmse  4.5552000              0.0862131900  4.5125000  4.5997750  4.5563667 0.023 0.0557603324  4.4912000  4.623700
+
+# Distance between folds ---
+# extract fold centers
+centers <- model.non.spatial_cv$evaluation$per.fold[
+  , c("fold.center.x", "fold.center.y")
+]
+
+# pairwise distance matrix (same units as CRS, likely meters)
+dist_matrix <- as.matrix(dist(centers))
+
+rownames(dist_matrix) <- centers$fold.id
+colnames(dist_matrix) <- centers$fold.id
+dist_matrix
+
+# minimum distance between any two fold centers
+min(dist_matrix[dist_matrix > 0])
+
+# maximum distance
+max(dist_matrix)
+
+# nearest neighbour distance per fold
+apply(dist_matrix + diag(Inf, nrow(dist_matrix)), 1, min)
+
+
+
+
+# Map folds ----
+df_sf <- tot_sf
+
+# fold1 <- model.non.spatial_cv$evaluation$spatial.folds[[1]]
+# 
+# train_sf <- df_sf[fold1$training, ]
+# test_sf  <- df_sf[fold1$testing, ]
+# 
+# 
+# 
+# plot(st_geometry(train_sf), col = "blue", pch = 16)
+# plot(st_geometry(test_sf),  col = "red",  pch = 16, add = TRUE)
+
+
+
+par(mfrow = c(2, 3))  # adjust to number of folds
+
+for (i in seq_along(model.non.spatial_cv$evaluation$spatial.folds)) {
+  
+  fold <- model.non.spatial_cv$evaluation$spatial.folds[[i]]
+  
+  plot(st_geometry(df_sf[fold$training, ]),
+       col = "blue", pch = 16, main = paste("Fold", i))
+  
+  plot(st_geometry(df_sf[fold$testing, ]),
+       col = "red", pch = 16, add = TRUE)
+}
+
+# save
+png("./figures/models/spatialrf/T.0.7_spatialrf_folds_R.png", width = 800, height = 600)
+
+
+
+
+
+#-------------------------- T.0.8 = T.1.33 RF ---------------------------------------------
+#-------------------------- mtry = 2, ntree = 500, nodesize = 1 ---------------
+
+#-------------------------- + area_km2 + estimated_volume_total ------------------------
+#-------------------------- Use mem ------------------------
+## Prep data for model ----
+
+pred1.5 <- st_read("./data/processed_data/predictors/predictors_sel_v1.5_month.gpkg")
+sort(names(pred1.5))
+
+# Add pred1.5$soft_bottom_clr and pred1.5$rock_clr to tot
+tot <- tot %>%
+  left_join(pred1.5 %>% st_drop_geometry() %>% dplyr::select(c("replicates", "soft_bottom_clr", "rock_clr", "area_km2")), by = "replicates")
+
+sort(names(tot))
+
+# Add year
+tot <- tot %>%
+  mutate(year = year(date))
+
+col_pred <- c(colnames(pred %>% st_drop_geometry() %>% dplyr::select(-c(replicates, grouped_main_habitat, northness, eastness))), "year", "soft_bottom_clr", "rock_clr", "area_km2", "estimated_volume_total")
+
+# Extract predictors
+predictors <- tot %>% 
+  dplyr::select(all_of(col_pred)) 
+names(predictors)
+
+# Extract response variables
+ind <- div  %>% dplyr::select("R")
+names(ind)
+
+
+
+
+# --- Define resp and predictors ---
+response_name <- names(ind)
+covariates_names <- names(predictors)
+
+
+
+
+## Prep data for spatial-RF ------------------------------
+
+tot_sf <- st_as_sf(tot, coords = c("x", "y"), crs = 4326)  # adapt names if needed
+tot_m  <- st_transform(tot_sf, 3857)                       # metric CRS (meters)
+
+xy_m <- st_coordinates(tot_m) |> as.data.frame()
+colnames(xy_m) <- c("x", "y")
+
+nrow(tot)    # 637
+nrow(xy_m)   # must be 637
+head(xy_m)
+
+dm  <- st_distance(tot_m)             # units [m]
+distance_matrix <- as.matrix(drop_units(dm))  # plain numeric
+
+dim(distance_matrix)   # 637 637
+range(distance_matrix)
+
+distance_thresholds <- c(0, 1000, 2000, 5000, 10000, 50000, 100000)
+
+
+## spatial rf with mem -----------
+model_spatial <- spatialRF::rf_spatial(
+  data = tot,
+  dependent.variable.name = response_name,
+  predictor.variable.names = covariates_names,
+  distance.matrix = distance_matrix,
+  #distance.thresholds = distance_thresholds,
+  xy = xy_m, #not needed by rf, but other functions read it from the model
+  seed = 1,
+  verbose = FALSE,
+  method = "mem.moran.sequential",
+  ranger.arguments = list(
+    mtry = 2,
+    ntree = 500,
+    min.node.size = 1,
+    max.depth = NULL
+  )
+)
+
+saveRDS(model_spatial, "./output/models/spatialrf/T.0.8_spatial_R.rds")
+
+
+## CV evaluation -----
+model_spatial_cv <- spatialRF::rf_evaluate(
+  model = model_spatial,
+  xy = xy_m,                  #data coordinates
+  #repetitions = 30,         # number of spatial folds
+  training.fraction = 0.95, # training data fraction on each fold
+  metrics = c("r.squared", "pseudo.r.squared", "rmse"),
+  distance.step = 50000, # 50 km distance for spatial folds
+  seed = 1,
+  verbose = FALSE
+)
+
+saveRDS(model_spatial_cv, "./output/models/spatialrf/T.0.8_spatial_cv_R.rds")
+
+# model.non.spatial_cv results 
+model_spatial_cv$evaluation
+
+# $aggregated
+# model           metric     median median_absolute_deviation         q1         q3       mean    se           sd        min       max
+# 1     Full pseudo.r.squared         NA                        NA         NA         NA  0.9785144    NA           NA         NA        NA
+# 2     Full        r.squared         NA                        NA         NA         NA  0.9574904    NA           NA         NA        NA
+# 3     Full             rmse         NA                        NA         NA         NA  4.4857000    NA           NA         NA        NA
+# 4  Testing pseudo.r.squared  0.6990000              0.0252042000  0.6372500  0.7052500  0.6555000 0.037 0.0914477993  0.4850000  0.726000
+# 5  Testing        r.squared  0.4885000              0.0370650000  0.4072500  0.4977500  0.4368333 0.045 0.1107418921  0.2350000  0.528000
+# 6  Testing             rmse 10.6775000              0.3587892000 10.5600000 13.4222500 11.8325000 0.809 1.9807255994 10.3490000 14.433000
+# 7 Training pseudo.r.squared  0.9781667              0.0002217163  0.9780676  0.9783353  0.9781866 0.000 0.0001727937  0.9779710  0.978389
+# 8 Training        r.squared  0.9568101              0.0004337256  0.9566163  0.9571399  0.9568490 0.000 0.0003380501  0.9564273  0.957245
+# 9 Training             rmse  4.5552000              0.0862131900  4.5125000  4.5997750  4.5563667 0.023 0.0557603324  4.4912000  4.623700
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+model.non.spatial
+
+
+
+## --- Compare models T.0.7 & T.08 ----
+model.non.spatial <- readRDS("./output/models/spatialrf/T.0.7_nonspatial_R.rds")
+model_spatial <- readRDS("./output/models/spatialrf/T.0.8_spatial_R.rds")
+
+comparison <- spatialRF::rf_compare(
+  models = list(
+    `Non-spatial` = model.non.spatial,
+    `Spatial` = model_spatial
+  ),
+  xy = xy_m,
+  repetitions = 30,
+  training.fraction = 0.8,
+  metrics = "r.squared",
+  seed = 1)
+
+comparison$plot
+ggsave("./figures/models/spatialrf/T.0.7_vs_T.0.8_comparison_R.png")
+
+
+# Check non spatial model residuals autocorrelation
+model.non.spatial$residuals$autocorrelation
+
+
+#-------------------------- T.0.9 = T.1.33 RF ---------------------------------------------
+#-------------------------- mtry = 2, ntree = 500, nodesize = 1 ---------------
+
+#-------------------------- + area_km2 + estimated_volume_total ------------------------
+#-------------------------- mem.moran.sequential ------------------------
+## Prep data for model ----
+
+pred1.5 <- st_read("./data/processed_data/predictors/predictors_sel_v1.5_month.gpkg")
+sort(names(pred1.5))
+
+# Add pred1.5$soft_bottom_clr and pred1.5$rock_clr to tot
+tot <- tot %>%
+  left_join(pred1.5 %>% st_drop_geometry() %>% dplyr::select(c("replicates", "soft_bottom_clr", "rock_clr", "area_km2")), by = "replicates")
+
+sort(names(tot))
+
+# Add year
+tot <- tot %>%
+  mutate(year = year(date))
+
+col_pred <- c(colnames(pred %>% st_drop_geometry() %>% dplyr::select(-c(replicates, grouped_main_habitat, northness, eastness))), "year", "soft_bottom_clr", "rock_clr", "area_km2", "estimated_volume_total")
+
+# Extract predictors
+predictors <- tot %>% 
+  dplyr::select(all_of(col_pred)) 
+names(predictors)
+
+# Extract response variables
+ind <- div  %>% dplyr::select("R")
+names(ind)
+
+
+
+
+# --- Define resp and predictors ---
+response_name <- names(ind)
+covariates_names <- names(predictors)
+
+
+
+
+## Prep data for spatial-RF ------------------------------
+
+tot_sf <- st_as_sf(tot, coords = c("x", "y"), crs = 4326)  # adapt names if needed
+tot_m  <- st_transform(tot_sf, 3857)                       # metric CRS (meters)
+
+xy_m <- st_coordinates(tot_m) |> as.data.frame()
+colnames(xy_m) <- c("x", "y")
+
+nrow(tot)    # 637
+nrow(xy_m)   # must be 637
+head(xy_m)
+
+dm  <- st_distance(tot_m)             # units [m]
+distance_matrix <- as.matrix(drop_units(dm))  # plain numeric
+
+dim(distance_matrix)   # 637 637
+range(distance_matrix)
+
+distance_thresholds <- c(0, 1000, 2000, 5000, 10000, 50000, 100000)
+
+
+## spatial rf with mem -----------
+model_spatial <- spatialRF::rf_spatial(
+  data = tot,
+  dependent.variable.name = response_name,
+  predictor.variable.names = covariates_names,
+  distance.matrix = distance_matrix,
+  distance.thresholds = c(1000, 2000, 5000, 10000, 50000),
+  xy = xy_m, #not needed by rf, but other functions read it from the model
+  seed = 1,
+  verbose = FALSE,
+  method = "mem.moran.sequential",
+  ranger.arguments = list(
+    mtry = 2,
+    ntree = 500,
+    min.node.size = 1,
+    max.depth = NULL
+  )
+)
+
+saveRDS(model_spatial, "./output/models/spatialrf/T.0.9_spatial_R.rds")
+
+
+## CV evaluation -----
+model_spatial_cv <- spatialRF::rf_evaluate(
+  model = model_spatial,
+  xy = xy_m,                  #data coordinates
+  #repetitions = 30,         # number of spatial folds
+  training.fraction = 0.95, # training data fraction on each fold
+  metrics = c("r.squared", "pseudo.r.squared", "rmse"),
+  distance.step = 50000, # 50 km distance for spatial folds
+  seed = 1,
+  verbose = FALSE
+)
+
+
+# model.non.spatial_cv results 
+model_spatial_cv$evaluation
+saveRDS(model_spatial_cv, "./output/models/spatialrf/T.0.9_spatial_cv_R.rds")
+
+
+# $aggregated
+# model           metric     median median_absolute_deviation         q1         q3       mean    se           sd
+# 1     Full pseudo.r.squared         NA                        NA         NA         NA  0.9785144    NA           NA
+# 2     Full        r.squared         NA                        NA         NA         NA  0.9574904    NA           NA
+# 3     Full             rmse         NA                        NA         NA         NA  4.4857000    NA           NA
+# 4  Testing pseudo.r.squared  0.6990000              0.0252042000  0.6372500  0.7052500  0.6555000 0.037 0.0914477993
+# 5  Testing        r.squared  0.4885000              0.0370650000  0.4072500  0.4977500  0.4368333 0.045 0.1107418921
+# 6  Testing             rmse 10.6775000              0.3587892000 10.5600000 13.4222500 11.8325000 0.809 1.9807255994
+# 7 Training pseudo.r.squared  0.9781667              0.0002217163  0.9780676  0.9783353  0.9781866 0.000 0.0001727937
+# 8 Training        r.squared  0.9568101              0.0004337256  0.9566163  0.9571399  0.9568490 0.000 0.0003380501
+# 9 Training             rmse  4.5552000              0.0862131900  4.5125000  4.5997750  4.5563667 0.023 0.0557603324
+# min       max
+# 1         NA        NA
+# 2         NA        NA
+# 3         NA        NA
+# 4  0.4850000  0.726000
+# 5  0.2350000  0.528000
+# 6 10.3490000 14.433000
+# 7  0.9779710  0.978389
+# 8  0.9564273  0.957245
+# 9  4.4912000  4.623700
+
+
+
+
+
+#-------------------------- T.0.10 = T.1.33 RF  - coords ---------------------------------------------
+#-------------------------- mtry = 2, ntree = 500, nodesize = 1 ---------------
+
+#-------------------------- + area_km2 + estimated_volume_total ------------------------
+#-------------------------- mem.moran.sequential ------------------------
+## Prep data for model ----
+
+pred1.5 <- st_read("./data/processed_data/predictors/predictors_sel_v1.5_month.gpkg")
+sort(names(pred1.5))
+
+# Add pred1.5$soft_bottom_clr and pred1.5$rock_clr to tot
+tot <- tot %>%
+  left_join(pred1.5 %>% st_drop_geometry() %>% dplyr::select(c("replicates", "soft_bottom_clr", "rock_clr", "area_km2")), by = "replicates")
+
+sort(names(tot))
+
+# Add year
+tot <- tot %>%
+  mutate(year = year(date))
+
+col_pred <- c(colnames(pred %>% st_drop_geometry() %>% dplyr::select(-c(replicates, grouped_main_habitat, northness, eastness, x, y))), "year", "soft_bottom_clr", "rock_clr", "area_km2", "estimated_volume_total")
+
+# Extract predictors
+predictors <- tot %>% 
+  dplyr::select(all_of(col_pred)) 
+names(predictors)
+
+# Extract response variables
+ind <- div  %>% dplyr::select("R")
+names(ind)
+
+
+
+
+# --- Define resp and predictors ---
+response_name <- names(ind)
+covariates_names <- names(predictors)
+
+
+
+
+## Prep data for spatial-RF ------------------------------
+
+tot_sf <- st_as_sf(tot, coords = c("x", "y"), crs = 4326)  # adapt names if needed
+tot_m  <- st_transform(tot_sf, 3857)                       # metric CRS (meters)
+
+xy_m <- st_coordinates(tot_m) |> as.data.frame()
+colnames(xy_m) <- c("x", "y")
+
+nrow(tot)    # 637
+nrow(xy_m)   # must be 637
+head(xy_m)
+
+dm  <- st_distance(tot_m)             # units [m]
+distance_matrix <- as.matrix(drop_units(dm))  # plain numeric
+
+dim(distance_matrix)   # 637 637
+range(distance_matrix) #  0.0 739198.1
+
+distance_thresholds <- c(0, 1000, 2000, 5000, 10000, 50000, 100000)
+
+
+## spatial rf with mem -----------
+model_spatial <- spatialRF::rf_spatial(
+  data = tot,
+  dependent.variable.name = response_name,
+  predictor.variable.names = covariates_names,
+  distance.matrix = distance_matrix,
+  distance.thresholds = c(1000, 2000, 5000, 10000, 50000),
+  xy = xy_m, #not needed by rf, but other functions read it from the model
+  seed = 1,
+  verbose = FALSE,
+  method = "mem.moran.sequential",
+  ranger.arguments = list(
+    mtry = 2,
+    ntree = 500,
+    min.node.size = 1,
+    max.depth = NULL
+  )
+)
+
+saveRDS(model_spatial, "./output/models/spatialrf/T.0.10_spatial_R.rds")
+model_spatial
+
+## CV evaluation -----
+model_spatial_cv <- spatialRF::rf_evaluate(
+  model = model_spatial,
+  xy = xy_m,                  #data coordinates
+  #repetitions = 30,         # number of spatial folds
+  training.fraction = 0.95, # training data fraction on each fold
+  metrics = c("r.squared", "pseudo.r.squared", "rmse"),
+  distance.step = 50000, # 50 km distance for spatial folds
+  seed = 1,
+  verbose = FALSE
+)
+
+
+
+# model.non.spatial_cv results 
+model_spatial_cv$evaluation
+saveRDS(model_spatial_cv, "./output/models/spatialrf/T.0.10_spatial_cv_R.rds")
+
+
+# $aggregated
+# model           metric     median median_absolute_deviation         q1         q3       mean    se           sd
+# 1     Full pseudo.r.squared         NA                        NA         NA         NA  0.9792377    NA           NA
+# 2     Full        r.squared         NA                        NA         NA         NA  0.9589066    NA           NA
+# 3     Full             rmse         NA                        NA         NA         NA  4.4680000    NA           NA
+# 4  Testing pseudo.r.squared  0.6880000              0.0326172000  0.6010000  0.7022500  0.6555000 0.028 0.0688324052
+# 5  Testing        r.squared  0.4740000              0.0444780000  0.3635000  0.4930000  0.4338333 0.036 0.0874949522
+# 6  Testing             rmse 11.0970000              0.4662777000 10.8630000 13.5052500 12.0393333 0.700 1.7151944107
+# 7 Training pseudo.r.squared  0.9784997              0.0001739434  0.9784240  0.9787920  0.9786094 0.000 0.0002719311
+# 8 Training        r.squared  0.9574616              0.0003403879  0.9573135  0.9580337  0.9576765 0.000 0.0005322714
+# 9 Training             rmse  4.5679000              0.0753902100  4.5101500  4.5913750  4.5561333 0.026 0.0639598520
+# min        max
+# 1         NA         NA
+# 2         NA         NA
+# 3         NA         NA
+# 4  0.5610000  0.7170000
+# 5  0.3150000  0.5140000
+# 6 10.7090000 14.2400000
+# 7  0.9783518  0.9790173
+# 8  0.9571722  0.9584749
+# 9  4.4705000  4.6404000
+
+
+
+
+
+#-------------------------- CHECK SPATIAL AUTOCORRELATION  ---------------------------------------------
+library(spdep)
+model.non.spatial <- readRDS("./output/models/spatialrf/T.0.7_nonspatial_R.rds")
+
+# --- Moran's I on residuals ----
+
+coords <- as.matrix(xy_m)
+
+# distance bands to test (meters)
+bands <- list(
+  "0-1km"  = c(0, 1000),
+  "1-2km"  = c(1000, 2000),
+  "2-5km"  = c(2000, 5000),
+  "5-10km" = c(5000, 10000),
+  "10-50km"= c(10000, 50000)
+)
+
+res <- lapply(bands, function(b) {
+  nb <- dnearneigh(coords, d1 = b[1], d2 = b[2])
+  lw <- nb2listw(nb, style = "W", zero.policy = TRUE)
+  moran.test(model.non.spatial$residuals$values, lw,
+             zero.policy = TRUE)
+})
+
+res
+
+# --- Variogram of residuals ----
+library(gstat)
+library(sf)
+
+res_sf <- st_as_sf(
+  data.frame(res = model.non.spatial$residuals$values,
+             x = xy_m$x, y = xy_m$y),
+  coords = c("x", "y"),
+  crs = 3857
+)
+
+vg <- variogram(res ~ 1, res_sf, cutoff = 50000, width = 1000)
+plot(vg)
+
+# Save variogram plot
+png("./figures/models/spatialrf/T.0.7_variogram_residuals_R.png", width = 800, height = 600)
+
+
+# --- Check spatial autocorrelation in the RAW response ----
+# Raw response
+res_raw <- lapply(bands, function(b) {
+  nb <- dnearneigh(coords, b[1], b[2])
+  lw <- nb2listw(nb, style = "W", zero.policy = TRUE)
+  moran.test(tot$R, lw, zero.policy = TRUE)
+})
+
+res_raw
+
+
+
+# --- Moran’s I of each predictor ----
+library(spdep)
+
+coords <- as.matrix(xy_m)
+
+# Use a representative distance band (e.g. 2–10 km)
+nb <- dnearneigh(coords, d1 = 2000, d2 = 10000)
+lw <- nb2listw(nb, style = "W", zero.policy = TRUE)
+
+moran_pred <- lapply(predictors, function(v) {
+  if (is.factor(v)) return(NA)
+  moran.test(v, lw, zero.policy = TRUE)$estimate["Moran I statistic"]
+})
+
+moran_pred <- sort(unlist(moran_pred), decreasing = TRUE)
+moran_pred
+
+
+
+
+
+
+# --- How much spatial autocorrelation disappears when conditioning on ONE predictor ----
+
+
+moran_resid <- lapply(predictors, function(v) {
+  if (is.factor(v)) return(NA)
+  
+  m <- lm(tot$R ~ v)
+  res <- resid(m)
+  
+  moran.test(res, lw, zero.policy = TRUE)$estimate["Moran I statistic"]
+})
+
+moran_resid <- sort(unlist(moran_resid))
+
+moran_resid
+
+
+
+# --- Leave-one-variable-out RF ----
+library(spatialRF)
+
+loo_moran <- sapply(names(predictors), function(var) {
+  
+  covs <- setdiff(names(predictors), var)
+  
+  m <- spatialRF::rf(
+    data = tot,
+    dependent.variable.name = response_name,
+    predictor.variable.names = covs,
+    distance.matrix = distance_matrix,
+    distance.thresholds = c(5000),
+    xy = xy_m,
+    seed = 1,
+    verbose = FALSE
+  )
+  
+  pd <- m$residuals$autocorrelation$per.distance
+  if (is.null(pd)) return(NA_real_)
+  
+  # pd is a data.frame with columns: distance.threshold, moran.i, ...
+  idx <- which(pd$distance.threshold == 5000)
+  if (length(idx) == 0) return(NA_real_)
+  
+  pd$moran.i[idx[1]]
+})
+
+
+
+sort(loo_moran, decreasing = TRUE)
+
+
+
+# --- Plot ----
+library(spdep)
+
+coords <- as.matrix(xy_m)
+nb <- dnearneigh(coords, d1 = 2000, d2 = 10000)
+lw <- nb2listw(nb, style = "W", zero.policy = TRUE)
+
+moran_pred <- sapply(names(predictors), function(nm) {
+  v <- predictors[[nm]]
+  if (is.factor(v) || is.character(v)) return(NA_real_)
+  mt <- moran.test(v, lw, zero.policy = TRUE)
+  as.numeric(mt$estimate[["Moran I statistic"]])
+})
+
+moran_pred <- moran_pred[!is.na(moran_pred)]
+vars <- names(sort(moran_pred, decreasing = TRUE))
+vars
+
+mi_progressive <- numeric(length(vars))
+
+for (i in seq_along(vars)) {
+  
+  m <- spatialRF::rf(
+    data = tot,
+    dependent.variable.name = response_name,
+    predictor.variable.names = vars[1:i],
+    distance.matrix = distance_matrix,
+    distance.thresholds = c(5000),
+    xy = xy_m,
+    seed = 1,
+    verbose = FALSE
+  )
+  
+  pd <- m$residuals$autocorrelation$per.distance
+  mi_progressive[i] <- pd$moran.i[pd$distance.threshold == 5000][1]
+}
+
+plot(mi_progressive, type = "b",
+     xlab = "Number of predictors added (ranked by Moran's I)",
+     ylab = "Residual Moran's I at 5 km")
+
+
+
+
+
+
+
+
+
+
+
+# --- Conclusion (on T.0.7 model residuals) -----
+# “Despite strong spatial structure in environmental predictors, residual spatial autocorrelation in species richness was negligible beyond ~2 km once covariates were included. This indicates that spatial dependence is fully mediated by measured environmental variables rather than unobserved spatial processes.”
+
+# Methods: assessment of spatial structure and spatial surrogacy
+# 
+# Spatial structure in predictors and model residuals was assessed using Moran’s I computed on distance-based spatial weights derived from projected coordinates (EPSG:3857). Neighbourhoods were defined using distance bands between 2 and 10 km, ensuring connected spatial graphs. Moran’s I was calculated for each predictor to quantify inherent spatial autocorrelation, and for residuals of univariate linear models to assess the extent to which individual predictors explained spatial structure in the response.
+# 
+# To evaluate spatial surrogacy in a multivariate context, random forest models were fitted using the spatialRF framework. Residual spatial autocorrelation was examined at multiple distance thresholds. Leave-one-variable-out random forest models were additionally fitted to quantify whether removing individual predictors reintroduced spatial autocorrelation, indicating a unique spatial role. Explicit spatial random forest models using Moran’s eigenvector maps (MEMs) were fitted and compared against non-spatial models using spatial cross-validation.
+# 
+# Results: spatial structure in predictors and response
+# 
+# Many predictors exhibited strong spatial autocorrelation, with Moran’s I values exceeding 0.8 for several distance-based, geomorphological, and oceanographic variables, indicating pronounced spatial structuring at kilometre scales. Spatial coordinates showed near-perfect autocorrelation, while environmental predictors displayed a gradient of spatial dependence. Univariate regressions reduced, but did not eliminate, spatial autocorrelation in the response, indicating that no single predictor fully accounted for spatial structure.
+# 
+# In multivariate random forest models, residual spatial autocorrelation was weak and non-significant beyond short distances (≤2 km). Leave-one-variable-out analyses showed that excluding any single predictor did not restore meaningful spatial autocorrelation in model residuals, demonstrating strong redundancy among spatially structured covariates. Consistent with this, spatial random forest models incorporating Moran’s eigenvector–based spatial predictors did not improve predictive performance or reduce residual spatial autocorrelation relative to non-spatial models. Together, these results indicate that spatial structure in the response was effectively captured by the environmental predictors themselves, leaving little additional spatial signal for explicit spatial terms to explain.
 
 

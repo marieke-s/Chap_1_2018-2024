@@ -60,7 +60,7 @@ pred_raw$grouped_main_habitat <- tolower(pred_raw$grouped_main_habitat)
 pred_raw$grouped_main_habitat <- as.factor(pred_raw$grouped_main_habitat)
 
 # predictors_raw_v3.1 ----
-pred_raw <- st_read("./data/processed_data/predictors/predictors_raw_v3.1.gpkg")
+pred_raw <- sf::st_read("./data/processed_data/predictors/predictors_raw_v3.1.gpkg")
 # mtdt_7_sel_v1.1 ----
 mtdt <- st_read("./data/processed_data/Mtdt/mtdt_7_sel_v1.1.gpkg")
 # mtdt_7 ---
@@ -1557,6 +1557,8 @@ tot <- pred %>%
   left_join(st_drop_geometry(mtdt), by = "replicates") %>%
   left_join(div, by = "replicates")
 
+# export tot 
+ st_write(st_as_sf(tot), "./data/processed_data/tot_v1.0.gpkg", delete_dsn = TRUE)
 
 
 #--- R ~ volume/area/depth_sampling  ----------------------------
@@ -1709,6 +1711,7 @@ p <- ggplot(tot, aes(x = grouped_main_habitat, y = R)) +
     axis.text.x = element_text(angle = 35, hjust = 1)
   )
 p
+
 # Save plot 
 ggsave(
   filename = "./figures/Div_indices/R_by_habitat.png",
@@ -1730,6 +1733,7 @@ spatialRF::plot_training_df(
   point.color = viridis::viridis(100, option = "F"),
   line.color = "gray30"
 )
+
 # Save plot
 ggsave(
   filename = "./figures/Div_indices/R_vs_nb-habitat_per_km2.png",
@@ -1905,3 +1909,396 @@ table(hot$region)
 # 14        14        17 
 
 tot %>% filter(estimated_volume_total < 60) %>% pull(R) %>% summary
+
+#--- Max R points ----------------------------
+# Extract point with max R 
+max_r_point <- tot %>% filter(R == max(R, na.rm = TRUE))
+
+
+#------------------------------------ Occurences data explo ------------------------------
+#--- Load data ----
+occ <- readr::read_delim("./data/processed_data/eDNA/occ_sel-on-mtdt_3.csv")
+traits <- read.csv("./data/processed_data/Traits/species_traits_NA-resolved_v1.0.csv", sep = ";", header=T)85
+
+## Nb species ----
+dim(occ) # 262 spp 
+# 258 spp occ our sel 
+div <- readr::read_csv2("./data/processed_data/Traits/div_indices_v1.0_sel_v1.1.csv") %>%
+  mutate(DeBRa = as.numeric(DeBRa))
+
+
+## Nb de familles ----
+names(traits)
+length(unique(traits$Family))
+sort(unique(traits$Family))
+
+## Nb of elasmo ----
+traits %>% filter(elasmo == 1) %>% dim # 25 (à vérif avec Célia) --> 23 manuscript Celia
+# 23 elasmobranch species (10 sharks and 11 rays and 2 skates) were identified. 
+# Notable examples include the critically endangered bull ray (Aetomylaeus bovinus) and angelshark (Squatina squatina).
+
+
+t <- traits %>% filter(elasmo == 1)
+t$species
+# [1] "Aetomylaeus bovinus"                        "Alopias superciliosus"                     
+# [3] "Alopias vulpinus"                           "Cetorhinus maximus"                        
+# [5] "Dasyatis pastinaca"                         "Dasyatis tortonesei"                       
+# [7] "Dipturus oxyrinchus"                        "Etmopterus spinax"                         
+# [9] "Galeus melastomus"                          "Isurus oxyrinchus"                         
+# [11] "Mobula mobular"                             "Mustelus mustelus"                         
+# [13] "Myliobatis aquila"                          "Prionace glauca"                           
+# [15] "Pteroplatytrygon violacea"                  "Raja brachyura"                            
+# [17] "Raja miraletus"                             "Raja undulata"                             
+# [19] "Rostroraja alba"                            "Scyliorhinus canicula"                     
+# [21] "Scyliorhinus stellaris"                     "Squalus blainville"                        
+# [23] "Squatina squatina"                          "Torpedo marmorata"                         
+# [25] "Raja asterias.Raja clavata.Raja polystigma"
+
+tt <- traits %>% filter(elasmo == 1) %>% filter(IUCN_combined == "Threatened" | IUCN_combined == "CR" | IUCN_combined == "EN" | IUCN_combined == "VU")
+nrow(tt) # 15
+tt$species 
+# [1] "Aetomylaeus bovinus"    "Alopias superciliosus"  "Alopias vulpinus"      
+# [4] "Cetorhinus maximus"     "Dasyatis pastinaca"     "Etmopterus spinax"     
+# [7] "Isurus oxyrinchus"      "Mobula mobular"         "Mustelus mustelus"     
+# [10] "Myliobatis aquila"      "Raja undulata"          "Rostroraja alba"       
+# [13] "Scyliorhinus stellaris" "Squatina squatina"      "Torpedo marmorata"  
+
+
+
+
+
+
+##  Nb of RedList + examples ----
+traits %>% filter(IUCN_combined == "Threatened" | IUCN_combined == "CR" | IUCN_combined == "EN" | IUCN_combined == "VU") %>% dim # 23 
+t <- traits %>% filter(IUCN_combined == "Threatened" | IUCN_combined == "CR" | IUCN_combined == "EN" | IUCN_combined == "VU")
+t$species
+# [1] "Aetomylaeus bovinus"     "Alopias superciliosus"   "Alopias vulpinus"       
+# [4] "Anguilla anguilla"       "Balistes capriscus"      "Cetorhinus maximus"     
+# [7] "Dasyatis pastinaca"      "Epinephelus costae"      "Epinephelus marginatus" 
+# [10] "Etmopterus spinax"       "Istiophorus platypterus" "Isurus oxyrinchus"      
+# [13] "Mobula mobular"          "Mola mola"               "Mustelus mustelus"      
+# [16] "Myliobatis aquila"       "Pomatomus saltatrix"     "Raja undulata"          
+# [19] "Rostroraja alba"         "Schedophilus ovalis"     "Scyliorhinus stellaris" 
+# [22] "Squatina squatina"       "Torpedo marmorata"    
+
+
+
+
+
+# Nb of cryptiques species + examples  ----
+
+
+
+## Richesse ----
+summary(div$R)
+# Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+# 1.00   22.00   36.00   35.76   49.00   85.00 
+
+# 35 espèces en moyenne par site +/- 17
+# standard deviation 
+sd(div$R)
+
+
+# "The overall diversity map (Figure 2) highlights three major biodiversity hotspots with comparable species richness (90 to 108 species). The northwestern region of Corsica near Calvi, the Cerbère-Banyuls Marine Nature Reserve, and the Calanques National Park and its surrounding waters near Marseille all support up to 100 species," --> correct with up to 85 species
+
+
+
+## Elasmo ----
+
+summary(div$Elasmo)
+# Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+# 0.000   0.000   1.000   1.262   2.000   8.000 
+hist(div$Elasmo)
+
+# Count how many sites have at least one elasmo
+sum(div$Elasmo >= 1) # 389 sites with at least one elasmo
+389/637 * 100 # 61.067
+
+# Map of elsamo > 0
+div_sf <- pred %>%
+  dplyr::select(replicates, geom) %>%
+  left_join(st_drop_geometry(div), by = "replicates")
+ggplot() + 
+  geom_sf(data = div_sf, aes(color = Elasmo), size = 0.5) +
+  scale_color_viridis_c() +
+  labs(title = "Number of Elasmobranch Species Detected per Site",
+       color = "Elasmobranchs") +
+  theme_minimal()
+
+
+
+# " These detections represent approximately 60% of the Teleostei and 38% of the Elasmobranchii listed in our regional checklist for the northwestern Mediterranean. "
+
+
+
+
+
+
+
+
+
+
+
+#-------------------------------------------- INFOGRAPHICS --------------------------------
+library(tidyverse)
+
+#--- Load data ----
+occ    <- readr::read_delim("./data/processed_data/eDNA/occ_sel-on-mtdt_3.csv")
+traits <- read.csv("./data/processed_data/Traits/species_traits_used_for_div_indices_v1.0.csv",
+                   sep = ";", header = TRUE)
+div    <- readr::read_csv2("./data/processed_data/Traits/div_indices_v1.0_sel_v1.1.csv") %>%
+  mutate(DeBRa = as.numeric(DeBRa))
+mtdt_7 <- st_read("./data/processed_data/Mtdt/mtdt_7.gpkg")
+names(mtdt_7)
+sum(mtdt_7$field_replicates)
+
+
+#--- Key numbers ----
+n_spp            <- occ %>% ncol()              # total species
+n_elasmo         <- traits %>% filter(elasmo == 1) %>% nrow() 
+n_threat         <- traits %>% filter(IUCN_combined %in% c("Threatened","CR","EN","VU")) %>%
+  nrow()
+n_threat_elasmo  <- traits %>% filter(elasmo == 1,
+                                      IUCN_combined %in% c("Threatened","CR","EN","VU")) %>%
+  nrow()
+
+rich_mean <- mean(div$R, na.rm = TRUE)
+rich_sd   <- sd(div$R,   na.rm = TRUE)
+rich_min  <- min(div$R,  na.rm = TRUE)
+rich_max  <- max(div$R,  na.rm = TRUE)
+
+# optional: fixed numbers you already checked in the manuscript
+n_sharks <- 10
+n_rays   <- 11
+n_skates <- 2
+
+#--- Data frame for the infographic ----
+info_df <- tibble(
+  block = factor(c("Total species", "Elasmobranchs",
+                   "Threatened species", "Richness per site"),
+                 levels = c("Total species", "Elasmobranchs",
+                            "Threatened species", "Richness per site")),
+  big   = c(
+    n_spp,
+    n_elasmo,
+    n_threat,
+    sprintf("%.1f ± %.1f", rich_mean, rich_sd)
+  ),
+  small = c(
+    "",
+    sprintf("%d sharks, %d rays, %d skates", n_sharks, n_rays, n_skates),
+    sprintf("%d threatened elasmobranchs", n_threat_elasmo),
+    sprintf("min = %d, max = %d", rich_min, rich_max)
+  )
+)
+
+#--- Simple infographic panel ----
+ggplot(info_df, aes(x = 0, y = 0)) +
+  geom_tile(width = 0.95, height = 0.95, alpha = 0.05) +
+  geom_text(aes(label = block), y = 0.35, fontface = "bold", size = 5) +
+  geom_text(aes(label = big),   y = 0.05, fontface = "bold", size = 7) +
+  geom_text(aes(label = small), y = -0.25, size = 4) +
+  facet_wrap(~ block, ncol = 2) +
+  coord_fixed() +
+  theme_void() +
+  theme(strip.text = element_blank())
+
+ggsave(
+  filename = "./figures/infographics_v1.0.png",
+  width = 8,
+  height = 6,
+  dpi = 300
+)
+
+
+
+
+
+
+
+
+
+
+#--------------------- waffle infographic -----------------------
+llibrary(waffle)
+
+# PARAMETERS
+n_sq <- 10                 # number of squares (default = 1)
+sq_col <- "deepskyblue"   # color of the square
+
+# Build waffle grid (force a single tiny square)
+df <- data.frame(values = n_sq)
+
+ggplot(df, aes(values = values, fill = "sq")) +
+  geom_waffle(
+    n_rows = 1,
+    size = 0,
+    colour = NA,
+    flip = FALSE
+  ) +
+  scale_fill_manual(values = c("sq" = sq_col)) +
+  coord_equal() +
+  theme_void() +
+  theme(
+    plot.background  = element_rect(fill = "black", color = NA),
+    panel.background = element_rect(fill = "black", color = NA),
+    legend.position  = "none",
+    plot.margin      = margin(40, 40, 40, 40)   # ensures the square stays small inside a large black frame
+  )
+
+
+
+waffle(
+  parts = c(85, 36, 1),
+  rows = 3,
+  size = 1,
+  colors = c("deepskyblue", "deepskyblue", "deepskyblue")
+) +
+  theme_void() +
+  theme(
+    legend.position = "none")
+
+
+
+
+
+
+
+library(waffle)
+library(ggplot2)
+library(patchwork)   # to stack plots
+
+p1 <- waffle(
+  parts  = c(one = 1),
+  rows   = 1,
+  size   = 1,
+  colors = "deepskyblue"
+) +
+  theme_void() +
+  theme(legend.position = "none")
+
+p2 <- waffle(
+  parts  = c(thirtysix = 36),
+  rows   = 1,
+  size   = 1,
+  colors = "deepskyblue"
+) +
+  theme_void() +
+  theme(legend.position = "none")
+
+p3 <- waffle(
+  parts  = c(eightyfive = 85),
+  rows   = 1,
+  size   = 1,
+  colors = "deepskyblue"
+) +
+  theme_void() +
+  theme(legend.position = "none")
+
+(p1 / p2 / p3) +
+  plot_annotation(theme = theme(
+    plot.background  = element_rect(fill = "black", color = NA),
+    panel.background = element_rect(fill = "black", color = NA)
+  ))
+
+
+
+library(waffle)
+library(ggplot2)
+library(patchwork)
+
+make_line <- function(n_fill, total = 85, col = "deepskyblue") {
+  waffle(
+    parts  = c(fill = n_fill, empty = total - n_fill),
+    rows   = 1,
+    size   = 1,
+    colors = c("fill" = col, "empty" = "white")
+  ) +
+    theme_void() +
+    # theme(
+    #   legend.position  = "none",
+    #   plot.background  = element_rect(fill = "black", color = NA),
+    #   panel.background = element_rect(fill = "black", color = NA)
+    # )
+}
+
+p1 <- make_line(1)
+p2 <- make_line(36)
+p3 <- make_line(85)
+
+p1 / p2 / p3   # three lines: 1, 36, 85 squares, all same size
+
+
+
+# save as png
+ggsave(
+  filename = "./figures/infographic_waffle_v1.0.png",
+  plot = p1 / p2 / p3 ,
+  width = 4,
+  height = 6,
+  dpi = 300
+)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## 1) Min / mean / max richness as blue squares ----
+rich_min  <- min(div$R, na.rm = TRUE)
+rich_mean <- round(mean(div$R, na.rm = TRUE))
+rich_max  <- max(div$R, na.rm = TRUE)
+
+rich_stats <- tibble::tibble(
+  site_stat = c("Min", "Mean", "Max"),
+  richness  = c(rich_min, rich_mean, rich_max)
+)
+
+ggplot(rich_stats, aes(values = richness, fill = "Richness")) +
+  geom_waffle(n_rows = 10, color = "white", size = 0.1) +
+  scale_fill_manual(values = c(Richness = "deepskyblue")) +
+  facet_wrap(~ site_stat, nrow = 1) +
+  theme_void() +
+  theme(legend.position = "none")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -546,15 +546,15 @@ rm(valid_replicates)
 #------------- Group by replicates  --------------------
 
 # Replace replicates = "no" by "spygen_code"
-mtdtcomb$replicates[mtdtcomb$replicates == "no"] <- mtdtcomb$spygen_code[mtdtcomb$replicates == "no"]
+mtdt_1$replicates[mtdt_1$replicates == "no"] <- mtdt_1$spygen_code[mtdt_1$replicates == "no"]
 
 # Remove spygen_code
-mtdtcomb <- mtdtcomb %>%                
+mtdt_1 <- mtdt_1 %>%                
   dplyr::select(-spygen_code)
 
 
 
-mtdt_full_replicates <- mtdtcomb %>%
+mtdt_full_replicates <- mtdt_1 %>%
   group_by(replicates) %>%
   summarise(
     date = first(na.omit(date)),
@@ -701,7 +701,7 @@ dt <- dt %>%
     component == "lagoon" ~ "Lagune",
     component == "freshwater_river" ~ "Rivière",
     component == "open_ocean" ~ "Haute mer",
-    component == "seamount" ~ "Mont marin",
+    component == "seamount" ~ "Mont sous-marin",
     component == "canyon" ~ "Canyon",
     TRUE ~ component
   ))
@@ -723,7 +723,7 @@ dt <- dt %>%
 
 
 
-#--------------- Background ---------------------
+#----- Background ---------------------
 # Load regions
 regions <- st_read("./data/processed_data/Data-viz/med_regions.geojson")
 
@@ -874,10 +874,6 @@ for (i in seq_along(components)) {
 
 
 #--------------- Data & Background ---------------------
-# Bathy lines 
-bathy <- terra::rast("./data/raw_data/ ")
-
-
 
 mtdt_7 <- st_read("./data/processed_data/Mtdt/mtdt_7.gpkg")
 # predictors_sel_v.1.4 ----
@@ -892,19 +888,19 @@ dt2 <- pred %>% st_as_sf(coords = c("x", "y"),
 
 dt2 <- st_transform(dt2, 3857)
 
-# Load regions
+# Load regions ----
 regions <- st_read("./data/processed_data/Data-viz/med_regions.geojson")
 
 # Transform CRS to 3857
 regions <- st_transform(regions, 3857)
 
 # Crop regions to bounding box of dt
-bb <- st_bbox(dt2)
+bb <- st_bbox(dt)
 world_crop <- st_crop(regions, bb)
 
 
 
-# Map with same style as before
+# Map with same style as before ----
 
 p2 <- ggplot() +
   geom_sf(data = world_crop, fill = "black", color = "grey70") +
@@ -941,7 +937,1008 @@ ggsave(
 
 
 
-#------------------------------------------------------------- ARCHIVED CODE ------------------------------------
+
+#------------------------------------------------ Extract 50m bathy -----------------------
+bathy_corse <- terra::rast("./data/raw_data/predictors/Bathymetry/MNT_MED_CORSE_SHOM100m_merged.tif")
+plot(bathy)
+
+# Transform to 3857
+bathy <- project(bathy, "EPSG:3857")
+plot(bathy)
+
+# Crop on dt bbox
+bathy_crop <- terra::crop(bathy, c(bb["xmin"], bb["xmax"], bb["ymin"], bb["ymax"]))
+plot(bathy_crop)
+
+# Extract 50m contour line
+bathy_50m <- terra::as.contour(bathy_crop, levels = -50)
+plot(bathy_50m)
+
+# Convert to sf
+bathy_50m_sf <- st_as_sf(bathy_50m)
+
+# Convert multilines to single lines
+bathy_50m_sf <- bathy_50m_sf %>%
+  st_cast("LINESTRING")
+
+# Export bathy_50m_sf
+st_write(bathy_50m_sf, "./data/processed_data/Data-viz/bathy_50m_sf.gpkg", delete_dsn = TRUE)
+
+
+# Load cleaned bathy (qgis manual cleaning)
+b <- st_read("./data/processed_data/Data-viz/bathy_50m_cleaned.gpkg")
+plot(b)
+
+#------------------------------------------------ MAP ALL POINTS + 50M bathy --------------------
+
+
+
+# Cumulative data up to 2024
+dt_cum <- dt %>% filter(year <= 2024)
+title_txt <- "2018-2024"
+
+p <- ggplot() +
+  geom_sf(data = world_crop, fill = "black", color = "grey70") +
+  
+   # points/tracks
+  geom_sf(data = dt_cum, color = "grey40", size = 1.3) +
+  
+  # 50 m bathymetry contour
+  geom_sf(data = b, color = "deepskyblue", size = 0.6) +
+  
+  ggtitle(title_txt) +
+  coord_sf(
+    xlim = c(bb["xmin"], bb["xmax"]),
+    ylim = c(bb["ymin"], bb["ymax"])
+  ) +
+  theme_dark() +
+  theme(
+    plot.background  = element_rect(fill = "black", color = NA),
+    panel.background = element_rect(fill = "black", color = NA),
+    axis.text        = element_text(color = "white", size = 10),
+    axis.title       = element_text(color = "white"),
+    panel.grid.major = element_line(color = "grey40"),
+    panel.grid.minor = element_line(color = "grey25"),
+    plot.title       = element_text(color = "white", size = 26, face = "bold"),
+    panel.border     = element_blank()
+  )
+
+p
+
+# Save
+ggsave(
+  filename = file.path(output_path, "year_2018-2024_with_50m_bathy.png"),
+  plot = p, width = 10, height = 8, dpi = 300, bg = "black"
+)
+
+
+
+
+
+
+
+
+
+
+
+
+
+bathy_col <- "deepskyblue"
+
+p <- ggplot() +
+  geom_sf(data = world_crop, fill = "black", color = "grey70") +
+  
+  # points/tracks
+  geom_sf(data = dt_cum, color = "grey40", size = 1.3) +
+  
+  # 50 m bathymetry contour
+  geom_sf(data = b, color = bathy_col, size = 0.6) +
+  
+  ggtitle(title_txt) +
+  
+  coord_sf(
+    xlim = c(bb["xmin"], bb["xmax"]),
+    ylim = c(bb["ymin"], bb["ymax"])
+  ) +
+  
+  # Annotation (top-left)
+  annotate(
+    "text",
+    x = bb["xmin"] + 0.02 * (bb["xmax"] - bb["xmin"]),    # slight margin from left
+    y = bb["ymax"] - 0.8 * (bb["ymax"] - bb["ymin"]),    # slight margin from top
+    label = "Bathymétrie = 50 mètres",
+    color = bathy_col,
+    size = 5,
+    hjust = 0,
+    vjust = 1
+  ) +
+  
+  theme_dark() +
+  theme(
+    plot.background  = element_rect(fill = "black", color = NA),
+    panel.background = element_rect(fill = "black", color = NA),
+    axis.text        = element_text(color = "white", size = 10),
+    axis.title       = element_text(color = "white"),
+    panel.grid.major = element_line(color = "grey40"),
+    panel.grid.minor = element_line(color = "grey25"),
+    plot.title       = element_text(color = "white", size = 26, face = "bold"),
+    panel.border     = element_blank()
+  )
+
+p
+
+
+
+
+
+
+
+
+
+
+
+#------------------------------------------------- EMPTY GRID --------------------
+grid <- st_read("./data/processed_data/prediction_extent/grid_v1.1_3857.gpkg")
+plot(grid)
+
+
+
+p_grid <- ggplot(grid) +
+  geom_sf(fill = NA, color = "deepskyblue", linewidth = 0.1) +
+  # ggtitle("Sites à 0-50m de profondeur") +
+  # coord_sf(xlim = c(bb["xmin"], bb["xmax"]),
+  #          ylim = c(bb["ymin"], bb["ymax"])) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5, color = "white"),
+    
+    # Black background everywhere
+    panel.background = element_rect(fill = "black", color = NA),
+    plot.background  = element_rect(fill = "black",  color = NA),
+    
+    # Grid lines faded to dark grey
+    panel.grid.major = element_line(color = "grey30", linewidth = 0.2),
+    panel.grid.minor = element_blank(),
+    
+    # Axis text in white
+    axis.text       = element_text(color = "white"),
+    axis.title      = element_text(color = "white")
+  )
+
+p_grid
+
+
+ggsave(
+  filename = file.path(output_path, "empty_grid_0-50m_depth_area.png"),
+  plot = p_grid, width = 10, height = 8, dpi = 300, bg = "black"
+)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#------------------------------------------------- PREDICTION MAPS ----------------------
+# --- Richness surface ----
+# Load & prep predictions ----
+pd <- readRDS("./output/predictions/rf/T1.33/T1.33_R_predictions_surface_2023-av-sept.rds")
+
+# transform to 3857
+pd_3857 <- lapply(pd, function(x) st_transform(x, 3857))
+
+
+
+
+# Map ----
+library(RColorBrewer)
+
+Sys.setlocale("LC_TIME", "fr_FR.UTF-8")
+
+mois_fr <- c(
+  "01" = "janvier", "02" = "février", "03" = "mars",
+  "04" = "avril",   "05" = "mai",      "06" = "juin",
+  "07" = "juillet", "08" = "août",     "09" = "septembre",
+  "10" = "octobre", "11" = "novembre", "12" = "décembre"
+)
+
+date_obj <- as.Date(date)
+month_num <- format(date_obj, "%m")
+year_txt  <- format(date_obj, "%Y")
+
+date_fmt <- paste(mois_fr[[month_num]], year_txt)
+
+for (date in names(pd_3857)) {
+  
+  df <- pd_3857[[date]]
+  
+  # date in object is 1 month ahead -> subtract 1 month
+  d_obj      <- ymd(date) %m-% months(1)
+  month_num  <- format(d_obj, "%m")
+  year_txt   <- format(d_obj, "%Y")
+  date_fmt   <- paste(mois_fr[[month_num]], year_txt)
+  
+  title_txt <- paste("Estimation du nombre d'espèces de poissons en", date_fmt) 
+  
+  p <- ggplot() +
+    geom_sf(data = world_crop, fill = "black", color = "grey70") +
+    geom_sf(data = df, aes(fill = prediction_R), color = NA) +
+    scale_fill_gradientn(
+      colours = brewer.pal(9, "PuBu"),
+      name = ""
+    ) +
+    ggtitle(title_txt) +
+    coord_sf(
+      xlim = c(bb["xmin"], bb["xmax"]),
+      ylim = c(bb["ymin"], bb["ymax"])
+    ) +
+    theme_dark() +
+    theme(
+      plot.background  = element_rect(fill = "black", color = NA),
+      panel.background = element_rect(fill = "black", color = NA),
+      axis.text        = element_text(color = "white", size = 10),
+      axis.title       = element_text(color = "white"),
+      panel.grid.major = element_line(color = "grey40"),
+      panel.grid.minor = element_line(color = "grey25"),
+      plot.title       = element_text(color = "white", size = 20, face = "bold"),
+      legend.title     = element_text(color = "white"),
+      legend.text      = element_text(color = "white", size = 16),
+      legend.background = element_rect(fill = "black", color = NA),
+      legend.key        = element_rect(fill = "black", color = NA),
+      panel.border     = element_blank()
+    )
+  
+  print(p)
+  
+  #Save
+  ggsave(
+    filename = file.path(
+      output_path,
+      paste0("T1.33_prediction_surface_R_", date, ".png")
+    ),
+    plot = p,
+    width = 10, height = 8, dpi = 300, bg = "black"
+  )
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# --- Richness bottom ----
+# Load & prep predictions ----
+pd_b <- readRDS("./output/predictions/rf/T1.33/T1.33_R_predictions_bottom_2023-av-sept.rds")
+
+# transform to 3857
+pd_b_3857 <- lapply(pd_b, function(x) st_transform(x, 3857))
+
+
+# Map ----
+Sys.setlocale("LC_TIME", "fr_FR.UTF-8")
+
+mois_fr <- c(
+  "01" = "janvier", "02" = "février", "03" = "mars",
+  "04" = "avril",   "05" = "mai",      "06" = "juin",
+  "07" = "juillet", "08" = "août",     "09" = "septembre",
+  "10" = "octobre", "11" = "novembre", "12" = "décembre"
+)
+
+date_obj <- as.Date(date)
+month_num <- format(date_obj, "%m")
+year_txt  <- format(date_obj, "%Y")
+
+date_fmt <- paste(mois_fr[[month_num]], year_txt)
+
+for (date in names(pd_3857)) {
+  
+  df <- pd_3857[[date]]
+  
+  # date in object is 1 month ahead -> subtract 1 month
+  d_obj      <- ymd(date) %m-% months(1)
+  month_num  <- format(d_obj, "%m")
+  year_txt   <- format(d_obj, "%Y")
+  date_fmt   <- paste(mois_fr[[month_num]], year_txt)
+  
+  title_txt <- paste("Estimation du nombre d'espèces de poissons en", date_fmt) 
+  
+  p <- ggplot() +
+    geom_sf(data = world_crop, fill = "black", color = "grey70") +
+    geom_sf(data = df, aes(fill = prediction_R), color = NA) +
+    scale_fill_gradientn(
+      colours = brewer.pal(9, "PuBu"),
+      name = ""
+    ) +
+    ggtitle(title_txt) +
+    coord_sf(
+      xlim = c(bb["xmin"], bb["xmax"]),
+      ylim = c(bb["ymin"], bb["ymax"])
+    ) +
+    theme_dark() +
+    theme(
+      plot.background  = element_rect(fill = "black", color = NA),
+      panel.background = element_rect(fill = "black", color = NA),
+      axis.text        = element_text(color = "white", size = 10),
+      axis.title       = element_text(color = "white"),
+      panel.grid.major = element_line(color = "grey40"),
+      panel.grid.minor = element_line(color = "grey25"),
+      plot.title       = element_text(color = "white", size = 20, face = "bold"),
+      legend.title     = element_text(color = "white"),
+      legend.text      = element_text(color = "white", size = 16),
+      legend.background = element_rect(fill = "black", color = NA),
+      legend.key        = element_rect(fill = "black", color = NA),
+      panel.border     = element_blank()
+    )
+  
+  print(p)
+  
+  #Save
+  ggsave(
+    filename = file.path(
+      output_path,
+      paste0("T1.33_prediction_bottom_R_", date, ".png")
+    ),
+    plot = p,
+    width = 10, height = 8, dpi = 300, bg = "black"
+  )
+  
+}
+
+
+
+
+
+
+
+
+
+
+
+# --- Richness bottom ----
+# Load & prep predictions ----
+pd_b <- readRDS("./output/predictions/rf/T1.33/T1.33_R_predictions_bottom_2023-av-sept.rds")
+
+# transform to 3857
+pd_b_3857 <- lapply(pd_b, function(x) st_transform(x, 3857))
+
+
+# Map ----
+Sys.setlocale("LC_TIME", "fr_FR.UTF-8")
+
+mois_fr <- c(
+  "01" = "janvier", "02" = "février", "03" = "mars",
+  "04" = "avril",   "05" = "mai",      "06" = "juin",
+  "07" = "juillet", "08" = "août",     "09" = "septembre",
+  "10" = "octobre", "11" = "novembre", "12" = "décembre"
+)
+
+date_obj <- as.Date(date)
+month_num <- format(date_obj, "%m")
+year_txt  <- format(date_obj, "%Y")
+
+date_fmt <- paste(mois_fr[[month_num]], year_txt)
+
+for (date in names(pd_3857)) {
+  
+  df <- pd_3857[[date]]
+  
+  # date in object is 1 month ahead -> subtract 1 month
+  d_obj      <- ymd(date) %m-% months(1)
+  month_num  <- format(d_obj, "%m")
+  year_txt   <- format(d_obj, "%Y")
+  date_fmt   <- paste(mois_fr[[month_num]], year_txt)
+  
+  title_txt <- paste("Estimation du nombre d'espèces de poissons en", date_fmt) 
+  
+  p <- ggplot() +
+    geom_sf(data = world_crop, fill = "black", color = "grey70") +
+    geom_sf(data = df, aes(fill = prediction_R), color = NA) +
+    scale_fill_gradientn(
+      colours = brewer.pal(9, "PuBu"),
+      name = ""
+    ) +
+    ggtitle(title_txt) +
+    coord_sf(
+      xlim = c(bb["xmin"], bb["xmax"]),
+      ylim = c(bb["ymin"], bb["ymax"])
+    ) +
+    theme_dark() +
+    theme(
+      plot.background  = element_rect(fill = "black", color = NA),
+      panel.background = element_rect(fill = "black", color = NA),
+      axis.text        = element_text(color = "white", size = 10),
+      axis.title       = element_text(color = "white"),
+      panel.grid.major = element_line(color = "grey40"),
+      panel.grid.minor = element_line(color = "grey25"),
+      plot.title       = element_text(color = "white", size = 20, face = "bold"),
+      legend.title     = element_text(color = "white"),
+      legend.text      = element_text(color = "white", size = 16),
+      legend.background = element_rect(fill = "black", color = NA),
+      legend.key        = element_rect(fill = "black", color = NA),
+      panel.border     = element_blank()
+    )
+  
+  print(p)
+  
+  #Save
+  ggsave(
+    filename = file.path(
+      output_path,
+      paste0("T1.33_prediction_bottom_R_", date, ".png")
+    ),
+    plot = p,
+    width = 10, height = 8, dpi = 300, bg = "black"
+  )
+  
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+# --- Richness surface + bottom panel ----
+library(patchwork)
+library(lubridate)
+library(RColorBrewer)
+
+mois_fr <- c(
+  "01" = "janvier", "02" = "février", "03" = "mars",
+  "04" = "avril",   "05" = "mai",      "06" = "juin",
+  "07" = "juillet", "08" = "août",     "09" = "septembre",
+  "10" = "octobre", "11" = "novembre", "12" = "décembre"
+)
+
+# Common function to build one map (no legend, title = real month in French)
+make_map <- function(df, date) {
+  d_obj     <- ymd(date) %m-% months(1)          # real month = date - 1 month
+  month_num <- format(d_obj, "%m")
+  year_txt  <- format(d_obj, "%Y")
+  date_fmt  <- paste(mois_fr[[month_num]], year_txt)
+  
+  ggplot() +
+    geom_sf(data = world_crop, fill = "black", color = "grey70") +
+    geom_sf(data = df, aes(fill = prediction_R), color = NA) +
+    scale_fill_gradientn(
+      colours = brewer.pal(9, "PuBu"),
+      name = ""
+    ) +
+    ggtitle(date_fmt) +
+    coord_sf(
+      xlim = c(bb["xmin"], bb["xmax"]),
+      ylim = c(bb["ymin"], bb["ymax"])
+    ) +
+    theme_dark() +
+    theme(
+      plot.background  = element_rect(fill = "black", color = NA),
+      panel.background = element_rect(fill = "black", color = NA),
+      axis.text        = element_text(color = "white", size = 8),
+      axis.title       = element_blank(),http://127.0.0.1:37451/graphics/plot_zoom_png?width=1850&height=1016
+      panel.grid.major = element_line(color = "grey40"),
+      panel.grid.minor = element_line(color = "grey25"),
+      plot.title       = element_text(color = "white", size = 14, face = "bold"),
+      legend.position  = "none",          # <- remove legend completely
+      panel.border     = element_blank()
+    )
+}
+
+# Build surface & bottom plot lists in the same order of dates
+dates <- names(pd_3857)
+
+plots_surface <- lapply(dates, function(d) make_map(pd_3857[[d]],  d))
+plots_bottom  <- lapply(dates, function(d) make_map(pd_b_3857[[d]], d))
+
+# Combine: top row = surface, bottom row = bottom (2 x 6)
+panel_2x6 <- wrap_plots(
+  c(plots_surface, plots_bottom),
+  nrow = 2
+)
+
+panel_2x6
+
+# Optional: save panel
+ggsave(
+  file.path(output_path, "T1.33_R_surface_bottom_panel_2x6.png"),
+  plot = panel_2x6,
+  width = 18, height = 6, dpi = 300, bg = "black"
+)
+
+
+
+
+
+
+
+
+
+
+
+
+#panel2 ---------------------------------
+panel_2x6_labeled <- panel_2x6 +
+  plot_annotation(
+    theme = theme(
+      plot.background = element_rect(fill = "black", color = NA),
+      panel.background = element_rect(fill = "black", color = NA)
+    )
+  ) &
+  theme(
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank()
+  ) +
+  # Add global labels
+  patchwork::plot_annotation() &
+  theme(
+    plot.margin = margin(40, 30, 40, 50),   # space for labels
+    axis.text  = element_text(color = "white")
+  )
+
+# Add labels manually using patchwork's guide_area trick
+library(grid)
+
+final_panel <- (
+  panel_2x6 /
+    grid::textGrob("Longitude", gp = grid::gpar(col = "white", fontsize = 16))
+) +
+  grid::textGrob("Latitude", rot = 90, gp = grid::gpar(col = "white", fontsize = 16))
+
+final_panel
+
+
+
+plots_surface[[1]] <- plots_surface[[1]] + theme(axis.title.y = element_text(color="white"))
+plots_bottom[[1]]  <- plots_bottom[[1]]  + theme(axis.title.y = element_text(color="white"))
+
+for(i in seq_along(plots_bottom)) {
+  plots_bottom[[i]] <- plots_bottom[[i]] + theme(axis.title.x = element_text(color="white"))
+}
+
+
+
+#-------------------------- RedList ------------------------------
+# --- RedList surface ----
+# Load & prep predictions ----
+rm(pd)
+pd <- readRDS("./output/predictions/rf/T1.37/T1.37_RedList_predictions_surface_2023-av-sept.rds")
+
+# transform to 3857
+pd_3857 <- lapply(pd, function(x) st_transform(x, 3857))
+
+
+
+
+# Map ----
+library(RColorBrewer)
+
+Sys.setlocale("LC_TIME", "fr_FR.UTF-8")
+
+mois_fr <- c(
+  "01" = "janvier", "02" = "février", "03" = "mars",
+  "04" = "avril",   "05" = "mai",      "06" = "juin",
+  "07" = "juillet", "08" = "août",     "09" = "septembre",
+  "10" = "octobre", "11" = "novembre", "12" = "décembre"
+)
+
+date_obj <- as.Date(date)
+month_num <- format(date_obj, "%m")
+year_txt  <- format(date_obj, "%Y")
+
+date_fmt <- paste(mois_fr[[month_num]], year_txt)
+
+for (date in names(pd_3857)) {
+  
+  df <- pd_3857[[date]]
+  # df$prediction_RedList <- round(df$prediction_RedList, 0)
+  
+  # date in object is 1 month ahead -> subtract 1 month
+  d_obj      <- ymd(date) %m-% months(1)
+  month_num  <- format(d_obj, "%m")
+  year_txt   <- format(d_obj, "%Y")
+  date_fmt   <- paste(mois_fr[[month_num]], year_txt)
+  
+  title_txt <- paste("Estimation du nombre d'espèces menacées en", date_fmt) 
+  
+  p <- ggplot() +
+    geom_sf(data = world_crop, fill = "black", color = "grey70") +
+    geom_sf(data = df, aes(fill = prediction_RedList), color = NA) +
+    scale_fill_gradientn(
+      colours = brewer.pal(9, "Reds"),
+      name = ""
+    ) +
+    ggtitle(title_txt) +
+    coord_sf(
+      xlim = c(bb["xmin"], bb["xmax"]),
+      ylim = c(bb["ymin"], bb["ymax"])
+    ) +
+    theme_dark() +
+    theme(
+      plot.background  = element_rect(fill = "black", color = NA),
+      panel.background = element_rect(fill = "black", color = NA),
+      axis.text        = element_text(color = "white", size = 10),
+      axis.title       = element_text(color = "white"),
+      panel.grid.major = element_line(color = "grey40"),
+      panel.grid.minor = element_line(color = "grey25"),
+      plot.title       = element_text(color = "white", size = 18, face = "bold"),
+      legend.title     = element_text(color = "white"),
+      legend.text      = element_text(color = "white", size = 16),
+      legend.background = element_rect(fill = "black", color = NA),
+      legend.key        = element_rect(fill = "black", color = NA),
+      panel.border     = element_blank()
+    )
+  
+  print(p)
+  
+  #Save
+  ggsave(
+    filename = file.path(
+      output_path,
+      paste0("T1.37_prediction_surface_RedList_", date, ".png")
+    ),
+    plot = p,
+    width = 10, height = 8, dpi = 300, bg = "black"
+  )
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# --- RedList bottom ----
+# Load & prep predictions ----
+rm(pd_b)
+pd_b <- readRDS("./output/predictions/rf/T1.37/T1.37_RedList_predictions_bottom_2023-av-sept.rds")
+
+# transform to 3857
+pd_b_3857 <- lapply(pd_b, function(x) st_transform(x, 3857))
+
+
+# Map ----
+Sys.setlocale("LC_TIME", "fr_FR.UTF-8")
+
+mois_fr <- c(
+  "01" = "janvier", "02" = "février", "03" = "mars",
+  "04" = "avril",   "05" = "mai",      "06" = "juin",
+  "07" = "juillet", "08" = "août",     "09" = "septembre",
+  "10" = "octobre", "11" = "novembre", "12" = "décembre"
+)
+
+date_obj <- as.Date(date)
+month_num <- format(date_obj, "%m")
+year_txt  <- format(date_obj, "%Y")
+
+date_fmt <- paste(mois_fr[[month_num]], year_txt)
+
+for (date in names(pd_3857)[1]) {
+  
+  df <- pd_3857[[date]]
+  
+  # date in object is 1 month ahead -> subtract 1 month
+  d_obj      <- ymd(date) %m-% months(1)
+  month_num  <- format(d_obj, "%m")
+  year_txt   <- format(d_obj, "%Y")
+  date_fmt   <- paste(mois_fr[[month_num]], year_txt)
+  
+  title_txt <- paste("Estimation du nombre d'espèces de poissons menacés", date_fmt) 
+  
+  p <- ggplot() +
+    geom_sf(data = world_crop, fill = "black", color = "grey70") +
+    geom_sf(data = df, aes(fill = prediction_RedList), color = NA) +
+    scale_fill_gradientn(
+      colours = brewer.pal(9, "OrRd"),
+      name = ""
+    ) +
+    ggtitle(title_txt) +
+    coord_sf(
+      xlim = c(bb["xmin"], bb["xmax"]),
+      ylim = c(bb["ymin"], bb["ymax"])
+    ) +
+    theme_dark() +
+    theme(
+      plot.background  = element_rect(fill = "black", color = NA),
+      panel.background = element_rect(fill = "black", color = NA),
+      axis.text        = element_text(color = "white", size = 10),
+      axis.title       = element_text(color = "white"),
+      panel.grid.major = element_line(color = "grey40"),
+      panel.grid.minor = element_line(color = "grey25"),
+      plot.title       = element_text(color = "white", size = 18, face = "bold"),
+      legend.title     = element_text(color = "white"),
+      legend.text      = element_text(color = "white", size = 16),
+      legend.background = element_rect(fill = "black", color = NA),
+      legend.key        = element_rect(fill = "black", color = NA),
+      panel.border     = element_blank()
+    )
+  
+  print(p)
+  
+  #Save
+  ggsave(
+    filename = file.path(
+      output_path,
+      paste0("T1.33_prediction_bottom_R_", date, ".png")
+    ),
+    plot = p,
+    width = 10, height = 8, dpi = 300, bg = "black"
+  )
+  
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#-------------------------- Crypto ------------------------------
+# --- Crypto surface ----
+# Load & prep predictions ----
+rm(pd)
+pd <- readRDS("./output/predictions/rf/T1.37/T1.37_Crypto_predictions_surface_2023-av-sept.rds")
+
+# transform to 3857
+pd_3857 <- lapply(pd, function(x) st_transform(x, 3857))
+
+
+
+
+# Map ----
+library(RColorBrewer)
+
+Sys.setlocale("LC_TIME", "fr_FR.UTF-8")
+
+mois_fr <- c(
+  "01" = "janvier", "02" = "février", "03" = "mars",
+  "04" = "avril",   "05" = "mai",      "06" = "juin",
+  "07" = "juillet", "08" = "août",     "09" = "septembre",
+  "10" = "octobre", "11" = "novembre", "12" = "décembre"
+)
+
+date_obj <- as.Date(date)
+month_num <- format(date_obj, "%m")
+year_txt  <- format(date_obj, "%Y")
+
+date_fmt <- paste(mois_fr[[month_num]], year_txt)
+
+for (date in names(pd_3857)) {
+  
+  df <- pd_3857[[date]]
+  # df$prediction_Crypto <- round(df$prediction_Crypto, 0)
+  
+  # date in object is 1 month ahead -> subtract 1 month
+  d_obj      <- ymd(date) %m-% months(1)
+  month_num  <- format(d_obj, "%m")
+  year_txt   <- format(d_obj, "%Y")
+  date_fmt   <- paste(mois_fr[[month_num]], year_txt)
+  
+  title_txt <- paste("Estimation du nombre d'espèces cachées en", date_fmt) 
+  
+  p <- ggplot() +
+    geom_sf(data = world_crop, fill = "black", color = "grey70") +
+    geom_sf(data = df, aes(fill = prediction_Crypto), color = NA) +
+    scale_fill_gradientn(
+      colours = brewer.pal(9, "BuPu"),
+      name = ""
+    ) +
+    ggtitle(title_txt) +
+    coord_sf(
+      xlim = c(bb["xmin"], bb["xmax"]),
+      ylim = c(bb["ymin"], bb["ymax"])
+    ) +
+    theme_dark() +
+    theme(
+      plot.background  = element_rect(fill = "black", color = NA),
+      panel.background = element_rect(fill = "black", color = NA),
+      axis.text        = element_text(color = "white", size = 10),
+      axis.title       = element_text(color = "white"),
+      panel.grid.major = element_line(color = "grey40"),
+      panel.grid.minor = element_line(color = "grey25"),
+      plot.title       = element_text(color = "white", size = 18, face = "bold"),
+      legend.title     = element_text(color = "white"),
+      legend.text      = element_text(color = "white", size = 16),
+      legend.background = element_rect(fill = "black", color = NA),
+      legend.key        = element_rect(fill = "black", color = NA),
+      panel.border     = element_blank()
+    )
+  
+  print(p)
+  
+  #Save
+  ggsave(
+    filename = file.path(
+      output_path,
+      paste0("T1.37_prediction_surface_Crypto_", date, ".png")
+    ),
+    plot = p,
+    width = 10, height = 8, dpi = 300, bg = "black"
+  )
+  
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# --- Crypto bottom ----
+# Load & prep predictions ----
+rm(pd_b)
+pd_b <- readRDS("./output/predictions/rf/T1.37/T1.37_Crypto_predictions_bottom_2023-av-sept.rds")
+
+# transform to 3857
+pd_b_3857 <- lapply(pd_b, function(x) st_transform(x, 3857))
+
+
+# Map ----
+Sys.setlocale("LC_TIME", "fr_FR.UTF-8")
+
+mois_fr <- c(
+  "01" = "janvier", "02" = "février", "03" = "mars",
+  "04" = "avril",   "05" = "mai",      "06" = "juin",
+  "07" = "juillet", "08" = "août",     "09" = "septembre",
+  "10" = "octobre", "11" = "novembre", "12" = "décembre"
+)
+
+date_obj <- as.Date(date)
+month_num <- format(date_obj, "%m")
+year_txt  <- format(date_obj, "%Y")
+
+date_fmt <- paste(mois_fr[[month_num]], year_txt)
+
+for (date in names(pd_3857)) {
+  
+  df <- pd_3857[[date]]
+  
+  # date in object is 1 month ahead -> subtract 1 month
+  d_obj      <- ymd(date) %m-% months(1)
+  month_num  <- format(d_obj, "%m")
+  year_txt   <- format(d_obj, "%Y")
+  date_fmt   <- paste(mois_fr[[month_num]], year_txt)
+  
+  title_txt <- paste("Estimation du nombre d'espèces de poissons cachés", date_fmt) 
+  
+  p <- ggplot() +
+    geom_sf(data = world_crop, fill = "black", color = "grey70") +
+    geom_sf(data = df, aes(fill = prediction_Crypto), color = NA) +
+    scale_fill_gradientn(
+      colours = brewer.pal(9, "BuPu"),
+      name = ""
+    ) +
+    ggtitle(title_txt) +
+    coord_sf(
+      xlim = c(bb["xmin"], bb["xmax"]),
+      ylim = c(bb["ymin"], bb["ymax"])
+    ) +
+    theme_dark() +
+    theme(
+      plot.background  = element_rect(fill = "black", color = NA),
+      panel.background = element_rect(fill = "black", color = NA),
+      axis.text        = element_text(color = "white", size = 10),
+      axis.title       = element_text(color = "white"),
+      panel.grid.major = element_line(color = "grey40"),
+      panel.grid.minor = element_line(color = "grey25"),
+      plot.title       = element_text(color = "white", size = 18, face = "bold"),
+      legend.title     = element_text(color = "white"),
+      legend.text      = element_text(color = "white", size = 16),
+      legend.background = element_rect(fill = "black", color = NA),
+      legend.key        = element_rect(fill = "black", color = NA),
+      panel.border     = element_blank()
+    )
+  
+  print(p)
+  
+  #Save
+  ggsave(
+    filename = file.path(
+      output_path,
+      paste0("T1.33_prediction_bottom_R_", date, ".png")
+    ),
+    plot = p,
+    width = 10, height = 8, dpi = 300, bg = "black"
+  )
+  
+}
+
+
+
+
+
+
+
+
+
+
+
+
+#===================================================================
+#=================== ARCHIVED CODE ------------------------------------
 
 # #--------------- Map year black --------------------
 # years <- 2017:2024
@@ -1474,6 +2471,12 @@ ggsave(
 # 
 # 
 
+#----------------------------------------------------- MAP PREDICTIONS
+
+
+
+
+
 #------------------------------------------------------------- TO DO ------------------------------------
 
 #------------------------------------------------- NUMBER OF SPECIES ------------------------------
@@ -1483,4 +2486,20 @@ ggsave(
 #--------------- Load data ------------------------
 #--------------- Total number of species  ------------------------
 #--------------- Number of species per site = HOTSPOTS ----------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

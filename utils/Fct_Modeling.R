@@ -212,13 +212,8 @@ fit_models <- function(dataset, response_var, predictors, cv_configs = NULL,
       # --- GLM.nb ---
       if ("GLM.nb" %in% models) {
         cat("\nFitting GLM.nb for fold", i, "...")
-        glm_nb_model <- tryCatch(
-          MASS::glm.nb(formula = formula, data = train_df, init.theta = 1, control = glm.control(maxit = 50)),
-          error = function(e) {
-            cat("\n GLM.nb failed for fold", i, "of", cv_name, ": ", e$message, "\n")
-            return(NULL)
-          }
-        )
+        glm_nb_model <- MASS::glm.nb(formula = formula, data = train_df, init.theta = 1, control = glm.control(maxit = 50))
+
         if (!is.null(glm_nb_model)) {
           predictions <- predict(glm_nb_model, newdata = test_df, type = "response")
           aic_value <- AIC(glm_nb_model)
@@ -234,13 +229,8 @@ fit_models <- function(dataset, response_var, predictors, cv_configs = NULL,
       # --- RF ---
       if ("RF" %in% models) {
         cat("\nFitting RF for fold", i, "...")
-        rf_model <- tryCatch(
-          randomForest(formula = formula, data = train_df, ntree = 500, importance = TRUE, mtry = 2, nodesize = 1),
-          error = function(e) {
-            cat("\n RF failed for fold", i, "of", cv_name, ": ", e$message, "\n")
-            return(NULL)
-          }
-        )
+        rf_model <- randomForest::randomForest(formula = formula, data = train_df, ntree = 500, importance = TRUE, mtry = 2, nodesize = 1)
+
         if (!is.null(rf_model)) {
           predictions <- predict(rf_model, newdata = test_df)
           fitted_models$RF[[cv_name]][[paste0("Fold_", i)]] <- list(
