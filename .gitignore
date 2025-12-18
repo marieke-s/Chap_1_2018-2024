@@ -11,3 +11,8 @@ analyses/.Rprofile
 scripts/.Rhistory
 scripts/.ipynb_checkpoints/
 scripts/.virtual_documents/
+.RDataTmp
+.RDataTmp1
+.RDataTmp*
+.RData
+.Rhistory
